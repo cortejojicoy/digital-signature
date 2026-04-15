@@ -1,4 +1,4 @@
-export default function signatureField({ initialTab, fieldId, showDraw, showUpload }) {
+export default function signatureField({ initialTab, fieldId, showDraw }) {
     return {
         // ── State ─────────────────────────────────────────────────────────────
         activeTab:     initialTab ?? (showDraw ? 'draw' : 'upload'),
@@ -91,7 +91,7 @@ export default function signatureField({ initialTab, fieldId, showDraw, showUplo
         // ── Clear ─────────────────────────────────────────────────────────────
 
         clear() {
-            this.value         = '';
+            this.value         = null;  // null triggers watcher → $wire.set(path, null)
             this.isDirty       = false;
             this.uploadPreview = null;
             this.uploadError   = null;

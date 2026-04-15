@@ -9,6 +9,7 @@
             showDraw:      {{ $field->getShowDrawTab() ? 'true' : 'false' }},
             showUpload:    {{ $field->getShowUploadTab() ? 'true' : 'false' }},
         })"
+        x-init="$watch('value', v => $wire.set('{{ $getStatePath() }}', v || ''))"
         x-on:sig:exported.window="onExported($event.detail)"
         class="w-full space-y-3"
     >
