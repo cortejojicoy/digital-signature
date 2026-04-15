@@ -1,0 +1,73 @@
+{
+    "name": "kukux/digital-signature",
+    "description": "A Laravel Filament package for digital signature capture, certificate issuance, and PDF signing (v4 + v5 compatible).",
+    "type": "library",
+    "license": "MIT",
+    "version": "1.0.0",
+    "keywords": [
+        "laravel",
+        "filament",
+        "digital-signature",
+        "pdf",
+        "pki",
+        "pades",
+        "signature-pad"
+    ],
+    "authors": [
+        {
+            "name": "John",
+            "email": "jicoy.cortejo@gmail.com",
+            "role": "Software Engineer"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "ext-openssl": "*",
+        "ext-gd": "*",
+        "laravel/framework": "^11.0 || ^12.0",
+        "filament/filament": "^4.0 || ^5.0",
+        "setasign/fpdi": "^2.5",
+        "tecnickcom/tcpdf": "^6.7"
+    },
+    "require-dev": {
+        "fpdf/fpdf": "^1.86",
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^9.0 || ^10.0",
+        "pestphp/pest": "^2.0 || ^3.0",
+        "pestphp/pest-plugin-laravel": "^2.0 || ^3.0",
+        "phpstan/phpstan": "^1.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "Kukux\\DigitalSignature\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Kukux\\DigitalSignature\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Kukux\\DigitalSignature\\SignatureServiceProvider"
+            ],
+            "aliases": {}
+        }
+    },
+    "scripts": {
+        "test":         "vendor/bin/pest",
+        "test:coverage":"XDEBUG_MODE=coverage vendor/bin/pest --coverage",
+        "analyse":      "vendor/bin/phpstan analyse src --level=8",
+        "format":       "vendor/bin/pint"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
