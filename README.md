@@ -10,6 +10,18 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 > Filament v3 is not supported.
 
+Full documentation is in the [docs/](docs/) folder.
+
+| Doc | Description |
+|---|---|
+| [Installation](docs/installation.md) | Composer, migrations, plugin registration |
+| [Configuration](docs/configuration.md) | All config keys and env variables |
+| [Model Setup](docs/model-setup.md) | Signable interface and HasSignatures trait |
+| [Filament Components](docs/filament-components.md) | SignaturePad, SignatureColumn, SignDocumentAction |
+| [Signing Workflow](docs/signing-workflow.md) | Full lifecycle and SignatureManager API |
+| [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
+| [Security](docs/security.md) | PKCS#7, DocMDP, forgery detection, CRL, TSA |
+
 ---
 
 ## Requirements
