@@ -41,7 +41,7 @@
             </button>
             @endif
         </div>
-        @endifs
+        @endif
 
         {{-- ── Draw tab (React island) ──────────────────────────────────── --}}
         @if ($field->getShowDrawTab())
