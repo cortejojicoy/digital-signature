@@ -1,5 +1,9 @@
 # Digital Signature for Filament
 
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/kukux/digital-signature.svg?style=flat-square)](https://packagist.org/packages/kukux/digital-signature)
+[![Total Downloads](https://img.shields.io/packagist/dt/kukux/digital-signature.svg?style=flat-square)](https://packagist.org/packages/kukux/digital-signature)
+[![License](https://img.shields.io/packagist/l/kukux/digital-signature.svg?style=flat-square)](https://packagist.org/packages/kukux/digital-signature)
+
 A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, and embedding signed stamps into PDF documents.
 
 **Supports:** Filament v4 and v5 — Laravel 11 / 12 — PHP 8.2+

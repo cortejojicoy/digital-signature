@@ -3,7 +3,6 @@
     "description": "A Laravel Filament package for digital signature capture, certificate issuance, and PDF signing (v4 + v5 compatible).",
     "type": "library",
     "license": "MIT",
-    "version": "1.0.0",
     "keywords": [
         "laravel",
         "filament",
