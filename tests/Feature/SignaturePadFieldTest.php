@@ -42,6 +42,32 @@ describe('SignaturePad Filament field', function () {
         expect($field->getShowDrawTab())->toBeFalse();
     });
 
+    it('shows clear and undo buttons by default', function () {
+        $field = SignaturePad::make('sig');
+        expect($field->getShowClearBtn())->toBeTrue()
+            ->and($field->getShowUndoBtn())->toBeTrue();
+    });
+
+    it('withoutClearBtn hides the clear button', function () {
+        $field = SignaturePad::make('sig')->withoutClearBtn();
+        expect($field->getShowClearBtn())->toBeFalse();
+    });
+
+    it('withoutUndoBtn hides the undo button', function () {
+        $field = SignaturePad::make('sig')->withoutUndoBtn();
+        expect($field->getShowUndoBtn())->toBeFalse();
+    });
+
+    it('has a default confirm label of Confirm', function () {
+        $field = SignaturePad::make('sig');
+        expect($field->getConfirmLabel())->toBe('Confirm');
+    });
+
+    it('confirmLabel sets a custom label', function () {
+        $field = SignaturePad::make('sig')->confirmLabel('Accept');
+        expect($field->getConfirmLabel())->toBe('Accept');
+    });
+
     it('dehydrates empty string state as null', function () {
         $field = SignaturePad::make('sig');
         // Access dehydrateStateUsing closure behaviour via reflection

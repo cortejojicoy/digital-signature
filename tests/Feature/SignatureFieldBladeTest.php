@@ -123,4 +123,35 @@ describe('signature-field blade template', function () {
 
         expect($compiled)->toContain('x-model="source"');
     });
+
+    // -------------------------------------------------------------------------
+    // signature-pad-tab method contract
+    // -------------------------------------------------------------------------
+    // Ensures every method called in signature-pad-tab.blade.php actually exists
+    // on SignaturePad. Catches BadMethodCallException before it reaches a browser.
+    // -------------------------------------------------------------------------
+
+    it('SignaturePad exposes every method called in signature-pad-tab blade', function () {
+        $field = \Kukux\DigitalSignature\Filament\Fields\SignaturePad::make('sig');
+
+        // All methods referenced in signature-pad-tab.blade.php
+        expect($field->getCanvasHeight())->toBeInt()
+            ->and($field->getCanvasWidth())->toBeInt()
+            ->and($field->getPenColor())->toBeString()
+            ->and($field->getMinPenWidth())->toBeFloat()
+            ->and($field->getMaxPenWidth())->toBeFloat()
+            ->and($field->getShowClearBtn())->toBeBool()
+            ->and($field->getShowUndoBtn())->toBeBool()
+            ->and($field->getConfirmLabel())->toBeString();
+    });
+
+    it('signature-pad-tab template compiles without a ParseError', function () {
+        $source = file_get_contents(
+            realpath(__DIR__ . '/../../resources/views/components/signature-pad-tab.blade.php')
+        );
+
+        $compiled = Blade::compileString($source);
+
+        expect($compiled)->toBeString()->not->toBeEmpty();
+    });
 });
