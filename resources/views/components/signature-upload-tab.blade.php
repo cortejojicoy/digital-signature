@@ -12,8 +12,20 @@
             ? 'border-primary-400 dark:border-primary-500 bg-primary-50/40 dark:bg-primary-900/10 py-4'
             : 'py-8'"
     >
+        {{-- Loading state --}}
+        <template x-if="uploadLoading">
+            <div class="flex flex-col items-center gap-2 px-4">
+                <svg class="h-6 w-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <p class="text-xs text-gray-400">Processing…</p>
+            </div>
+        </template>
+
         {{-- Empty state --}}
-        <template x-if="!uploadPreview">
+        <template x-if="!uploadPreview && !uploadLoading">
             <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <span class="flex h-10 w-10 items-center justify-center rounded-full
                              bg-gray-100 dark:bg-white/10
@@ -37,8 +49,8 @@
             </div>
         </template>
 
-        {{-- Preview state --}}
-        <template x-if="uploadPreview">
+        {{-- Preview state (auto-confirmed) --}}
+        <template x-if="uploadPreview && !uploadLoading">
             <div class="flex flex-col items-center gap-2 px-4">
                 <img
                     x-bind:src="uploadPreview"
@@ -75,23 +87,4 @@
         <p x-text="uploadError" class="text-sm text-red-600 dark:text-red-400"></p>
     </div>
 
-    {{-- Confirm button --}}
-    <button
-        type="button"
-        x-show="uploadPreview && !isDirty"
-        x-cloak
-        x-on:click="confirmUpload()"
-        class="w-full inline-flex items-center justify-center gap-2 rounded-xl
-               bg-primary-600 hover:bg-primary-500 active:bg-primary-700
-               text-white text-sm font-medium py-2.5 px-4
-               transition-colors duration-150 shadow-sm"
-    >
-        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" clip-rule="evenodd"
-                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414
-                     0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1
-                     1 0 011.414 0z"/>
-        </svg>
-        Use this signature
-    </button>
 </div>

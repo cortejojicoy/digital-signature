@@ -1,4 +1,4 @@
-import { useEffect, useRef, useReducer } from 'react';
+import { useEffect, useRef } from 'react';
 import { AnimatedStroke }   from './AnimatedStroke.jsx';
 import { useCanvasPointer } from '../hooks/useCanvasPointer.js';
 
@@ -46,15 +46,55 @@ export function Canvas({ width, height, state, dispatch }) {
         }
     }
 
-    // Last stroke gets the SVG animation overlay; older strokes are on canvas
     const completedStrokes = state.isDrawing
         ? state.strokes.slice(0, -1)
         : state.strokes;
-    const liveStroke = state.isDrawing ? state.strokes[state.strokes.length - 1] : null;
+    const isEmpty = state.strokes.length === 0 && !state.isDrawing;
 
     return (
         <div style={{ position: 'relative', width, height, cursor: 'crosshair' }}>
-            {/* Raster layer — all committed strokes */}
+
+            {/* ── Empty-state guide ──────────────────────────────────────── */}
+            {isEmpty && (
+                <div style={{
+                    position:       'absolute',
+                    inset:          0,
+                    display:        'flex',
+                    flexDirection:  'column',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    gap:            '8px',
+                    pointerEvents:  'none',
+                    userSelect:     'none',
+                }}>
+                    {/* Pen icon */}
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+                         stroke="rgba(0,0,0,0.12)" strokeWidth="1.5"
+                         strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15.232 5.232l3.536 3.536M9 11l4-4 2 2-4 4H9v-2z"/>
+                        <path d="M4 20h4l9-9-4-4-9 9v4z"/>
+                    </svg>
+
+                    {/* Dashed baseline */}
+                    <div style={{
+                        width:        '55%',
+                        borderBottom: '2px dashed rgba(0,0,0,0.09)',
+                    }} />
+
+                    <span style={{
+                        fontSize:      '11px',
+                        color:         'rgba(0,0,0,0.18)',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        fontFamily:    'system-ui, sans-serif',
+                        fontWeight:    '500',
+                    }}>
+                        Sign here
+                    </span>
+                </div>
+            )}
+
+            {/* ── Raster layer — committed strokes ───────────────────────── */}
             <canvas
                 ref={canvasRef}
                 width={width}
@@ -66,7 +106,7 @@ export function Canvas({ width, height, state, dispatch }) {
                 onPointerLeave={onPointerUp}
             />
 
-            {/* SVG overlay — animated entrance for the latest completed stroke */}
+            {/* ── SVG overlay — animated last stroke ─────────────────────── */}
             <svg
                 width={width}
                 height={height}

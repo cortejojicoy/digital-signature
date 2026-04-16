@@ -1,14 +1,10 @@
 import { getFingerprint } from '../utils/machineFingerprint.js';
 
 export default function signatureField({ initialTab, fieldId, showDraw, fpEndpoint }) {
-    // Pre-fetch the device fingerprint asynchronously and POST it to the server session.
-    // By the time the user draws or uploads and clicks submit,
-    // the promise will already be resolved.
     let deviceFingerprint = '';
     getFingerprint().then(fp => {
         deviceFingerprint = fp;
         window.__sigDeviceFp = fp;
-
         if (fpEndpoint) {
             fetch(fpEndpoint, {
                 method:  'POST',
@@ -17,41 +13,27 @@ export default function signatureField({ initialTab, fieldId, showDraw, fpEndpoi
                     'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content ?? '',
                 },
                 body: JSON.stringify({ fp }),
-            }).catch(() => { /* non-critical — server-side signals still apply */ });
+            }).catch(() => {});
         }
     });
 
     return {
         // ── State ─────────────────────────────────────────────────────────────
         activeTab:     initialTab ?? (showDraw ? 'draw' : 'upload'),
-        value:         '',        // base64 PNG — synced to Livewire via x-init watcher
+        value:         '',
         source:        initialTab === 'upload' ? 'upload' : 'draw',
         isDirty:       false,
-        uploadPreview: null,      // object URL for upload tab preview
+        uploadPreview: null,   // data URL of the selected file (for preview)
         uploadError:   null,
+        uploadLoading: false,
 
-        // ── Device fingerprint accessor ───────────────────────────────────────
+        getDeviceFingerprint() { return deviceFingerprint; },
 
-        /** Returns the current device fingerprint (may be '' if promise is still pending). */
-        getDeviceFingerprint() {
-            return deviceFingerprint;
-        },
-
-        // ── React island lifecycle ────────────────────────────────────────────
-
-        /**
-         * Switch active tab.
-         * When switching away from 'draw', React unmounts automatically because
-         * its mount point is removed from the DOM via x-show (x-cloak).
-         * When switching back to 'draw', the mount point re-appears and
-         * SignaturePadIsland.jsx re-mounts via its MutationObserver bootstrap.
-         */
+        // ── Tab switch ────────────────────────────────────────────────────────
         switchTab(tab) {
             if (this.activeTab === tab) return;
             this.activeTab = tab;
             this.source    = tab;
-
-            // Reset dirty state when user manually switches tabs
             if (!this.isDirty) {
                 this.value         = '';
                 this.uploadPreview = null;
@@ -59,12 +41,7 @@ export default function signatureField({ initialTab, fieldId, showDraw, fpEndpoi
             }
         },
 
-        // ── Bridge: React → Alpine ────────────────────────────────────────────
-
-        /**
-         * Called when React fires window.dispatchEvent('sig:exported', { png, fieldId }).
-         * Only accept events targeted at this field instance.
-         */
+        // ── Bridge: React → Alpine (draw tab) ─────────────────────────────────
         onExported({ png, fieldId: eventFieldId }) {
             if (eventFieldId && eventFieldId !== fieldId) return;
             this.value   = png;
@@ -72,68 +49,74 @@ export default function signatureField({ initialTab, fieldId, showDraw, fpEndpoi
             this.isDirty = true;
         },
 
-        // ── Upload tab handlers ───────────────────────────────────────────────
-
+        // ── Upload tab ────────────────────────────────────────────────────────
         onFileChange(event) {
             const file = event.target.files?.[0];
             if (!file) return;
 
-            this.uploadError = null;
+            this.uploadError   = null;
+            this.uploadLoading = true;
 
-            // Client-side validation
             const allowedTypes = ['image/png', 'image/jpeg'];
             const maxBytes     = (window.__signatureConfig?.maxKb ?? 512) * 1024;
 
             if (!allowedTypes.includes(file.type)) {
-                this.uploadError = 'Only PNG and JPG files are allowed.';
+                this.uploadError   = 'Only PNG and JPG files are allowed.';
+                this.uploadLoading = false;
                 return;
             }
             if (file.size > maxBytes) {
-                this.uploadError = `File must be smaller than ${maxBytes / 1024}KB.`;
+                this.uploadError   = `File must be smaller than ${maxBytes / 1024} KB.`;
+                this.uploadLoading = false;
                 return;
             }
 
-            // Revoke previous object URL to prevent memory leak
-            if (this.uploadPreview) URL.revokeObjectURL(this.uploadPreview);
-
-            this.uploadPreview = URL.createObjectURL(file);
-            this.isDirty       = false; // require explicit confirm
-        },
-
-        confirmUpload() {
-            if (!this.uploadPreview) return;
-
-            // Convert object URL → base64 so the hidden input has a uniform format
-            const img    = new Image();
-            img.onload   = () => {
-                const canvas  = document.createElement('canvas');
-                canvas.width  = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                canvas.getContext('2d').drawImage(img, 0, 0);
-                this.value   = canvas.toDataURL('image/png');
-                this.source  = 'upload';
-                this.isDirty = true;
+            // Read file as data URL (avoids blob URL async issues)
+            const reader = new FileReader();
+            reader.onerror = () => {
+                this.uploadError   = 'Failed to read file.';
+                this.uploadLoading = false;
             };
-            img.src = this.uploadPreview;
+            reader.onload = (e) => {
+                const dataUrl = e.target.result;
+
+                // Normalise to PNG via canvas (handles JPEG input too)
+                const img    = new Image();
+                img.onerror  = () => {
+                    this.uploadError   = 'Could not load image. Try another file.';
+                    this.uploadLoading = false;
+                };
+                img.onload   = () => {
+                    const canvas  = document.createElement('canvas');
+                    canvas.width  = img.naturalWidth  || 600;
+                    canvas.height = img.naturalHeight || 200;
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    const png = canvas.toDataURL('image/png');
+
+                    this.uploadPreview = png;   // show thumbnail
+                    this.value         = png;   // auto-confirm — no extra button click
+                    this.source        = 'upload';
+                    this.isDirty       = true;
+                    this.uploadLoading = false;
+                };
+                img.src = dataUrl;
+            };
+            reader.readAsDataURL(file);
+
+            // Reset input so the same file can be re-selected
+            event.target.value = '';
         },
 
         // ── Clear ─────────────────────────────────────────────────────────────
-
         clear() {
-            this.value         = null;  // null triggers watcher → $wire.set(path, null)
+            this.value         = null;
             this.isDirty       = false;
             this.uploadPreview = null;
             this.uploadError   = null;
             this.source        = this.activeTab;
-
-            // Tell React to clear its canvas too
             window.dispatchEvent(new CustomEvent('sig:clear', { detail: { fieldId } }));
         },
 
-        // ── Cleanup ───────────────────────────────────────────────────────────
-
-        destroy() {
-            if (this.uploadPreview) URL.revokeObjectURL(this.uploadPreview);
-        },
+        destroy() {},
     };
 }
