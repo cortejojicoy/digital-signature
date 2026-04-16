@@ -97,7 +97,7 @@ return [
     |   When false (default), only the HMAC and user-id are checked.
     */
     'metadata' => [
-        'enforce_machine_lock' => env('SIGNATURE_MACHINE_LOCK', false),
+        'enforce_machine_lock' => env('SIGNATURE_MACHINE_LOCK', true),
     ],
 
     /*

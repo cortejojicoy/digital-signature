@@ -12,7 +12,7 @@ use Kukux\DigitalSignature\Exceptions\MachineBindingException;
  * Every signature stored by this plugin receives four tEXt chunks:
  *
  *   Sig-User-Id      — the signer's user ID
- *   Sig-Machine-Hash — SHA-256 of (userId|userAgent|ip|deviceFingerprint)
+ *   Sig-Machine-Hash — SHA-256 of (userId|userAgent|deviceFingerprint)
  *   Sig-Timestamp    — Unix timestamp when the image was stored
  *   Sig-Hmac         — HMAC-SHA256 of (userId|machineHash|timestamp) signed
  *                      with the application key
@@ -23,8 +23,8 @@ use Kukux\DigitalSignature\Exceptions\MachineBindingException;
  *    tEXt chunks → HMAC is absent → rejected.
  * 2. Cross-user reuse: Sig-User-Id is checked against the current user →
  *    using another person's exported PNG fails.
- * 3. Cross-machine reuse (opt-in): Sig-Machine-Hash encodes user-agent, IP,
- *    and the browser-collected device fingerprint.  With
+ * 3. Cross-machine reuse (opt-in): Sig-Machine-Hash encodes user-agent and
+ *    the browser-collected device fingerprint.  With
  *    `signature.metadata.enforce_machine_lock = true` this hash must match
  *    the current request's fingerprint → copying the file to another browser
  *    or machine is rejected.
@@ -146,19 +146,23 @@ class SignatureMetadataService
 
     /**
      * Compute a machine fingerprint that is stable for a given
-     * (userId, browser, IP, device fingerprint) combination.
+     * (userId, browser, device fingerprint) combination.
      *
      * The device fingerprint comes from the browser-side machineFingerprint.js
      * utility (localStorage-cached SHA-256 of canvas/WebGL/UA signals).
-     * The server-side signals (UA header, IP) add a layer that cannot be
-     * spoofed from the client alone.
+     * The User-Agent adds a server-side layer that cannot be spoofed from the
+     * client alone.
+     *
+     * NOTE: IP address is intentionally excluded.  Including IP causes false
+     * positives for legitimate users whose IP changes (mobile networks, VPN,
+     * DHCP, corporate proxies).  The device fingerprint + user-agent combination
+     * is already a strong machine identifier.
      */
     private function computeMachineHash(int $userId, string $deviceFp): string
     {
         return hash('sha256', implode('|', [
             (string) $userId,
             $this->request->userAgent() ?? '',
-            $this->request->ip()        ?? '',
             $deviceFp,
         ]));
     }

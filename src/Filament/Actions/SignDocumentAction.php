@@ -8,6 +8,8 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
+use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
@@ -85,19 +87,41 @@ class SignDocumentAction extends Action
 
             $signable = ($record instanceof Signable) ? $record : null;
 
-            $signature = $manager->store(
-                userId:   Auth::id(),
-                input:    $inputData,
-                source:   $inputSrc,
-                signable: $signable,
-                position: $this->defaultPosition ?: null,
-                deviceFp: $inputFp,
-            );
+            try {
+                $signature = $manager->store(
+                    userId:   Auth::id(),
+                    input:    $inputData,
+                    source:   $inputSrc,
+                    signable: $signable,
+                    position: $this->defaultPosition ?: null,
+                    deviceFp: $inputFp,
+                );
 
-            if ($this->queued) {
-                $manager->sign($signature, $inputPwd);
-            } else {
-                $manager->embedAndFinalize($signature, $inputPwd);
+                if ($this->queued) {
+                    $manager->sign($signature, $inputPwd);
+                } else {
+                    $manager->embedAndFinalize($signature, $inputPwd);
+                }
+            } catch (MachineBindingException $e) {
+                Notification::make()
+                    ->title('Signature rejected — wrong device')
+                    ->body('This signature image was created on a different device. Please draw a new signature on this device.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            } catch (ForgedSignatureException $e) {
+                Notification::make()
+                    ->title('Invalid signature image')
+                    ->body('The uploaded image failed security verification. It may have been tampered with or does not originate from this system.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
             }
         });
     }
