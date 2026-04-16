@@ -1,12 +1,27 @@
+import { getFingerprint } from '../utils/machineFingerprint.js';
+
 export default function signatureField({ initialTab, fieldId, showDraw }) {
+    // Pre-fetch the device fingerprint asynchronously.
+    // By the time the user draws or uploads and clicks submit,
+    // the promise will already be resolved.
+    let deviceFingerprint = '';
+    getFingerprint().then(fp => { deviceFingerprint = fp; });
+
     return {
         // ── State ─────────────────────────────────────────────────────────────
         activeTab:     initialTab ?? (showDraw ? 'draw' : 'upload'),
-        value:         '',        // base64 PNG — written to hidden input
+        value:         '',        // base64 PNG — synced to Livewire via x-init watcher
         source:        initialTab === 'upload' ? 'upload' : 'draw',
         isDirty:       false,
         uploadPreview: null,      // object URL for upload tab preview
         uploadError:   null,
+
+        // ── Device fingerprint accessor ───────────────────────────────────────
+
+        /** Returns the current device fingerprint (may be '' if promise is still pending). */
+        getDeviceFingerprint() {
+            return deviceFingerprint;
+        },
 
         // ── React island lifecycle ────────────────────────────────────────────
 

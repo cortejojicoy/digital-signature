@@ -13,10 +13,12 @@ This document covers every security mechanism added to the plugin, what problem 
 | Forged/screenshot signature detection | `DuplicateSignatureGuard` | Always on |
 | Document integrity hashes (before + after) | `DocumentIntegrity` | Always on |
 | Unique UUID per signing request | `SignatureManager` | Always on |
+| Machine-bound PNG metadata (HMAC-signed tEXt chunks) | `PngMetaEmbedder` / `SignatureMetadataService` | Always on |
+| Machine lock — reject re-upload from different machine | `SignatureMetadataService` | Opt-in |
 | CRL certificate revocation check | `CrlValidator` | Opt-in |
 | RFC 3161 trusted timestamp (TSA) | `FpdiDriver` | Opt-in |
 
-The first five are always active. CRL and TSA require explicit configuration.
+The first six are always active. Machine lock, CRL, and TSA require explicit configuration.
 
 ---
 
@@ -187,7 +189,108 @@ The UUID is stable for the lifetime of the record and does not change on status 
 
 ---
 
-## 6. CRL validation (opt-in)
+## 6. Machine-bound PNG metadata
+
+### What it does
+
+Every signature image stored by `SignatureManager::store()` is enriched with four HMAC-signed `tEXt` chunks injected at the binary PNG level. These chunks bind the image to the specific user and machine (browser + IP) that created it:
+
+| Chunk key | Value |
+|---|---|
+| `Sig-User-Id` | The authenticated user's integer ID |
+| `Sig-Machine-Hash` | SHA-256 of `userId\|userAgent\|ip\|deviceFp` |
+| `Sig-Timestamp` | ISO 8601 UTC datetime of embedding |
+| `Sig-Hmac` | `HMAC-SHA256(userId\|machineHash\|timestamp, APP_KEY)` |
+
+The HMAC is keyed with `APP_KEY`, so only your server can produce a valid one.
+
+### How browser fingerprinting works
+
+When the signature field renders, a small JS module (`resources/js/utils/machineFingerprint.js`) runs in the browser and collects:
+
+- User-Agent, language, platform, hardware concurrency
+- Screen dimensions and colour depth
+- Timezone
+- Canvas 2D rendering fingerprint (font metrics)
+- WebGL renderer string
+
+These are hashed with `SubtleCrypto.digest('SHA-256', ...)` to produce a 64-character hex token. The token is cached in `localStorage` and posted to `/signature/device-fingerprint` which stores it in the Laravel session. During form submission `SignDocumentAction` reads it back via `session()->pull('sig_device_fp', '')`.
+
+### Validation on every upload
+
+When a user uploads a signature image (as opposed to drawing one fresh), `SignatureMetadataService::validateIfPresent()` is called before the file is stored:
+
+- **No HMAC present** — image is fresh (just drawn), pass through
+- **HMAC invalid** — `ForgedSignatureException` — image was tampered with or forged on another server
+- **User ID mismatch** — `ForgedSignatureException` — image belongs to a different user
+- **Machine hash mismatch (when lock enabled)** — `MachineBindingException` — image was created on a different machine
+
+### Enabling machine lock (opt-in)
+
+By default, only the HMAC and user ID are verified. To also require the same machine:
+
+In `.env`:
+
+```bash
+SIGNATURE_MACHINE_LOCK=true
+```
+
+Or in `config/signature.php`:
+
+```php
+'metadata' => [
+    'enforce_machine_lock' => true,
+],
+```
+
+When enabled, uploading a signature PNG from a different browser session or device throws `MachineBindingException`.
+
+### Handling exceptions
+
+```php
+use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+
+// In app/Exceptions/Handler.php
+
+$this->renderable(function (ForgedSignatureException $e) {
+    return response()->json(['message' => 'Signature rejected: forged image'], 422);
+});
+
+$this->renderable(function (MachineBindingException $e) {
+    return response()->json(['message' => 'Signature must be re-drawn on this device'], 422);
+});
+```
+
+### JPEG images
+
+JPEG does not support `tEXt` chunks. Any JPEG uploaded via the upload tab is automatically converted to PNG via GD before metadata is embedded. The stored file will always have a `.png` extension and be a valid PNG regardless of what the user uploaded.
+
+### Inspecting embedded metadata in code
+
+```php
+use Kukux\DigitalSignature\Security\PngMetaEmbedder;
+
+$embedder = app(PngMetaEmbedder::class);
+
+$pngBytes = Storage::disk(config('signature.storage_disk'))
+    ->get($signature->image_path);
+
+$chunks = $embedder->read($pngBytes);
+// ['Sig-User-Id' => '42', 'Sig-Machine-Hash' => 'abc...', ...]
+```
+
+### Migration required
+
+```bash
+php artisan migrate
+```
+
+Migration `2024_01_01_000005_add_machine_fingerprint_to_signatures_table` adds `machine_fingerprint varchar(64) nullable` to the `signatures` table.
+
+---
+
+## 8. CRL validation (opt-in)
 
 ### What it does
 
@@ -242,7 +345,7 @@ php artisan cache:clear
 
 ---
 
-## 7. TSA trusted timestamp (opt-in)
+## 9. TSA trusted timestamp (opt-in)
 
 ### What it does
 
@@ -291,6 +394,9 @@ openssl ts -verify -in signed.pdf -CAfile ca-bundle.crt
 ## New environment variables summary
 
 ```bash
+# Bind uploaded signatures to the machine that created them
+SIGNATURE_MACHINE_LOCK=false
+
 # Enable CRL revocation checking (requires openssl CLI in PATH)
 SIGNATURE_CRL_ENABLED=false
 
@@ -304,10 +410,11 @@ SIGNATURE_TSA_URL=
 
 | Exception | Namespace | Thrown in | Meaning |
 |---|---|---|---|
-| `ForgedSignatureException` | `Kukux\DigitalSignature\Exceptions` | `SignatureManager::store()` | Image hash matches a different user's signature |
+| `ForgedSignatureException` | `Kukux\DigitalSignature\Exceptions` | `SignatureManager::store()` | Image hash matches a different user's signature, or embedded HMAC/user-id is invalid |
+| `MachineBindingException` | `Kukux\DigitalSignature\Exceptions` | `SignatureManager::store()` | Machine lock is enabled and the image was created on a different machine |
 | `CertificateRevokedException` | `Kukux\DigitalSignature\Exceptions` | `SignatureManager::embedAndFinalize()` | Certificate serial is on a downloaded CRL |
 
-Both extend `\RuntimeException` and carry a descriptive message. Neither is caught inside the plugin — your application decides how to surface them.
+All three extend `\RuntimeException` and carry a descriptive message. None are caught inside the plugin — your application decides how to surface them.
 
 ---
 
@@ -347,6 +454,44 @@ app(CrlValidator::class)->validate($certData);
 
 No-op when disabled via config. Silently skips certs with no CDP extension.
 
+### `PngMetaEmbedder`
+
+```php
+use Kukux\DigitalSignature\Security\PngMetaEmbedder;
+
+$embedder = app(PngMetaEmbedder::class);
+
+// Inject tEXt chunks into a PNG
+$enriched = $embedder->embed($pngBytes, [
+    'Sig-User-Id'     => '42',
+    'Sig-Machine-Hash' => 'abc...',
+    'Sig-Timestamp'   => '2025-01-01T00:00:00Z',
+    'Sig-Hmac'        => 'def...',
+]);
+
+// Read tEXt chunks back out
+$chunks = $embedder->read($enriched);
+
+// Convert JPEG to PNG first
+$pngBytes = $embedder->normalizeToPng($jpegBytes);
+```
+
+### `SignatureMetadataService`
+
+```php
+use Kukux\DigitalSignature\Security\SignatureMetadataService;
+
+$svc = app(SignatureMetadataService::class);
+
+// Embed metadata into raw image bytes (JPEG auto-converted to PNG)
+$enriched = $svc->embedIntoImage($rawBytes, $userId, $deviceFp);
+
+// Validate metadata on upload (throws ForgedSignatureException or MachineBindingException)
+$svc->validateIfPresent($rawBytes, $userId, $deviceFp);
+```
+
+Both methods are called automatically inside `SignatureManager::store()`. Use them directly only if you build a custom storage pipeline.
+
 ---
 
 ## Database columns added
@@ -358,3 +503,9 @@ Migration: `2024_01_01_000004_add_security_columns_to_signatures_table`
 | `uuid` | `char(36)` unique | yes (existing rows) | RFC 4122 v4 UUID per signing request |
 | `document_hash` | `varchar(64)` | yes | SHA-256 of source PDF before signing |
 | `signed_document_hash` | `varchar(64)` | yes | SHA-256 of signed PDF after signing |
+
+Migration: `2024_01_01_000005_add_machine_fingerprint_to_signatures_table`
+
+| Column | Type | Nullable | Description |
+|---|---|---|---|
+| `machine_fingerprint` | `varchar(64)` | yes | SHA-256 of `userId\|UA\|IP\|deviceFp` at signing time |

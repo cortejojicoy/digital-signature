@@ -87,6 +87,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Image Metadata (machine-binding security)
+    |--------------------------------------------------------------------------
+    | Every stored signature PNG receives four HMAC-signed tEXt chunks:
+    |   Sig-User-Id, Sig-Machine-Hash, Sig-Timestamp, Sig-Hmac
+    |
+    | enforce_machine_lock: when true, re-uploading a signature image from a
+    |   different browser or IP is rejected with MachineBindingException.
+    |   When false (default), only the HMAC and user-id are checked.
+    */
+    'metadata' => [
+        'enforce_machine_lock' => env('SIGNATURE_MACHINE_LOCK', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | CRL Validation (Certificate Revocation List)
     |--------------------------------------------------------------------------
     | When enabled, the CRL Distribution Points embedded in the signer's

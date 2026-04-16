@@ -14,69 +14,109 @@ use Kukux\DigitalSignature\Models\SignaturePosition;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
+use Kukux\DigitalSignature\Security\SignatureMetadataService;
 
 class SignatureManager
 {
     public function __construct(
-        protected CertificateService    $certService,
-        protected PdfSignerService      $pdfSigner,
+        protected CertificateService      $certService,
+        protected PdfSignerService        $pdfSigner,
         protected DuplicateSignatureGuard $duplicateGuard,
-        protected CrlValidator          $crlValidator,
-        protected DocumentIntegrity     $documentIntegrity,
+        protected CrlValidator            $crlValidator,
+        protected DocumentIntegrity       $documentIntegrity,
+        protected SignatureMetadataService $metadataService,
     ) {}
 
     /**
-     * Store a raw signature image (base64 data URI or UploadedFile).
-     * Returns a pending Signature record.
+     * Store a signature image and return a pending Signature record.
      *
-     * Security checks performed here:
-     *   - Cross-user duplicate image hash (forgery detection)
-     *   - Document pre-signing hash captured for audit trail
-     *   - UUID assigned for tamper-evident request tracking
+     * Security pipeline:
+     *   1. Decode / save raw image bytes.
+     *   2. Normalise to PNG (converts JPEG) so metadata chunks are always supported.
+     *   3. DuplicateSignatureGuard — reject if the same image hash exists under
+     *      a different user (screenshot/copy-paste forgery detection).
+     *   4. MetadataService::validateIfPresent — if the PNG already carries our
+     *      tEXt metadata (i.e. it was previously exported from this system),
+     *      verify the HMAC, user-id, and optionally the machine fingerprint.
+     *   5. MetadataService::embedIntoImage — inject HMAC-signed tEXt chunks
+     *      (userId, machine fingerprint, timestamp) into the PNG bytes.
+     *   6. Overwrite the stored file with the metadata-enriched PNG.
+     *   7. Capture document hash for audit trail.
+     *   8. Create Signature record.
+     *
+     * @param string $deviceFp  Browser-side device fingerprint from machineFingerprint.js.
      */
     public function store(
-        int                     $userId,
-        string|UploadedFile     $input,
-        string                  $source,      // 'draw' | 'upload'
-        ?Signable               $signable = null,
-        ?array                  $position = null,
+        int                 $userId,
+        string|UploadedFile $input,
+        string              $source,      // 'draw' | 'upload'
+        ?Signable           $signable  = null,
+        ?array              $position  = null,
+        string              $deviceFp  = '',
     ): Signature {
         $disk = Storage::disk(config('signature.storage_disk'));
         $dir  = config('signature.signatures_path');
 
+        // ── 1. Decode raw bytes ───────────────────────────────────────────────
         if ($input instanceof UploadedFile) {
-            $path  = $input->store($dir, config('signature.storage_disk'));
-            $bytes = file_get_contents($input->getRealPath());
+            $rawPath  = $input->store($dir, config('signature.storage_disk'));
+            $rawBytes = file_get_contents($input->getRealPath());
         } else {
-            // Strip base64 data URI header before decoding
-            $bytes = base64_decode(preg_replace('/^data:image\/\w+;base64,/', '', $input));
-            $path  = $dir . '/' . uniqid('sig_', true) . '.png';
-            $disk->put($path, $bytes);
+            $rawBytes = base64_decode(preg_replace('/^data:image\/\w+;base64,/', '', $input));
+            $rawPath  = $dir . '/' . uniqid('sig_', true) . '.png';
+            $disk->put($rawPath, $rawBytes);
         }
 
-        $hash = hash(config('signature.hash_algo'), $bytes);
+        // ── 2. Hash raw bytes for duplicate detection (before metadata changes them) ──
+        $rawHash = hash(config('signature.hash_algo'), $rawBytes);
 
-        // Security: reject if the exact image hash is already stored under another user.
-        // This catches the screenshot/copy-paste forgery scenario.
-        $this->duplicateGuard->check($hash, $userId);
+        // ── 3. Cross-user duplicate image hash check ──────────────────────────
+        $this->duplicateGuard->check($rawHash, $userId);
 
-        // Capture the document hash before signing so we can prove later that
-        // the signer was presented exactly this version of the document.
-        $documentHash = null;
-        if ($signable !== null) {
-            $documentHash = $this->documentIntegrity->hash($signable->getSignablePdfPath());
+        // ── 4. Validate existing metadata on uploaded images ──────────────────
+        //    Drawn signatures come from our canvas and will never have pre-existing
+        //    metadata.  Uploaded images might be a previously exported signature.
+        if ($source === 'upload') {
+            $this->metadataService->validateIfPresent($rawBytes, $userId, $deviceFp);
         }
 
+        // ── 5 + 6. Embed metadata and overwrite stored file ───────────────────
+        $enrichedBytes = $this->metadataService->embedIntoImage($rawBytes, $userId, $deviceFp);
+
+        // The enriched file is always PNG; update path extension if needed
+        $enrichedPath = preg_replace('/\.(jpe?g)$/i', '.png', $rawPath);
+        $disk->put($enrichedPath, $enrichedBytes);
+
+        if ($enrichedPath !== $rawPath) {
+            $disk->delete($rawPath); // remove original JPEG
+        }
+
+        // ── 7. Final image hash (of what is actually on disk) ─────────────────
+        $imageHash       = hash(config('signature.hash_algo'), $enrichedBytes);
+        $machineFingerprint = hash('sha256', implode('|', [
+            (string) $userId,
+            request()->userAgent() ?? '',
+            request()->ip()        ?? '',
+            $deviceFp,
+        ]));
+
+        // ── 8. Document pre-signing hash ──────────────────────────────────────
+        $documentHash = $signable !== null
+            ? $this->documentIntegrity->hash($signable->getSignablePdfPath())
+            : null;
+
+        // ── 9. Create record ──────────────────────────────────────────────────
         $sig = Signature::create([
-            'uuid'          => (string) Str::uuid(),
-            'user_id'       => $userId,
-            'image_path'    => $path,
-            'image_hash'    => $hash,
-            'document_hash' => $documentHash,
-            'source'        => $source,
-            'status'        => 'pending',
-            'signable_type' => $signable ? get_class($signable) : null,
-            'signable_id'   => $signable?->getSignableId(),
+            'uuid'                => (string) Str::uuid(),
+            'user_id'             => $userId,
+            'image_path'          => $enrichedPath,
+            'image_hash'          => $imageHash,
+            'document_hash'       => $documentHash,
+            'machine_fingerprint' => $machineFingerprint,
+            'source'              => $source,
+            'status'              => 'pending',
+            'signable_type'       => $signable ? get_class($signable) : null,
+            'signable_id'         => $signable?->getSignableId(),
         ]);
 
         if ($position) {
@@ -98,23 +138,16 @@ class SignatureManager
 
     /**
      * Synchronous signing — called inside EmbedSignatureJob.
-     *
-     * Security checks performed here:
-     *   - CRL validation: verifies the certificate has not been revoked
-     *   - Cryptographic PKCS#7 signature embedded in the PDF (via FpdiDriver)
-     *   - Signed-document hash captured for post-signing integrity verification
      */
     public function embedAndFinalize(Signature $signature, string $userPassword): void
     {
         $cert     = $this->certService->getOrCreate($signature->user_id, $userPassword);
         $certData = $this->certService->load($cert, $userPassword);
 
-        // Security: validate certificate is not on a CRL before signing
         $this->crlValidator->validate($certData);
 
         $signedPath = $this->pdfSigner->sign($signature, $certData);
 
-        // Capture hash of the completed signed PDF for audit / tamper detection
         $signedDocumentHash = $this->documentIntegrity->hash($signedPath);
 
         $signature->update([

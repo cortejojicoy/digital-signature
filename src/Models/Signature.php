@@ -16,6 +16,7 @@ class Signature extends Model
         'document_hash',          // SHA-256 of source PDF before signing
         'signed_document_path',
         'signed_document_hash',   // SHA-256 of signed PDF after signing
+        'machine_fingerprint',    // SHA-256 of userId|userAgent|ip|deviceFp at store time
         'source', 'status', 'certificate_fingerprint',
         'pades_info', 'signed_at', 'revoked_at',
     ];
