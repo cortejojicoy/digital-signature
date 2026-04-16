@@ -145,10 +145,21 @@ class PngMetaEmbedder
     /**
      * Build a PNG iTXt chunk containing XMP metadata derived from $meta.
      *
-     * The XMP is written with:
-     *   dc:description — human-readable summary shown by Preview
-     *   xmp:CreateDate — ISO-8601 signing timestamp
-     *   sig:*          — all four security fields (userId, machineHash, timestamp, hmac)
+     * Metadata is written using XMP-spec compliant RDF structures so that it is
+     * readable on both platforms without any third-party tools:
+     *
+     *   macOS  — Preview.app: Tools → Inspector → More Info
+     *   Windows — File Explorer: right-click → Properties → Details tab
+     *
+     * Windows Shell Property System (WIC) requires DC multi-value fields to use
+     * RDF container elements (rdf:Alt / rdf:Seq), not plain string literals.
+     * macOS Preview accepts both, so this stricter format works everywhere.
+     *
+     * Windows Details tab mapping:
+     *   dc:title       → "Title"
+     *   dc:creator     → "Authors"
+     *   dc:description → "Comments"
+     *   xmp:CreateDate → "Date taken" (some viewers)
      *
      * iTXt chunk data layout (PNG spec §11.3.4.3):
      *   keyword \0 compression_flag(1B) compression_method(1B)
@@ -157,14 +168,22 @@ class PngMetaEmbedder
     private function buildXmpChunk(array $meta): string
     {
         $userId      = htmlspecialchars($meta['Sig-User-Id']      ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
-        $signerName  = htmlspecialchars($meta['Sig-Signer-Name'] ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $signerName  = htmlspecialchars($meta['Sig-Signer-Name']  ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
         $machineHash = htmlspecialchars($meta['Sig-Machine-Hash'] ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
         $timestamp   = (int) ($meta['Sig-Timestamp'] ?? 0);
         $hmac        = htmlspecialchars($meta['Sig-Hmac']         ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
         $isoDate     = $timestamp > 0 ? gmdate('Y-m-d\TH:i:s\Z', $timestamp) : '';
-        $desc        = 'Digitally signed image.'
-                     . ($signerName ? " Signed by: {$signerName}." : ($userId ? " Signer ID: {$userId}." : ''))
-                     . ($isoDate    ? " Signed at: {$isoDate} UTC." : '');
+
+        // Human-readable one-liner shown by both Preview and Windows Explorer
+        $desc = 'Digitally signed image.'
+              . ($signerName ? " Signed by: {$signerName}." : ($userId ? " Signer ID: {$userId}." : ''))
+              . ($isoDate    ? " Signed at: {$isoDate} UTC." : '');
+
+        // Strip the email portion for dc:creator (Windows "Authors" field expects
+        // a plain display name, not "Name <email>")
+        $displayName = $signerName
+            ? preg_replace('/\s*&lt;[^&]*&gt;\s*$/', '', $signerName)
+            : '';
 
         $xmp = '<?xpacket begin="' . "\xef\xbb\xbf" . '" id="W5M0MpCehiHzreSzNTczkc9d"?>' . "\n"
              . '<x:xmpmeta xmlns:x="adobe:ns:meta/">' . "\n"
@@ -173,13 +192,35 @@ class PngMetaEmbedder
              . '      xmlns:dc="http://purl.org/dc/elements/1.1/"' . "\n"
              . '      xmlns:xmp="http://ns.adobe.com/xap/1.0/"' . "\n"
              . '      xmlns:sig="http://ns.kukux.io/signature/1.0/">' . "\n"
-             . '      <dc:description>' . $desc . '</dc:description>' . "\n"
+
+             // dc:title — Windows "Title" field
+             // rdf:Alt + xml:lang="x-default" is required by XMP spec for localizable strings
+             . '      <dc:title>' . "\n"
+             . '        <rdf:Alt><rdf:li xml:lang="x-default">Digitally Signed Image</rdf:li></rdf:Alt>' . "\n"
+             . '      </dc:title>' . "\n"
+
+             // dc:creator — Windows "Authors" field
+             // rdf:Seq is required; plain string is silently ignored by Windows WIC
+             . '      <dc:creator>' . "\n"
+             . '        <rdf:Seq><rdf:li>' . $displayName . '</rdf:li></rdf:Seq>' . "\n"
+             . '      </dc:creator>' . "\n"
+
+             // dc:description — Windows "Comments" field + macOS Preview description
+             // rdf:Alt + xml:lang="x-default" is the XMP-spec form for multi-language text
+             . '      <dc:description>' . "\n"
+             . '        <rdf:Alt><rdf:li xml:lang="x-default">' . $desc . '</rdf:li></rdf:Alt>' . "\n"
+             . '      </dc:description>' . "\n"
+
+             // xmp:CreateDate — shown as date in many viewers
              . '      <xmp:CreateDate>' . $isoDate . '</xmp:CreateDate>' . "\n"
+
+             // sig:* — custom security namespace; readable via ExifTool on any platform
              . '      <sig:UserId>' . $userId . '</sig:UserId>' . "\n"
              . '      <sig:SignerName>' . $signerName . '</sig:SignerName>' . "\n"
              . '      <sig:MachineHash>' . $machineHash . '</sig:MachineHash>' . "\n"
              . '      <sig:Timestamp>' . $timestamp . '</sig:Timestamp>' . "\n"
              . '      <sig:Hmac>' . $hmac . '</sig:Hmac>' . "\n"
+
              . '    </rdf:Description>' . "\n"
              . '  </rdf:RDF>' . "\n"
              . '</x:xmpmeta>' . "\n"
