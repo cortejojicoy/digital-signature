@@ -14,13 +14,19 @@ class ListSignatures extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            // ── Add Signature ────────────────────────────────────────────────────
+            Action::make('createSignature')
+                ->label('Add Signature')
+                ->icon('heroicon-o-plus')
+                ->color('primary')
+                ->url(static::getResource()::getUrl('create')),
+
             // ── Sign Document ─────────────────────────────────────────────────
             // Opens the SignDocumentAction modal from within the resource.
             // Records created here are standalone (not attached to a signable).
             SignDocumentAction::make()
                 ->label('Sign Document')
-                ->icon('heroicon-o-pencil-square')
-                ->color('primary'),
+                ->icon('heroicon-o-pencil-square'),
         ];
     }
 }

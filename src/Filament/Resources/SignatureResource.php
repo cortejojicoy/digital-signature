@@ -8,6 +8,7 @@ use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontFamily;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -59,12 +60,28 @@ class SignatureResource extends Resource
     }
 
     // -------------------------------------------------------------------------
-    // Form (only needed for create/edit — we only support view)
+    // Form — for creating new signatures
     // -------------------------------------------------------------------------
 
     public static function form(Schema $schema): Schema
     {
-        return $schema->schema([]);
+        return $schema->schema([
+            SignaturePad::make('signature')
+                ->label('Your Signature')
+                ->canvasWidth(600)
+                ->canvasHeight(200)
+                ->showUploadTab()
+                ->showDrawTab()
+                ->required(),
+
+            TextInput::make('certificate_password')
+                ->label('Certificate Password')
+                ->password()
+                ->required()
+                ->hint('Protects your signing certificate')
+                ->hintIcon('heroicon-m-lock-closed')
+                ->placeholder('Enter your certificate password'),
+        ]);
     }
 
     // -------------------------------------------------------------------------
@@ -262,6 +279,7 @@ class SignatureResource extends Resource
     {
         return [
             'index' => Pages\ListSignatures::route('/'),
+            'create' => Pages\CreateSignature::route('/create'),
             'view' => Pages\ViewSignature::route('/{record}'),
         ];
     }
