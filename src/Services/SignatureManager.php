@@ -21,11 +21,11 @@ use Kukux\DigitalSignature\Security\SignatureMetadataService;
 class SignatureManager
 {
     public function __construct(
-        protected CertificateService      $certService,
-        protected PdfSignerService        $pdfSigner,
+        protected CertificateService $certService,
+        protected PdfSignerService $pdfSigner,
         protected DuplicateSignatureGuard $duplicateGuard,
-        protected CrlValidator            $crlValidator,
-        protected DocumentIntegrity       $documentIntegrity,
+        protected CrlValidator $crlValidator,
+        protected DocumentIntegrity $documentIntegrity,
         protected SignatureMetadataService $metadataService,
     ) {}
 
@@ -51,28 +51,29 @@ class SignatureManager
      *   7.  Capture document hash for audit trail.
      *   8.  Create Signature record.
      *
-     * @param string $deviceFp    Browser-side device fingerprint from machineFingerprint.js.
-     * @param string $signerName  "Full Name <email>" string embedded into the PNG.
+     * @param  string  $deviceFp  Browser-side device fingerprint from machineFingerprint.js.
+     * @param  string  $signerName  "Full Name <email>" string embedded into the PNG.
      */
     public function store(
-        int                 $userId,
+        int $userId,
         string|UploadedFile $input,
-        string              $source,
-        ?Signable           $signable   = null,
-        ?array              $position   = null,
-        string              $deviceFp   = '',
-        string              $signerName = '',
+        string $source,
+        ?Signable $signable = null,
+        ?array $position = null,
+        string $deviceFp = '',
+        string $signerName = '',
+        ?string $certificatePassword = null,
     ): Signature {
         $disk = Storage::disk(config('signature.storage_disk'));
-        $dir  = config('signature.signatures_path');
+        $dir = config('signature.signatures_path');
 
         // ── 1. Decode raw bytes ───────────────────────────────────────────────
         if ($input instanceof UploadedFile) {
-            $rawPath  = $input->store($dir, config('signature.storage_disk'));
+            $rawPath = $input->store($dir, config('signature.storage_disk'));
             $rawBytes = file_get_contents($input->getRealPath());
         } else {
             $rawBytes = base64_decode(preg_replace('/^data:image\/\w+;base64,/', '', $input));
-            $rawPath  = $dir . '/' . uniqid('sig_', true) . '.png';
+            $rawPath = $dir.'/'.uniqid('sig_', true).'.png';
             $disk->put($rawPath, $rawBytes);
         }
 
@@ -118,7 +119,7 @@ class SignatureManager
         }
 
         // ── 7. Final image hash (of what is actually on disk) ─────────────────
-        $imageHash          = hash(config('signature.hash_algo'), $enrichedBytes);
+        $imageHash = hash(config('signature.hash_algo'), $enrichedBytes);
         // Use the same formula as Sig-Machine-Hash in the PNG (no IP — see
         // SignatureMetadataService::computeMachineHash for rationale).
         $machineFingerprint = $this->computeFingerprint($userId, $deviceFp);
@@ -130,16 +131,17 @@ class SignatureManager
 
         // ── 9. Create record (UUID was already embedded in the PNG above) ─────
         $sig = Signature::create([
-            'uuid'                => $uuid,
-            'user_id'             => $userId,
-            'image_path'          => $enrichedPath,
-            'image_hash'          => $imageHash,
-            'document_hash'       => $documentHash,
+            'uuid' => $uuid,
+            'user_id' => $userId,
+            'image_path' => $enrichedPath,
+            'image_hash' => $imageHash,
+            'document_hash' => $documentHash,
             'machine_fingerprint' => $machineFingerprint,
-            'source'              => $source,
-            'status'              => 'pending',
-            'signable_type'       => $signable ? get_class($signable) : null,
-            'signable_id'         => $signable?->getSignableId(),
+            'source' => $source,
+            'status' => 'pending',
+            'signable_type' => $signable ? get_class($signable) : null,
+            'signable_id' => $signable?->getSignableId(),
+            'certificate_password' => $certificatePassword,
         ]);
 
         if ($position) {
@@ -161,8 +163,8 @@ class SignatureManager
      *   2. The record has not been revoked.
      *   3. The record's stored machine_fingerprint matches the current request.
      *
-     * @throws ForgedSignatureException  for ownership / existence failures.
-     * @throws MachineBindingException   when the machine fingerprint differs.
+     * @throws ForgedSignatureException for ownership / existence failures.
+     * @throws MachineBindingException when the machine fingerprint differs.
      */
     private function validateAgainstDbRecord(string $recordId, int $userId, string $deviceFp): void
     {
@@ -193,7 +195,7 @@ class SignatureManager
         if (! hash_equals($original->machine_fingerprint, $currentFingerprint)) {
             throw new MachineBindingException(
                 'This signature image is registered to a different device. '
-                . 'Please draw a new signature on this device.'
+                .'Please draw a new signature on this device.'
             );
         }
     }
@@ -226,7 +228,7 @@ class SignatureManager
      */
     public function embedAndFinalize(Signature $signature, string $userPassword): void
     {
-        $cert     = $this->certService->getOrCreate($signature->user_id, $userPassword);
+        $cert = $this->certService->getOrCreate($signature->user_id, $userPassword);
         $certData = $this->certService->load($cert, $userPassword);
 
         $this->crlValidator->validate($certData);
@@ -236,10 +238,10 @@ class SignatureManager
         $signedDocumentHash = $this->documentIntegrity->hash($signedPath);
 
         $signature->update([
-            'signed_document_path'    => $signedPath,
-            'signed_document_hash'    => $signedDocumentHash,
-            'status'                  => 'signed',
-            'signed_at'               => now(),
+            'signed_document_path' => $signedPath,
+            'signed_document_hash' => $signedDocumentHash,
+            'status' => 'signed',
+            'signed_at' => now(),
             'certificate_fingerprint' => $cert->fingerprint,
         ]);
 
