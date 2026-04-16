@@ -17,6 +17,8 @@ use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\SignaturePlugin;
+use Filament\Actions\ViewAction;
+use Filament\Actions\Action;
 
 class SignatureResource extends Resource
 {
@@ -250,9 +252,9 @@ class SignatureResource extends Resource
                     ]),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
+                ViewAction::make(),
 
-                Tables\Actions\Action::make('revoke')
+                Action::make('revoke')
                     ->label('Revoke')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
