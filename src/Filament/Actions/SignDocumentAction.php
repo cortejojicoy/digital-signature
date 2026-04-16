@@ -87,14 +87,23 @@ class SignDocumentAction extends Action
 
             $signable = ($record instanceof Signable) ? $record : null;
 
+            // Build a human-readable identity string embedded inside the PNG metadata.
+            // Format: "Full Name <email@example.com>" — visible in Preview / ExifTool.
+            $user       = Auth::user();
+            $signerName = trim(
+                ($user->name  ?? '')
+                . ($user->email ? ' <' . $user->email . '>' : '')
+            );
+
             try {
                 $signature = $manager->store(
-                    userId:   Auth::id(),
-                    input:    $inputData,
-                    source:   $inputSrc,
-                    signable: $signable,
-                    position: $this->defaultPosition ?: null,
-                    deviceFp: $inputFp,
+                    userId:     Auth::id(),
+                    input:      $inputData,
+                    source:     $inputSrc,
+                    signable:   $signable,
+                    position:   $this->defaultPosition ?: null,
+                    deviceFp:   $inputFp,
+                    signerName: $signerName,
                 );
 
                 if ($this->queued) {

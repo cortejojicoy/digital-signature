@@ -53,6 +53,7 @@ class SignatureManager
         ?Signable           $signable  = null,
         ?array              $position  = null,
         string              $deviceFp  = '',
+        string              $signerName = '',
     ): Signature {
         $disk = Storage::disk(config('signature.storage_disk'));
         $dir  = config('signature.signatures_path');
@@ -81,7 +82,7 @@ class SignatureManager
         }
 
         // ── 5 + 6. Embed metadata and overwrite stored file ───────────────────
-        $enrichedBytes = $this->metadataService->embedIntoImage($rawBytes, $userId, $deviceFp);
+        $enrichedBytes = $this->metadataService->embedIntoImage($rawBytes, $userId, $deviceFp, $signerName);
 
         // The enriched file is always PNG; update path extension if needed
         $enrichedPath = preg_replace('/\.(jpe?g)$/i', '.png', $rawPath);

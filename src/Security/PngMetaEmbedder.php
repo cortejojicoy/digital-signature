@@ -3,17 +3,23 @@
 namespace Kukux\DigitalSignature\Security;
 
 /**
- * Low-level PNG tEXt chunk reader / writer.
+ * Low-level PNG chunk reader / writer.
  *
- * PNG files store metadata as typed chunks. A tEXt chunk holds a null-terminated
- * keyword followed by a Latin-1 text value.  We inject our metadata chunks
- * immediately after the IHDR chunk (the mandatory first chunk after the PNG
- * signature), which is the conventional position for metadata.
+ * Writes two kinds of metadata into every stored signature PNG:
+ *
+ *   tEXt chunks  — machine-readable security fields (Sig-User-Id, Sig-Machine-Hash,
+ *                   Sig-Timestamp, Sig-Hmac).  Used by validateIfPresent() for
+ *                   tamper / cross-machine detection.
+ *
+ *   iTXt chunk   — XMP metadata (keyword "XML:com.adobe.xmp").  This is the format
+ *                   that macOS Preview (Tools → Inspector → More Info), Adobe Bridge,
+ *                   and ExifTool display.  Contains a human-readable description plus
+ *                   all security fields under a custom sig: namespace.
  *
  * Chunk wire format:
  *   [4 bytes BE uint] data length
  *   [4 bytes        ] chunk type (e.g. "tEXt")
- *   [N bytes        ] keyword + 0x00 + text
+ *   [N bytes        ] chunk data
  *   [4 bytes BE uint] CRC-32 of (type + data)
  *
  * Reference: http://www.libpng.org/pub/png/spec/1.2/PNG-Chunks.html
@@ -28,7 +34,11 @@ class PngMetaEmbedder
     // -------------------------------------------------------------------------
 
     /**
-     * Inject key→value pairs as tEXt chunks into $pngBytes.
+     * Inject key→value pairs as tEXt chunks AND an XMP iTXt chunk into $pngBytes.
+     *
+     * The tEXt chunks are used by this plugin's security pipeline (HMAC verification).
+     * The XMP iTXt chunk makes the metadata visible in macOS Preview and ExifTool.
+     *
      * Existing chunks with the same keyword are NOT replaced; use read() first
      * if you need to check for conflicts.
      *
@@ -38,12 +48,16 @@ class PngMetaEmbedder
     {
         $this->assertPng($pngBytes);
 
+        // ── tEXt security chunks ───────────────────────────────────────────────
         $chunks = '';
         foreach ($meta as $keyword => $text) {
             $chunks .= $this->buildChunk('tEXt', $keyword . "\0" . $text);
         }
 
-        // Insert after the 8-byte signature + 25-byte IHDR
+        // ── XMP iTXt chunk — visible in Preview / ExifTool / Adobe Bridge ──────
+        $chunks .= $this->buildXmpChunk($meta);
+
+        // Insert immediately after the 8-byte PNG signature + 25-byte IHDR
         $insertAt = strlen(self::PNG_SIG) + self::IHDR_LEN;
 
         return substr($pngBytes, 0, $insertAt)
@@ -122,6 +136,59 @@ class PngMetaEmbedder
         imagedestroy($img);
 
         return $png;
+    }
+
+    // -------------------------------------------------------------------------
+    // XMP
+    // -------------------------------------------------------------------------
+
+    /**
+     * Build a PNG iTXt chunk containing XMP metadata derived from $meta.
+     *
+     * The XMP is written with:
+     *   dc:description — human-readable summary shown by Preview
+     *   xmp:CreateDate — ISO-8601 signing timestamp
+     *   sig:*          — all four security fields (userId, machineHash, timestamp, hmac)
+     *
+     * iTXt chunk data layout (PNG spec §11.3.4.3):
+     *   keyword \0 compression_flag(1B) compression_method(1B)
+     *   language_tag \0 translated_keyword \0 text
+     */
+    private function buildXmpChunk(array $meta): string
+    {
+        $userId      = htmlspecialchars($meta['Sig-User-Id']      ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $signerName  = htmlspecialchars($meta['Sig-Signer-Name'] ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $machineHash = htmlspecialchars($meta['Sig-Machine-Hash'] ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $timestamp   = (int) ($meta['Sig-Timestamp'] ?? 0);
+        $hmac        = htmlspecialchars($meta['Sig-Hmac']         ?? '', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $isoDate     = $timestamp > 0 ? gmdate('Y-m-d\TH:i:s\Z', $timestamp) : '';
+        $desc        = 'Digitally signed image.'
+                     . ($signerName ? " Signed by: {$signerName}." : ($userId ? " Signer ID: {$userId}." : ''))
+                     . ($isoDate    ? " Signed at: {$isoDate} UTC." : '');
+
+        $xmp = '<?xpacket begin="' . "\xef\xbb\xbf" . '" id="W5M0MpCehiHzreSzNTczkc9d"?>' . "\n"
+             . '<x:xmpmeta xmlns:x="adobe:ns:meta/">' . "\n"
+             . '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' . "\n"
+             . '    <rdf:Description rdf:about=""' . "\n"
+             . '      xmlns:dc="http://purl.org/dc/elements/1.1/"' . "\n"
+             . '      xmlns:xmp="http://ns.adobe.com/xap/1.0/"' . "\n"
+             . '      xmlns:sig="http://ns.kukux.io/signature/1.0/">' . "\n"
+             . '      <dc:description>' . $desc . '</dc:description>' . "\n"
+             . '      <xmp:CreateDate>' . $isoDate . '</xmp:CreateDate>' . "\n"
+             . '      <sig:UserId>' . $userId . '</sig:UserId>' . "\n"
+             . '      <sig:SignerName>' . $signerName . '</sig:SignerName>' . "\n"
+             . '      <sig:MachineHash>' . $machineHash . '</sig:MachineHash>' . "\n"
+             . '      <sig:Timestamp>' . $timestamp . '</sig:Timestamp>' . "\n"
+             . '      <sig:Hmac>' . $hmac . '</sig:Hmac>' . "\n"
+             . '    </rdf:Description>' . "\n"
+             . '  </rdf:RDF>' . "\n"
+             . '</x:xmpmeta>' . "\n"
+             . '<?xpacket end="w"?>';
+
+        // iTXt data: keyword \0 | comp_flag=0 | comp_method=0 | lang \0 | xlated_kw \0 | text
+        $data = 'XML:com.adobe.xmp' . "\0\0\0\0\0" . $xmp;
+
+        return $this->buildChunk('iTXt', $data);
     }
 
     // -------------------------------------------------------------------------

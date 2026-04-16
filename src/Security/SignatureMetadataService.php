@@ -9,13 +9,14 @@ use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 /**
  * Embeds and validates tamper-proof metadata inside PNG signature images.
  *
- * Every signature stored by this plugin receives four tEXt chunks:
+ * Every signature stored by this plugin receives five tEXt chunks:
  *
  *   Sig-User-Id      — the signer's user ID
+ *   Sig-Signer-Name  — the signer's display name (name + email), visible in Preview
  *   Sig-Machine-Hash — SHA-256 of (userId|userAgent|deviceFingerprint)
  *   Sig-Timestamp    — Unix timestamp when the image was stored
- *   Sig-Hmac         — HMAC-SHA256 of (userId|machineHash|timestamp) signed
- *                      with the application key
+ *   Sig-Hmac         — HMAC-SHA256 of (userId|signerName|machineHash|timestamp)
+ *                      signed with the application key
  *
  * What this prevents
  * ------------------
@@ -35,6 +36,7 @@ class SignatureMetadataService
 {
     // tEXt chunk keyword names embedded in each PNG
     private const K_USER      = 'Sig-User-Id';
+    private const K_SIGNER    = 'Sig-Signer-Name';
     private const K_MACHINE   = 'Sig-Machine-Hash';
     private const K_TIMESTAMP = 'Sig-Timestamp';
     private const K_HMAC      = 'Sig-Hmac';
@@ -57,18 +59,26 @@ class SignatureMetadataService
      * @param string $deviceFp    Browser-collected device fingerprint hex string
      *                            (from machineFingerprint.js).  May be '' if JS
      *                            was disabled; server-side signals still apply.
+     * @param string $signerName  Human-readable identity string embedded in the PNG
+     *                            (e.g. "Juan dela Cruz <juan@example.com>").
+     *                            Included inside the HMAC so it cannot be altered.
      */
-    public function embedIntoImage(string $imageBytes, int $userId, string $deviceFp = ''): string
-    {
+    public function embedIntoImage(
+        string $imageBytes,
+        int    $userId,
+        string $deviceFp   = '',
+        string $signerName = '',
+    ): string {
         // Always store as PNG so tEXt chunks are supported
         $png = $this->embedder->normalizeToPng($imageBytes);
 
         $machineHash = $this->computeMachineHash($userId, $deviceFp);
         $timestamp   = (string) time();
-        $hmac        = $this->makeHmac($userId, $machineHash, $timestamp);
+        $hmac        = $this->makeHmac($userId, $signerName, $machineHash, $timestamp);
 
         return $this->embedder->embed($png, [
             self::K_USER      => (string) $userId,
+            self::K_SIGNER    => $signerName,
             self::K_MACHINE   => $machineHash,
             self::K_TIMESTAMP => $timestamp,
             self::K_HMAC      => $hmac,
@@ -100,12 +110,13 @@ class SignatureMetadataService
         }
 
         $storedUserId  = $meta[self::K_USER]      ?? '';
+        $storedSigner  = $meta[self::K_SIGNER]   ?? '';
         $storedMachine = $meta[self::K_MACHINE]   ?? '';
         $storedTs      = $meta[self::K_TIMESTAMP] ?? '';
         $storedHmac    = $meta[self::K_HMAC];
 
         // 1. Verify HMAC — proves the metadata was written by this server
-        $expectedHmac = $this->makeHmac((int) $storedUserId, $storedMachine, $storedTs);
+        $expectedHmac = $this->makeHmac((int) $storedUserId, $storedSigner, $storedMachine, $storedTs);
         if (!hash_equals($expectedHmac, $storedHmac)) {
             throw new ForgedSignatureException(
                 'The uploaded signature image contains invalid security metadata. '
@@ -172,9 +183,9 @@ class SignatureMetadataService
      * The separator '|' is included between every field to prevent
      * length-extension ambiguity.
      */
-    private function makeHmac(int $userId, string $machineHash, string $timestamp): string
+    private function makeHmac(int $userId, string $signerName, string $machineHash, string $timestamp): string
     {
-        $payload = implode('|', [(string) $userId, $machineHash, $timestamp]);
+        $payload = implode('|', [(string) $userId, $signerName, $machineHash, $timestamp]);
         return hash_hmac('sha256', $payload, config('app.key'));
     }
 }
