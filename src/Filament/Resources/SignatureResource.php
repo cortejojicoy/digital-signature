@@ -19,6 +19,10 @@ use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\SignaturePlugin;
 use Filament\Actions\ViewAction;
 use Filament\Actions\Action;
+use Filament\Actions\BulkActionGroup;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Columns\TextInputColumn;
+use Filament\Tables\Columns\ImageColumn;
 
 class SignatureResource extends Resource
 {
@@ -190,7 +194,7 @@ class SignatureResource extends Resource
             ->columns([
 
                 // Signature thumbnail
-                Tables\Columns\ImageColumn::make('image_path')
+                ImageColumn::make('image_path')
                     ->label('Signature')
                     ->disk(config('signature.storage_disk'))
                     ->height(32)
@@ -201,13 +205,13 @@ class SignatureResource extends Resource
                     ]),
 
                 // Signer
-                Tables\Columns\TextColumn::make('user.name')
+                TextInputColumn::make('user.name')
                     ->label('Signer')
                     ->searchable()
                     ->description(fn (Signature $record): string => $record->user?->email ?? ''),
 
                 // Status badge
-                Tables\Columns\TextColumn::make('status')
+                TextInputColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         'signed' => 'success',
@@ -216,20 +220,20 @@ class SignatureResource extends Resource
                     }),
 
                 // Capture method
-                Tables\Columns\TextColumn::make('source')
+                TextInputColumn::make('source')
                     ->label('Method')
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->color(fn (string $state): string => $state === 'draw' ? 'info' : 'primary'),
 
                 // Dates
-                Tables\Columns\TextColumn::make('signed_at')
+                TextInputColumn::make('signed_at')
                     ->label('Signed')
                     ->dateTime()
                     ->placeholder('Pending')
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('created_at')
+                TextInputColumn::make('created_at')
                     ->label('Created')
                     ->dateTime()
                     ->sortable()
@@ -237,14 +241,14 @@ class SignatureResource extends Resource
 
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('status')
+                SelectFilter::make('status')
                     ->options([
                         'pending' => 'Pending',
                         'signed' => 'Signed',
                         'revoked' => 'Revoked',
                     ]),
 
-                Tables\Filters\SelectFilter::make('source')
+                SelectFilter::make('source')
                     ->label('Capture Method')
                     ->options([
                         'draw' => 'Draw',
@@ -267,9 +271,7 @@ class SignatureResource extends Resource
                     }),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
+                //
             ]);
     }
 
