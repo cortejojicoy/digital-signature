@@ -6,15 +6,13 @@ After publishing, the config file lives at `config/signature.php`.
 
 ## Certificate driver
 
-Controls how X.509 certificates are issued for each user.
-
 ```php
 'cert_driver' => env('SIGNATURE_CERT_DRIVER', 'openssl'),
 ```
 
 | Value | Description |
 |---|---|
-| `openssl` | Self-signed via PHP's `openssl_*` extension (default, no extra services needed) |
+| `openssl` | Self-signed via PHP's `openssl_*` extension (default) |
 | `cfssl` | Issues certificates from a running CFSSL server |
 
 ### OpenSSL options
@@ -25,12 +23,12 @@ Controls how X.509 certificates are issued for each user.
     'private_key_bits' => 2048,
     'private_key_type' => OPENSSL_KEYTYPE_RSA,
     'cert_lifetime'    => 3650,   // days before expiry
-    'ca_cert_path'     => storage_path('app/certs/ca.crt'),  // optional CA cert
-    'ca_key_path'      => storage_path('app/certs/ca.key'),  // optional CA key
+    'ca_cert_path'     => storage_path('app/certs/ca.crt'),  // optional
+    'ca_key_path'      => storage_path('app/certs/ca.key'),  // optional
 ],
 ```
 
-When `ca_cert_path` and `ca_key_path` point to valid files, certificates are CA-signed instead of self-signed. Leave them absent for development.
+When `ca_cert_path` and `ca_key_path` point to valid files, certificates are CA-signed. Leave absent for development (self-signed).
 
 ### CFSSL options
 
@@ -45,15 +43,13 @@ When `ca_cert_path` and `ca_key_path` point to valid files, certificates are CA-
 
 ## PDF driver
 
-Controls how the signature is embedded into the PDF.
-
 ```php
 'pdf_driver' => env('SIGNATURE_PDF_DRIVER', 'fpdi'),
 ```
 
 | Value | Description |
 |---|---|
-| `fpdi` | Uses FPDI + TCPDF. Imports existing PDF pages and embeds a PKCS#7 cryptographic signature (default) |
+| `fpdi` | FPDI + TCPDF — imports existing PDF pages, embeds PKCS#7 signature (default) |
 | `tcpdf` | Pure TCPDF |
 
 ---
@@ -62,26 +58,18 @@ Controls how the signature is embedded into the PDF.
 
 ```php
 'storage_disk'     => env('SIGNATURE_DISK', 'local'),
-'certs_path'       => 'certs',         // PFX files
+'certs_path'       => 'certs',         // PFX certificate files
 'signatures_path'  => 'signatures',    // raw signature images
 'signed_docs_path' => 'signed-docs',   // completed signed PDFs
 ```
 
-All paths are relative to the disk root. Use `s3` or any Laravel disk driver.
-
----
-
-## Hashing
-
-```php
-'hash_algo' => 'sha256',
-```
-
-Used for image hashes, document integrity hashes, and the signed-document hash. Any algo supported by PHP's `hash()` function is valid.
+All paths are relative to the disk root. Any Laravel disk driver works (`local`, `s3`, etc.).
 
 ---
 
 ## Image constraints
+
+Applied both client-side (JS) and server-side (PHP) during upload validation.
 
 ```php
 'image' => [
@@ -94,6 +82,49 @@ Used for image hashes, document integrity hashes, and the signed-document hash. 
 
 ---
 
+## Admin Resource
+
+Controls whether and how the built-in Signatures resource appears in the panel.
+
+```php
+'resource' => [
+    'enabled'          => env('SIGNATURE_RESOURCE_ENABLED', true),
+    'navigation_icon'  => env('SIGNATURE_RESOURCE_ICON', 'heroicon-o-pencil-square'),
+    'navigation_group' => env('SIGNATURE_RESOURCE_GROUP', null),
+    'navigation_sort'  => env('SIGNATURE_RESOURCE_SORT', null),
+    'navigation_label' => env('SIGNATURE_RESOURCE_LABEL', 'Signatures'),
+],
+```
+
+These are the **defaults**. Values set on `SignaturePlugin::make()` take precedence:
+
+```php
+SignaturePlugin::make()
+    ->navigationGroup('Documents')
+    ->navigationIcon('heroicon-o-pencil-square')
+    ->navigationSort(10)
+    ->navigationLabel('Document Signatures')
+```
+
+---
+
+## Metadata & machine binding
+
+Every stored signature PNG receives HMAC-signed `tEXt` chunks and XMP metadata. Machine lock requires the same browser/device on re-upload.
+
+```php
+'metadata' => [
+    'enforce_machine_lock' => env('SIGNATURE_MACHINE_LOCK', true),
+],
+```
+
+| Setting | Effect |
+|---|---|
+| `false` | Only verifies HMAC + user ID on re-upload |
+| `true` (default) | Also verifies the device fingerprint and DB `machine_fingerprint` |
+
+---
+
 ## Queue
 
 ```php
@@ -101,13 +132,13 @@ Used for image hashes, document integrity hashes, and the signed-document hash. 
 'queue_connection' => env('SIGNATURE_QUEUE_CONNECTION', null),
 ```
 
-`null` uses the application's default queue connection.
+`null` uses the application's default connection. Only relevant when `SignDocumentAction::make()->queued()` is used — the default is synchronous.
 
 ---
 
 ## Timestamp Authority (TSA)
 
-Embeds an RFC 3161 trusted timestamp inside the PKCS#7 signature. Disabled when `url` is `null`.
+Embeds an RFC 3161 trusted timestamp inside the PKCS#7 block. Disabled when `url` is `null`.
 
 ```php
 'tsa' => [
@@ -140,16 +171,35 @@ Requires the `openssl` CLI binary in `PATH`. Self-signed certificates (no CDP ex
 
 ---
 
-## Environment variable summary
+## Full environment variable reference
 
 ```bash
+# Drivers
 SIGNATURE_CERT_DRIVER=openssl       # openssl | cfssl
 SIGNATURE_PDF_DRIVER=fpdi           # fpdi | tcpdf
+
+# Storage
 SIGNATURE_DISK=local                # any Laravel disk
+
+# Admin resource
+SIGNATURE_RESOURCE_ENABLED=true
+SIGNATURE_RESOURCE_ICON=heroicon-o-pencil-square
+SIGNATURE_RESOURCE_GROUP=           # blank = ungrouped
+SIGNATURE_RESOURCE_SORT=            # blank = default order
+SIGNATURE_RESOURCE_LABEL=Signatures
+
+# Security
+SIGNATURE_MACHINE_LOCK=true         # reject re-upload from different device
+
+# Queue
 SIGNATURE_QUEUE=default
 SIGNATURE_QUEUE_CONNECTION=         # blank = app default
+
+# Optional features
 SIGNATURE_TSA_URL=                  # blank = disabled
 SIGNATURE_CRL_ENABLED=false
+
+# CFSSL (only if cert_driver=cfssl)
 CFSSL_HOST=http://localhost:8888
 CFSSL_PROFILE=client
 ```

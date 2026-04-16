@@ -7,22 +7,21 @@ This page covers the full lifecycle of a signature — from form submission to a
 ## Lifecycle overview
 
 ```
-User submits form
+User submits form (SignDocumentAction)
       |
       v
 SignatureManager::store()
   - Forgery check (duplicate image hash)
+  - Metadata validation on upload (HMAC + user ID + machine)
+  - DB cross-validation (Sig-Record-Id → machine_fingerprint)
   - Document hash captured
-  - UUID assigned
+  - UUID generated
+  - PNG metadata embedded (tEXt + XMP: signer name, machine hash, UUID)
   - Signature record created (status: pending)
       |
       v
-SignatureManager::sign()
-  - Dispatches EmbedSignatureJob to queue
-      |
-      v
-EmbedSignatureJob::handle()
-  - Calls embedAndFinalize()
+SignatureManager::embedAndFinalize()   ← called directly (synchronous default)
+  OR EmbedSignatureJob::handle()       ← via .queued()
       |
       v
 SignatureManager::embedAndFinalize()
@@ -33,6 +32,8 @@ SignatureManager::embedAndFinalize()
   - Signature record updated (status: signed)
   - DocumentSigned event fired
 ```
+
+By default, `SignDocumentAction` calls `embedAndFinalize()` synchronously — no queue worker is required. Opt into queued signing with `.queued()`.
 
 ---
 
@@ -50,11 +51,12 @@ $manager = app(SignatureManager::class);
 
 ```php
 $signature = $manager->store(
-    userId:   $user->id,
-    input:    $request->input('signature_data'),  // base64 data URI
-    source:   'draw',                             // 'draw' or 'upload'
-    signable: $contract,                          // optional Signable model
-    position: [                                   // optional stamp coordinates
+    userId:     $user->id,
+    input:      $request->input('signature_data'),  // base64 data URI or UploadedFile
+    source:     'draw',                              // 'draw' or 'upload'
+    signable:   $contract,                           // optional Signable model
+    signerName: $user->name . ' <' . $user->email . '>',  // optional, embedded in PNG
+    position:   [                                    // optional stamp coordinates
         'page'   => 1,
         'x'      => 100.0,
         'y'      => 650.0,
@@ -63,30 +65,40 @@ $signature = $manager->store(
     ],
 );
 
-// $signature->uuid   — unique token for this signing request
+// $signature->uuid   — unique token embedded in the PNG and stored in DB
 // $signature->status — 'pending'
 ```
+
+`signerName` is embedded in the PNG as `Sig-Signer-Name` (inside the HMAC) and surfaced in XMP metadata visible to macOS Preview and Windows File Explorer.
 
 You can also pass an `UploadedFile` instead of a base64 string:
 
 ```php
 $signature = $manager->store(
-    userId: $user->id,
-    input:  $request->file('signature_image'),
-    source: 'upload',
+    userId:     $user->id,
+    input:      $request->file('signature_image'),
+    source:     'upload',
+    signerName: $user->name . ' <' . $user->email . '>',
 );
 ```
 
-### sign() — dispatch the signing job
+When `source = 'upload'`, `validateIfPresent()` runs first — any HMAC violation, user mismatch, or machine mismatch throws before the record is written.
+
+### embedAndFinalize() — sign the PDF synchronously
+
+```php
+$manager->embedAndFinalize($signature, $request->input('certificate_password'));
+```
+
+Runs the full PDF signing pipeline in the current process. Throws on failure (certificate error, CRL revocation, missing PDF). The signature record is updated to `status = signed` on success.
+
+### sign() — dispatch the signing job (queued)
 
 ```php
 $manager->sign($signature, $request->input('certificate_password'));
 ```
 
-This queues `EmbedSignatureJob`. The job will fail (and set `status = failed`) if:
-- The certificate password is wrong
-- The certificate is revoked (CRL enabled)
-- The PDF cannot be found on the storage disk
+Queues `EmbedSignatureJob`. The job calls `embedAndFinalize()` and sets `status = failed` after 3 retries if it cannot complete.
 
 ### revoke() — invalidate a signature
 
@@ -100,6 +112,17 @@ $manager->revoke($signature);
 
 ---
 
+## Synchronous vs queued signing
+
+| Mode | How to use | Requires queue worker |
+|---|---|---|
+| Synchronous (default) | `SignDocumentAction::make()` | No |
+| Queued | `SignDocumentAction::make()->queued()` | Yes |
+
+Synchronous signing blocks the HTTP request until the PDF is signed. For large PDFs or TSA requests with network latency, consider queued mode.
+
+---
+
 ## Checking signature status
 
 ```php
@@ -110,8 +133,8 @@ $contract->latestSignature();    // ?Signature
 
 $sig = $contract->latestSignature();
 
-$sig->isPending();   // true while job is queued
-$sig->isSigned();    // true after job completes
+$sig->isPending();   // true while job is queued / before embedAndFinalize()
+$sig->isSigned();    // true after embedAndFinalize() completes
 $sig->isRevoked();   // true after revoke()
 ```
 
@@ -119,7 +142,7 @@ $sig->isRevoked();   // true after revoke()
 
 ## Verifying document integrity
 
-After signing, the plugin stores SHA-256 hashes of both the original and signed PDFs. You can verify at any point that neither file has been tampered with.
+After signing, the plugin stores SHA-256 hashes of both the original and signed PDFs.
 
 ```php
 use Illuminate\Support\Facades\Storage;
@@ -137,15 +160,29 @@ if ($current !== $sig->signed_document_hash) {
 
 ---
 
+## Verifying PNG metadata
+
+After download, you can verify that a signature PNG was produced by your server and has not been tampered with:
+
+```php
+use Kukux\DigitalSignature\Security\PngMetaEmbedder;
+
+$chunks = app(PngMetaEmbedder::class)->read(file_get_contents($path));
+
+// $chunks['Sig-Record-Id'] — look up the DB record
+// $chunks['Sig-Signer-Name'] — who it was registered to
+// $chunks['Sig-Hmac'] — verify against your APP_KEY
+```
+
+---
+
 ## Events
 
 | Event | Payload | When fired |
 |---|---|---|
 | `CertificateIssued` | `$certificate` (`UserCertificate`) | New certificate created for a user |
-| `DocumentSigned` | `$signature` (`Signature`) | Signing job completes successfully |
+| `DocumentSigned` | `$signature` (`Signature`) | `embedAndFinalize()` completes successfully |
 | `SignatureRevoked` | `$signature` (`Signature`) | `revoke()` is called |
-
-### Listening to events
 
 ```php
 // app/Providers/EventServiceProvider.php
@@ -154,12 +191,8 @@ use Kukux\DigitalSignature\Events\DocumentSigned;
 use Kukux\DigitalSignature\Events\SignatureRevoked;
 
 protected $listen = [
-    DocumentSigned::class => [
-        SendSignedDocumentEmail::class,
-    ],
-    SignatureRevoked::class => [
-        NotifyAdminOfRevocation::class,
-    ],
+    DocumentSigned::class  => [SendSignedDocumentEmail::class],
+    SignatureRevoked::class => [NotifyAdminOfRevocation::class],
 ];
 ```
 
@@ -175,6 +208,7 @@ Event::listen(DocumentSigned::class, function ($event) {
     // $sig->signed_document_hash  — SHA-256 for integrity checks
     // $sig->certificate_fingerprint
     // $sig->signed_at
+    // $sig->uuid                  — embedded in the PNG as Sig-Record-Id
 });
 ```
 
@@ -184,16 +218,16 @@ Event::listen(DocumentSigned::class, function ($event) {
 
 | Status | Meaning |
 |---|---|
-| `pending` | Image stored, job queued |
-| `signed` | PDF signed, job completed |
-| `revoked` | Manually invalidated |
-| `failed` | Job failed after 3 retries |
+| `pending` | Image stored, PDF not yet signed |
+| `signed` | `embedAndFinalize()` completed |
+| `revoked` | Manually invalidated via `revoke()` |
+| `failed` | `embedAndFinalize()` failed after 3 retries (queued mode) |
 
 ---
 
 ## Queue configuration
 
-The job retries 3 times with a 120-second timeout per attempt.
+Only relevant when using `.queued()`. The job retries 3 times with a 120-second timeout per attempt.
 
 ```php
 // config/signature.php
@@ -201,7 +235,7 @@ The job retries 3 times with a 120-second timeout per attempt.
 'queue_connection' => env('SIGNATURE_QUEUE_CONNECTION', null),
 ```
 
-To handle failed jobs, listen to Laravel's `Illuminate\Queue\Events\JobFailed`:
+To handle failed jobs:
 
 ```php
 Queue::failing(function (JobFailed $event) {

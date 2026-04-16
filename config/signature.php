@@ -87,6 +87,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin Resource
+    |--------------------------------------------------------------------------
+    | When enabled, a SignatureResource is automatically registered on the
+    | Filament panel via SignaturePlugin.  The navigation appearance can be
+    | changed here or overridden at runtime with the plugin's fluent API:
+    |
+    |   SignaturePlugin::make()
+    |       ->navigationIcon('heroicon-o-pencil-square')
+    |       ->navigationGroup('Documents')
+    |       ->navigationSort(10)
+    |
+    | Set SIGNATURE_RESOURCE_ENABLED=false to hide the resource entirely.
+    */
+    'resource' => [
+        'enabled'          => env('SIGNATURE_RESOURCE_ENABLED', true),
+        'navigation_icon'  => env('SIGNATURE_RESOURCE_ICON', 'heroicon-o-pencil-square'),
+        'navigation_group' => env('SIGNATURE_RESOURCE_GROUP', null),
+        'navigation_sort'  => env('SIGNATURE_RESOURCE_SORT', null),
+        'navigation_label' => env('SIGNATURE_RESOURCE_LABEL', 'Signatures'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Image Metadata (machine-binding security)
     |--------------------------------------------------------------------------
     | Every stored signature PNG receives four HMAC-signed tEXt chunks:
