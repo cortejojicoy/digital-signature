@@ -10,7 +10,7 @@
             showUpload:    {{ $field->getShowUploadTab() ? 'true' : 'false' }},
         })"
         x-init="
-            $watch('value', v => $wire.set('{{ $getStatePath() }}', v || ''));
+            $watch('value', v => { if (v !== '') $wire.set('{{ $getStatePath() }}', v ?? null); });
             getFingerprint().then(fp => {
                 window.__sigDeviceFp = fp;
                 fetch('{{ route('signature.device-fingerprint') }}', {
