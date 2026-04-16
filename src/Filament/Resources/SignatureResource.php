@@ -2,7 +2,10 @@
 
 namespace Kukux\DigitalSignature\Filament\Resources;
 
+use Filament\Actions\Action;
+use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
@@ -10,19 +13,16 @@ use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontFamily;
-use Filament\Tables;
+use Filament\Tables\Columns\ImageColumn;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\SignaturePlugin;
-use Filament\Actions\ViewAction;
-use Filament\Actions\Action;
-use Filament\Actions\BulkActionGroup;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Tables\Columns\TextInputColumn;
-use Filament\Tables\Columns\ImageColumn;
 
 class SignatureResource extends Resource
 {
@@ -205,13 +205,13 @@ class SignatureResource extends Resource
                     ]),
 
                 // Signer
-                TextInputColumn::make('user.name')
+                TextColumn::make('user.name')
                     ->label('Signer')
                     ->searchable()
                     ->description(fn (Signature $record): string => $record->user?->email ?? ''),
 
                 // Status badge
-                TextInputColumn::make('status')
+                TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         'signed' => 'success',
@@ -220,20 +220,20 @@ class SignatureResource extends Resource
                     }),
 
                 // Capture method
-                TextInputColumn::make('source')
+                TextColumn::make('source')
                     ->label('Method')
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->color(fn (string $state): string => $state === 'draw' ? 'info' : 'primary'),
 
                 // Dates
-                TextInputColumn::make('signed_at')
+                TextColumn::make('signed_at')
                     ->label('Signed')
                     ->dateTime()
                     ->placeholder('Pending')
                     ->sortable(),
 
-                TextInputColumn::make('created_at')
+                TextColumn::make('created_at')
                     ->label('Created')
                     ->dateTime()
                     ->sortable()
