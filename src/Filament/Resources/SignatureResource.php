@@ -88,9 +88,9 @@ class SignatureResource extends Resource
     // Infolist — used by the View page
     // -------------------------------------------------------------------------
 
-    public static function infolist(Infolist $infolist): Infolist
+    public static function infolist(Schema $schema): Schema
     {
-        return $infolist
+        return $schema
             ->columns(3)
             ->schema([
 
