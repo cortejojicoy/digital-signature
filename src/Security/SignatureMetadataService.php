@@ -39,6 +39,7 @@ class SignatureMetadataService
     private const K_SIGNER    = 'Sig-Signer-Name';
     private const K_MACHINE   = 'Sig-Machine-Hash';
     private const K_TIMESTAMP = 'Sig-Timestamp';
+    private const K_RECORD    = 'Sig-Record-Id';   // Signature.uuid for DB cross-validation
     private const K_HMAC      = 'Sig-Hmac';
 
     public function __construct(
@@ -62,25 +63,30 @@ class SignatureMetadataService
      * @param string $signerName  Human-readable identity string embedded in the PNG
      *                            (e.g. "Juan dela Cruz <juan@example.com>").
      *                            Included inside the HMAC so it cannot be altered.
+     * @param string $recordId    The Signature model UUID generated before DB insert.
+     *                            Embedded so re-uploaded images can be cross-checked
+     *                            against the database record.
      */
     public function embedIntoImage(
         string $imageBytes,
         int    $userId,
         string $deviceFp   = '',
         string $signerName = '',
+        string $recordId   = '',
     ): string {
         // Always store as PNG so tEXt chunks are supported
         $png = $this->embedder->normalizeToPng($imageBytes);
 
         $machineHash = $this->computeMachineHash($userId, $deviceFp);
         $timestamp   = (string) time();
-        $hmac        = $this->makeHmac($userId, $signerName, $machineHash, $timestamp);
+        $hmac        = $this->makeHmac($userId, $signerName, $machineHash, $timestamp, $recordId);
 
         return $this->embedder->embed($png, [
             self::K_USER      => (string) $userId,
             self::K_SIGNER    => $signerName,
             self::K_MACHINE   => $machineHash,
             self::K_TIMESTAMP => $timestamp,
+            self::K_RECORD    => $recordId,
             self::K_HMAC      => $hmac,
         ]);
     }
@@ -113,10 +119,11 @@ class SignatureMetadataService
         $storedSigner  = $meta[self::K_SIGNER]   ?? '';
         $storedMachine = $meta[self::K_MACHINE]   ?? '';
         $storedTs      = $meta[self::K_TIMESTAMP] ?? '';
+        $storedRecord  = $meta[self::K_RECORD]   ?? '';
         $storedHmac    = $meta[self::K_HMAC];
 
         // 1. Verify HMAC — proves the metadata was written by this server
-        $expectedHmac = $this->makeHmac((int) $storedUserId, $storedSigner, $storedMachine, $storedTs);
+        $expectedHmac = $this->makeHmac((int) $storedUserId, $storedSigner, $storedMachine, $storedTs, $storedRecord);
         if (!hash_equals($expectedHmac, $storedHmac)) {
             throw new ForgedSignatureException(
                 'The uploaded signature image contains invalid security metadata. '
@@ -182,10 +189,21 @@ class SignatureMetadataService
      * HMAC-SHA256 over the core fields, keyed by APP_KEY.
      * The separator '|' is included between every field to prevent
      * length-extension ambiguity.
+     *
+     * $recordId is appended only when non-empty so that older PNGs (stored before
+     * Sig-Record-Id was introduced) still validate correctly.
      */
-    private function makeHmac(int $userId, string $signerName, string $machineHash, string $timestamp): string
-    {
-        $payload = implode('|', [(string) $userId, $signerName, $machineHash, $timestamp]);
-        return hash_hmac('sha256', $payload, config('app.key'));
+    private function makeHmac(
+        int    $userId,
+        string $signerName,
+        string $machineHash,
+        string $timestamp,
+        string $recordId = '',
+    ): string {
+        $parts = [(string) $userId, $signerName, $machineHash, $timestamp];
+        if ($recordId !== '') {
+            $parts[] = $recordId;
+        }
+        return hash_hmac('sha256', implode('|', $parts), config('app.key'));
     }
 }
