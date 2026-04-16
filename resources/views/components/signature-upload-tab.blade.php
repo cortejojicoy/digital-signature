@@ -28,10 +28,10 @@
         <template x-if="!uploadPreview && !uploadLoading">
             <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <span class="flex h-10 w-10 items-center justify-center rounded-full
-                             bg-gray-100 dark:bg-white/10
+                             bg-gray-100 dark:bg-white/[0.08]
                              group-hover:bg-primary-100 dark:group-hover:bg-primary-900/30
                              transition-colors duration-150">
-                    <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-500 transition-colors duration-150"
+                    <svg class="h-5 w-5 text-gray-400 dark:text-gray-400 group-hover:text-primary-500 transition-colors duration-150"
                          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                         <path stroke-linecap="round" stroke-linejoin="round"
                               d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0
@@ -39,10 +39,10 @@
                     </svg>
                 </span>
                 <div>
-                    <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <p class="text-sm font-medium text-gray-700 dark:text-gray-200">
                         Click to upload
                     </p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                    <p class="text-xs text-gray-400 dark:text-gray-400 mt-0.5">
                         PNG or JPG &mdash; max {{ config('signature.image.max_kb') }}KB
                     </p>
                 </div>

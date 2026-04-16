@@ -42,8 +42,10 @@
             <img
                 x-bind:src="value"
                 alt="Signature preview"
-                class="h-9 max-w-[140px] object-contain rounded bg-white dark:bg-white/10
-                       border border-green-200 dark:border-green-700 px-1"
+                class="h-9 max-w-[140px] object-contain rounded
+                       bg-white dark:bg-gray-900
+                       border border-green-200 dark:border-green-700
+                       dark:invert dark:brightness-90 px-1"
             />
 
             <div class="min-w-0 flex-1">

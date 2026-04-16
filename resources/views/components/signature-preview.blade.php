@@ -11,7 +11,8 @@
             alt="Signature"
             style="width: {{ $column->getThumbWidth() }}px; height: {{ $column->getThumbHeight() }}px;"
             class="object-contain rounded border border-gray-200 dark:border-white/10
-                   bg-white dark:bg-white/5"
+                   bg-white dark:bg-gray-900
+                   dark:invert dark:brightness-90"
             x-bind:class="revealed ? 'opacity-100' : 'opacity-0'"
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0 scale-95"

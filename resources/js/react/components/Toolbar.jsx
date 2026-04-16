@@ -1,3 +1,5 @@
+import { useDarkMode } from '../hooks/useDarkMode.js';
+
 const SWATCHES = [
     { color: '#1a1a1a', label: 'Black' },
     { color: '#1e3a8a', label: 'Navy' },
@@ -19,6 +21,7 @@ function activeBrushKey(maxWidth) {
 }
 
 export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, onConfirm }) {
+    const isDark      = useDarkMode();
     const isEmpty     = state.strokes.length === 0;
     const activeSize  = activeBrushKey(state.maxWidth);
 
@@ -28,8 +31,8 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
             alignItems:  'center',
             gap:         '8px',
             padding:     '7px 12px',
-            borderTop:   '1px solid rgba(0,0,0,0.07)',
-            background:  'var(--color-bg-secondary, #f8f9fa)',
+            borderTop:   isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)',
+            background:  isDark ? 'rgba(255,255,255,0.03)'           : '#f8f9fa',
             flexWrap:    'wrap',
         }}>
 
@@ -65,7 +68,7 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
             </div>
 
             {/* ── Divider ────────────────────────────────────────────────── */}
-            <div style={{ width: '1px', height: '22px', background: 'rgba(0,0,0,0.09)', flexShrink: 0 }} />
+            <div style={{ width: '1px', height: '22px', background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)', flexShrink: 0 }} />
 
             {/* ── Brush size picker ──────────────────────────────────────── */}
             <div
@@ -74,7 +77,7 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
                     display:      'flex',
                     gap:          '2px',
                     alignItems:   'center',
-                    background:   'rgba(0,0,0,0.05)',
+                    background:   isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
                     borderRadius: '8px',
                     padding:      '3px',
                 }}
@@ -122,7 +125,7 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
                     disabled={state.undoStack.length === 0}
                     onClick={() => dispatch({ type: 'UNDO' })}
                     title="Undo last stroke"
-                    style={actionBtn(state.undoStack.length === 0)}
+                    style={actionBtn(state.undoStack.length === 0, isDark)}
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" strokeWidth="2.2"
@@ -139,7 +142,7 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
                     disabled={isEmpty}
                     onClick={() => dispatch({ type: 'CLEAR' })}
                     title="Clear canvas"
-                    style={actionBtn(isEmpty)}
+                    style={actionBtn(isEmpty, isDark)}
                 >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" strokeWidth="2.2"
@@ -167,9 +170,11 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
                     opacity:      isEmpty ? 0.4 : 1,
                     border:       'none',
                     background:   isEmpty
-                        ? 'rgba(0,0,0,0.1)'
+                        ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)')
                         : 'var(--color-primary-600, #4f46e5)',
-                    color:        isEmpty ? 'rgba(0,0,0,0.4)' : '#fff',
+                    color:        isEmpty
+                        ? (isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.4)')
+                        : '#fff',
                     transition:   'opacity 0.15s, background 0.15s',
                     whiteSpace:   'nowrap',
                 }}
@@ -186,19 +191,21 @@ export function Toolbar({ state, dispatch, confirmLabel, showClear, showUndo, on
     );
 }
 
-function actionBtn(disabled) {
+function actionBtn(disabled, isDark) {
     return {
-        width:         '30px',
-        height:        '30px',
-        display:       'flex',
-        alignItems:    'center',
-        justifyContent:'center',
-        borderRadius:  '7px',
-        border:        '1px solid rgba(0,0,0,0.1)',
-        background:    'transparent',
-        color:         disabled ? '#d1d5db' : '#6b7280',
-        cursor:        disabled ? 'not-allowed' : 'pointer',
-        opacity:       disabled ? 0.45 : 1,
-        transition:    'color 0.12s, background 0.12s',
+        width:          '30px',
+        height:         '30px',
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+        borderRadius:   '7px',
+        border:         isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.1)',
+        background:     'transparent',
+        color:          disabled
+            ? (isDark ? 'rgba(255,255,255,0.2)' : '#d1d5db')
+            : (isDark ? 'rgba(255,255,255,0.55)' : '#6b7280'),
+        cursor:         disabled ? 'not-allowed' : 'pointer',
+        opacity:        disabled ? 0.45 : 1,
+        transition:     'color 0.12s, background 0.12s',
     };
 }

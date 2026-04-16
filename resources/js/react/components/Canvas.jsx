@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { AnimatedStroke }   from './AnimatedStroke.jsx';
 import { useCanvasPointer } from '../hooks/useCanvasPointer.js';
+import { useDarkMode }      from '../hooks/useDarkMode.js';
 
 export function Canvas({ width, height, state, dispatch }) {
+    const isDark = useDarkMode();
     const canvasRef = useRef(null);
     const rafRef    = useRef(null);
 
@@ -13,12 +15,12 @@ export function Canvas({ width, height, state, dispatch }) {
         maxWidth: state.maxWidth,
     });
 
-    // Re-render canvas whenever strokes change
+    // Re-render canvas whenever strokes or dark mode changes
     useEffect(() => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = requestAnimationFrame(() => renderCanvas());
         return () => cancelAnimationFrame(rafRef.current);
-    }, [state.strokes]);
+    }, [state.strokes, isDark]);
 
     function renderCanvas() {
         const canvas = canvasRef.current;
@@ -69,7 +71,8 @@ export function Canvas({ width, height, state, dispatch }) {
                 }}>
                     {/* Pen icon */}
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
-                         stroke="rgba(0,0,0,0.12)" strokeWidth="1.5"
+                         stroke={isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)'}
+                         strokeWidth="1.5"
                          strokeLinecap="round" strokeLinejoin="round">
                         <path d="M15.232 5.232l3.536 3.536M9 11l4-4 2 2-4 4H9v-2z"/>
                         <path d="M4 20h4l9-9-4-4-9 9v4z"/>
@@ -78,12 +81,12 @@ export function Canvas({ width, height, state, dispatch }) {
                     {/* Dashed baseline */}
                     <div style={{
                         width:        '55%',
-                        borderBottom: '2px dashed rgba(0,0,0,0.09)',
+                        borderBottom: `2px dashed ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)'}`,
                     }} />
 
                     <span style={{
                         fontSize:      '11px',
-                        color:         'rgba(0,0,0,0.18)',
+                        color:         isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.18)',
                         letterSpacing: '0.06em',
                         textTransform: 'uppercase',
                         fontFamily:    'system-ui, sans-serif',
