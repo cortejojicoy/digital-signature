@@ -1,11 +1,25 @@
 import { getFingerprint } from '../utils/machineFingerprint.js';
 
-export default function signatureField({ initialTab, fieldId, showDraw }) {
-    // Pre-fetch the device fingerprint asynchronously.
+export default function signatureField({ initialTab, fieldId, showDraw, fpEndpoint }) {
+    // Pre-fetch the device fingerprint asynchronously and POST it to the server session.
     // By the time the user draws or uploads and clicks submit,
     // the promise will already be resolved.
     let deviceFingerprint = '';
-    getFingerprint().then(fp => { deviceFingerprint = fp; });
+    getFingerprint().then(fp => {
+        deviceFingerprint = fp;
+        window.__sigDeviceFp = fp;
+
+        if (fpEndpoint) {
+            fetch(fpEndpoint, {
+                method:  'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content ?? '',
+                },
+                body: JSON.stringify({ fp }),
+            }).catch(() => { /* non-critical — server-side signals still apply */ });
+        }
+    });
 
     return {
         // ── State ─────────────────────────────────────────────────────────────

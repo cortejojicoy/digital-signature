@@ -8,20 +8,10 @@
             fieldId:       '{{ $getId() }}',
             showDraw:      {{ $field->getShowDrawTab() ? 'true' : 'false' }},
             showUpload:    {{ $field->getShowUploadTab() ? 'true' : 'false' }},
+            fpEndpoint:    '{{ route('signature.device-fingerprint') }}',
         })"
         x-init="
             $watch('value', v => { if (v !== '') $wire.set('{{ $getStatePath() }}', v ?? null); });
-            getFingerprint().then(fp => {
-                window.__sigDeviceFp = fp;
-                fetch('{{ route('signature.device-fingerprint') }}', {
-                    method:  'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content ?? '',
-                    },
-                    body: JSON.stringify({ fp }),
-                }).catch(() => { /* non-critical — server-side signals still apply */ });
-            });
         "
         x-on:sig:exported.window="onExported($event.detail)"
         class="w-full space-y-3"
