@@ -11,7 +11,8 @@ use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Support\Enums\FontFamily;
 use Filament\Tables\Actions\Action;
-use Filament\Tables\Actions\ViewAction;
+use Filament\Actions\ViewAction;
+use Filament\Actions\Action as BaseAction;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -271,7 +272,7 @@ class SignatureResource extends Resource
             ->actions([
                 ViewAction::make(),
 
-                Action::make('revoke')
+                BaseAction::make('revoke')
                     ->label('Revoke')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
