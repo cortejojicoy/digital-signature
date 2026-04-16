@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
@@ -13,6 +14,15 @@ use Kukux\DigitalSignature\Services\SignatureManager;
 class SignDocumentAction extends Action
 {
     protected array $defaultPosition = [];
+
+    protected bool $queued = false;
+
+    public function queued(bool $condition = true): static
+    {
+        $this->queued = $condition;
+
+        return $this;
+    }
 
     public static function getDefaultName(): ?string
     {
@@ -27,13 +37,15 @@ class SignDocumentAction extends Action
 
         $this->form([
             SignaturePad::make('signature_data')
-                ->label('Signature')
-                ->required(),
+                ->label('Signature'),
 
             TextInput::make('password')
                 ->label('Certificate Password')
                 ->password()
-                ->required(),
+                ->required()
+                ->hint('Protects your signing certificate')
+                ->hintIcon('heroicon-m-lock-closed')
+                ->placeholder('Enter your certificate password'),
 
             // source is set by the SignaturePad Alpine component
             Hidden::make('source')->default('draw'),
@@ -50,6 +62,18 @@ class SignDocumentAction extends Action
             $inputData = $data['signature_data'] ?? $signature_data;
             $inputPwd  = $data['password']        ?? $password;
             $inputSrc  = $data['source']          ?? $source;
+
+            if (empty($inputData)) {
+                Notification::make()
+                    ->title('Signature required')
+                    ->body('Please draw or upload your signature before submitting.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
 
             // Device fingerprint is stored in the session by the blade's
             // x-init when machineFingerprint.js resolves.
@@ -70,7 +94,11 @@ class SignDocumentAction extends Action
                 deviceFp: $inputFp,
             );
 
-            $manager->sign($signature, $inputPwd);
+            if ($this->queued) {
+                $manager->sign($signature, $inputPwd);
+            } else {
+                $manager->embedAndFinalize($signature, $inputPwd);
+            }
         });
     }
 
