@@ -3,8 +3,6 @@
 namespace Kukux\DigitalSignature\Filament\Resources;
 
 use Filament\Facades\Filament;
-use Filament\Forms\Form;
-use Filament\Infolists\Components\Grid;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
@@ -14,9 +12,9 @@ use Filament\Support\Enums\FontFamily;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\SignaturePlugin;
 
 class SignatureResource extends Resource
@@ -64,9 +62,9 @@ class SignatureResource extends Resource
     // Form (only needed for create/edit — we only support view)
     // -------------------------------------------------------------------------
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form->schema([]);
+        return $schema->schema([]);
     }
 
     // -------------------------------------------------------------------------
@@ -108,9 +106,9 @@ class SignatureResource extends Resource
                         TextEntry::make('status')
                             ->badge()
                             ->color(fn (string $state): string => match ($state) {
-                                'signed'  => 'success',
+                                'signed' => 'success',
                                 'revoked' => 'danger',
-                                default   => 'warning',
+                                default => 'warning',
                             }),
 
                         TextEntry::make('source')
@@ -148,13 +146,13 @@ class SignatureResource extends Resource
                         TextEntry::make('machine_fingerprint')
                             ->label('Device Fingerprint')
                             ->fontFamily(FontFamily::Mono)
-                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20) . '…' : '—')
+                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20).'…' : '—')
                             ->copyable(),
 
                         TextEntry::make('certificate_fingerprint')
                             ->label('Certificate Fingerprint')
                             ->fontFamily(FontFamily::Mono)
-                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20) . '…' : '—')
+                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20).'…' : '—')
                             ->placeholder('—')
                             ->copyable(),
                     ]),
@@ -193,9 +191,9 @@ class SignatureResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        'signed'  => 'success',
+                        'signed' => 'success',
                         'revoked' => 'danger',
-                        default   => 'warning',
+                        default => 'warning',
                     }),
 
                 // Capture method
@@ -223,14 +221,14 @@ class SignatureResource extends Resource
                 Tables\Filters\SelectFilter::make('status')
                     ->options([
                         'pending' => 'Pending',
-                        'signed'  => 'Signed',
+                        'signed' => 'Signed',
                         'revoked' => 'Revoked',
                     ]),
 
                 Tables\Filters\SelectFilter::make('source')
                     ->label('Capture Method')
                     ->options([
-                        'draw'   => 'Draw',
+                        'draw' => 'Draw',
                         'upload' => 'Upload',
                     ]),
             ])
@@ -246,7 +244,7 @@ class SignatureResource extends Resource
                     ->modalDescription('This signature will be marked as revoked and can no longer be used to sign documents. This cannot be undone.')
                     ->visible(fn (Signature $record): bool => ! $record->isRevoked())
                     ->action(function (Signature $record): void {
-                        app(\Kukux\DigitalSignature\Services\SignatureManager::class)->revoke($record);
+                        app(SignatureManager::class)->revoke($record);
                     }),
             ])
             ->bulkActions([
@@ -264,7 +262,7 @@ class SignatureResource extends Resource
     {
         return [
             'index' => Pages\ListSignatures::route('/'),
-            'view'  => Pages\ViewSignature::route('/{record}'),
+            'view' => Pages\ViewSignature::route('/{record}'),
         ];
     }
 
