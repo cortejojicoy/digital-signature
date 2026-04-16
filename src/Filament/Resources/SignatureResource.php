@@ -2,17 +2,16 @@
 
 namespace Kukux\DigitalSignature\Filament\Resources;
 
-use Filament\Actions\Action;
-use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Form;
 use Filament\Infolists\Components\ImageEntry;
-use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
-use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontFamily;
+use Filament\Tables\Actions\Action;
+use Filament\Tables\Actions\ViewAction;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -29,6 +28,17 @@ class SignatureResource extends Resource
     protected static ?string $model = Signature::class;
 
     protected static ?string $recordTitleAttribute = 'uuid';
+
+    // -------------------------------------------------------------------------
+    // v4/v5 compatibility — Section lives in different namespaces
+    // -------------------------------------------------------------------------
+
+    private static function sectionClass(): string
+    {
+        return class_exists(\Filament\Schemas\Components\Section::class)
+            ? \Filament\Schemas\Components\Section::class
+            : \Filament\Infolists\Components\Section::class;
+    }
 
     // -------------------------------------------------------------------------
     // Navigation — reads from the plugin instance so runtime overrides take
@@ -69,9 +79,9 @@ class SignatureResource extends Resource
     // Form — for creating new signatures
     // -------------------------------------------------------------------------
 
-    public static function form(Schema $schema): Schema
+    public static function form(Schema $form): Schema
     {
-        return $schema->schema([
+        return $form->schema([
             SignaturePad::make('signature')
                 ->label('Your Signature')
                 ->canvasWidth(600)
@@ -94,14 +104,16 @@ class SignatureResource extends Resource
     // Infolist — used by the View page
     // -------------------------------------------------------------------------
 
-    public static function infolist(Schema $schema): Schema
+    public static function infolist(Schema $infolist): Schema
     {
-        return $schema
+        $section = static::sectionClass();
+
+        return $infolist
             ->columns(3)
             ->schema([
 
                 // ── Signature image (spans left 2 columns) ────────────────────
-                Section::make()
+                $section::make()
                     ->columnSpan(2)
                     ->schema([
                         ImageEntry::make('image_path')
@@ -115,7 +127,7 @@ class SignatureResource extends Resource
                     ]),
 
                 // ── Signer + status (right column) ───────────────────────────
-                Section::make('Signer')
+                $section::make('Signer')
                     ->columnSpan(1)
                     ->schema([
                         TextEntry::make('user.name')
@@ -151,7 +163,7 @@ class SignatureResource extends Resource
                     ]),
 
                 // ── Security metadata (collapsed) ─────────────────────────────
-                Section::make('Security Metadata')
+                $section::make('Security Metadata')
                     ->columnSpanFull()
                     ->collapsed()
                     ->columns(2)
@@ -298,7 +310,7 @@ class SignatureResource extends Resource
     }
 
     // -------------------------------------------------------------------------
-    // Internal helper
+    // Internal helpers
     // -------------------------------------------------------------------------
 
     private static function plugin(): SignaturePlugin
