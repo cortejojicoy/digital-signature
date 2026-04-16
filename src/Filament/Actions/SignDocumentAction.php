@@ -3,14 +3,13 @@
 namespace Kukux\DigitalSignature\Filament\Actions;
 
 use Filament\Actions\Action;
-use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
-use Kukux\DigitalSignature\Exceptions\MachineBindingException;
-use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
+use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
 class SignDocumentAction extends Action
@@ -37,38 +36,57 @@ class SignDocumentAction extends Action
 
         $this->label('Sign Document');
 
-        $this->form([
-            SignaturePad::make('signature_data')
-                ->label('Signature'),
+        $this->form(function () {
+            $user = Auth::user();
+            $storedPassword = null;
+            $storedSignatures = [];
 
-            TextInput::make('password')
-                ->label('Certificate Password')
-                ->password()
-                ->required()
-                ->hint('Protects your signing certificate')
-                ->hintIcon('heroicon-m-lock-closed')
-                ->placeholder('Enter your certificate password'),
+            if ($user) {
+                $signatures = Signature::where('user_id', $user->id)
+                    ->whereNotNull('certificate_password')
+                    ->where('status', '!=', 'revoked')
+                    ->latest()
+                    ->get();
 
-            // source is set by the SignaturePad Alpine component
-            Hidden::make('source')->default('draw'),
-        ]);
+                foreach ($signatures as $sig) {
+                    $label = $sig->uuid.' - '.($sig->source === 'draw' ? 'Drawn' : 'Uploaded');
+                    $label .= $sig->signed_at ? ' (Signed)' : ' (Pending)';
+                    $storedSignatures[$sig->id] = $label;
+                }
 
-        $this->action(function (
-            array  $data     = [],
-            string $signature_data = '',
-            string $password       = '',
-            string $source         = 'draw',
-            $record = null,
-        ) {
-            // Support both form submission ($data) and direct call() in tests
-            $inputData = $data['signature_data'] ?? $signature_data;
-            $inputPwd  = $data['password']        ?? $password;
-            $inputSrc  = $data['source']          ?? $source;
+                $latestWithPassword = $signatures->first();
+                if ($latestWithPassword) {
+                    $storedPassword = $latestWithPassword->getCertificatePassword();
+                }
+            }
 
-            if (empty($inputData)) {
+            return [
+                Select::make('signature_id')
+                    ->label('Select Signature')
+                    ->options($storedSignatures)
+                    ->required()
+                    ->placeholder('Choose your signature')
+                    ->helperText('Select a signature that you have previously registered'),
+
+                TextInput::make('password')
+                    ->label('Certificate Password')
+                    ->password()
+                    ->required()
+                    ->default($storedPassword)
+                    ->hint('Protects your signing certificate')
+                    ->hintIcon('heroicon-m-lock-closed')
+                    ->placeholder('Enter your certificate password'),
+            ];
+        });
+
+        $this->action(function (array $data, $record = null) {
+            $signatureId = $data['signature_id'] ?? null;
+            $password = $data['password'] ?? '';
+
+            if (! $signatureId) {
                 Notification::make()
                     ->title('Signature required')
-                    ->body('Please draw or upload your signature before submitting.')
+                    ->body('Please select a signature to use.')
                     ->danger()
                     ->send();
 
@@ -77,60 +95,79 @@ class SignDocumentAction extends Action
                 return;
             }
 
-            // Device fingerprint is stored in the session by the blade's
-            // x-init when machineFingerprint.js resolves.
-            // Falls back to '' — server-side signals (UA + IP) still apply.
-            $inputFp = session()->pull('sig_device_fp', '');
+            $signature = Signature::find($signatureId);
+
+            if (! $signature || $signature->user_id !== Auth::id()) {
+                Notification::make()
+                    ->title('Invalid signature')
+                    ->body('The selected signature was not found or does not belong to you.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
+
+            if ($signature->isRevoked()) {
+                Notification::make()
+                    ->title('Signature revoked')
+                    ->body('This signature has been revoked and cannot be used.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
+
+            $certificatePassword = $signature->getCertificatePassword();
+            if (! $certificatePassword && empty($password)) {
+                Notification::make()
+                    ->title('Password required')
+                    ->body('Please enter your certificate password.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
+
+            $signingPassword = $certificatePassword ?: $password;
+            $signable = ($record instanceof Signable) ? $record : null;
 
             /** @var SignatureManager $manager */
             $manager = app(SignatureManager::class);
 
-            $signable = ($record instanceof Signable) ? $record : null;
-
-            // Build a human-readable identity string embedded inside the PNG metadata.
-            // Format: "Full Name <email@example.com>" — visible in Preview / ExifTool.
-            $user       = Auth::user();
-            $signerName = trim(
-                ($user->name  ?? '')
-                . ($user->email ? ' <' . $user->email . '>' : '')
-            );
-
             try {
-                $signature = $manager->store(
-                    userId:     Auth::id(),
-                    input:      $inputData,
-                    source:     $inputSrc,
-                    signable:   $signable,
-                    position:   $this->defaultPosition ?: null,
-                    deviceFp:   $inputFp,
-                    signerName: $signerName,
-                );
-
                 if ($this->queued) {
-                    $manager->sign($signature, $inputPwd);
+                    $manager->sign($signature, $signingPassword);
                 } else {
-                    $manager->embedAndFinalize($signature, $inputPwd);
+                    $manager->embedAndFinalize($signature, $signingPassword);
                 }
-            } catch (MachineBindingException $e) {
+
                 Notification::make()
-                    ->title('Signature rejected — wrong device')
-                    ->body('This signature image was created on a different device. Please draw a new signature on this device.')
-                    ->danger()
+                    ->title('Document signed')
+                    ->body('The document has been signed successfully.')
+                    ->success()
                     ->send();
-
-                $this->halt();
-
-                return;
             } catch (ForgedSignatureException $e) {
                 Notification::make()
-                    ->title('Invalid signature image')
-                    ->body('The uploaded image failed security verification. It may have been tampered with or does not originate from this system.')
+                    ->title('Invalid signature')
+                    ->body($e->getMessage())
                     ->danger()
                     ->send();
 
                 $this->halt();
+            } catch (\Exception $e) {
+                Notification::make()
+                    ->title('Signing failed')
+                    ->body('An error occurred while signing: '.$e->getMessage())
+                    ->danger()
+                    ->send();
 
-                return;
+                $this->halt();
             }
         });
     }
@@ -138,10 +175,10 @@ class SignDocumentAction extends Action
     public function stampAt(int $page, float $x, float $y, float $w, float $h): static
     {
         $this->defaultPosition = [
-            'page'   => $page,
-            'x'      => $x,
-            'y'      => $y,
-            'width'  => $w,
+            'page' => $page,
+            'x' => $x,
+            'y' => $y,
+            'width' => $w,
             'height' => $h,
         ];
 
