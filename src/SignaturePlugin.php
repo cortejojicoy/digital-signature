@@ -4,18 +4,19 @@ namespace Kukux\DigitalSignature;
 
 use Filament\Contracts\Plugin;
 use Filament\Panel;
-use Kukux\DigitalSignature\Filament\Pages\SignDocumentPage;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 
 class SignaturePlugin implements Plugin
 {
-    protected bool    $registerResource = true;
-    protected bool    $registerPages    = true;
+    protected bool $registerResource = true;
 
-    protected ?string $navigationIcon   = null;   // null = fall back to config
-    protected ?string $navigationGroup  = null;
-    protected ?int    $navigationSort   = null;
-    protected ?string $navigationLabel  = null;
+    protected ?string $navigationIcon = null;   // null = fall back to config
+
+    protected ?string $navigationGroup = null;
+
+    protected ?int $navigationSort = null;
+
+    protected ?string $navigationLabel = null;
 
     // -------------------------------------------------------------------------
     // Factory
@@ -44,6 +45,7 @@ class SignaturePlugin implements Plugin
     public function navigationIcon(string $icon): static
     {
         $this->navigationIcon = $icon;
+
         return $this;
     }
 
@@ -56,6 +58,7 @@ class SignaturePlugin implements Plugin
     public function navigationGroup(?string $group): static
     {
         $this->navigationGroup = $group;
+
         return $this;
     }
 
@@ -67,6 +70,7 @@ class SignaturePlugin implements Plugin
     public function navigationSort(?int $sort): static
     {
         $this->navigationSort = $sort;
+
         return $this;
     }
 
@@ -78,6 +82,7 @@ class SignaturePlugin implements Plugin
     public function navigationLabel(?string $label): static
     {
         $this->navigationLabel = $label;
+
         return $this;
     }
 
@@ -88,15 +93,7 @@ class SignaturePlugin implements Plugin
     public function withoutResource(): static
     {
         $this->registerResource = false;
-        return $this;
-    }
 
-    /**
-     * Prevent the standalone SignDocumentPage from being registered.
-     */
-    public function withoutPages(): static
-    {
-        $this->registerPages = false;
         return $this;
     }
 
@@ -119,6 +116,7 @@ class SignaturePlugin implements Plugin
     public function getNavigationSort(): ?int
     {
         $sort = $this->navigationSort ?? config('signature.resource.navigation_sort');
+
         return $sort !== null ? (int) $sort : null;
     }
 
@@ -136,10 +134,6 @@ class SignaturePlugin implements Plugin
     {
         if ($this->registerResource && config('signature.resource.enabled', true)) {
             $panel->resources([SignatureResource::class]);
-        }
-
-        if ($this->registerPages) {
-            $panel->pages([SignDocumentPage::class]);
         }
     }
 
