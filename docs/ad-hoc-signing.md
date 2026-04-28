@@ -101,6 +101,24 @@ class ContractResource extends Resource
 
 The action modal asks the user to choose one of their stored signatures and enter a certificate password if the selected signature does not already have one stored. When submitted, the action creates a new document-specific `Signature` record linked to the current `Signable` record, then signs that document.
 
+You can also mount the action as a header action on a View or Edit page — the same picker modal is rendered:
+
+```php
+use Filament\Resources\Pages\ViewRecord;
+use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;
+
+class ViewContract extends ViewRecord
+{
+    protected function getHeaderActions(): array
+    {
+        return [
+            SignDocumentAction::make()
+                ->stampAt(page: 1, x: 100, y: 650, w: 200, h: 80),
+        ];
+    }
+}
+```
+
 For non-Filament flows, make sure the signature record you finalize is associated with the target model. The service-level example below shows the most explicit way to do that in a custom ad-hoc flow.
 
 Use queued signing only when you have a worker running:
