@@ -7,6 +7,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Models\Signature;
@@ -134,17 +135,44 @@ class SignDocumentAction extends Action
                 return;
             }
 
-            $signingPassword = $certificatePassword ?: $password;
             $signable = ($record instanceof Signable) ? $record : null;
+
+            if (! $signable) {
+                Notification::make()
+                    ->title('No document selected')
+                    ->body('This action must be used from a record that implements the Signable contract.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
+
+            $signingPassword = $certificatePassword ?: $password;
 
             /** @var SignatureManager $manager */
             $manager = app(SignatureManager::class);
 
             try {
+                $disk = Storage::disk(config('signature.storage_disk'));
+                $signatureImage = 'data:image/png;base64,'.base64_encode($disk->get($signature->image_path));
+                $signer = Auth::user();
+
+                $documentSignature = $manager->store(
+                    userId: Auth::id(),
+                    input: $signatureImage,
+                    source: 'upload',
+                    signable: $signable,
+                    position: $this->defaultPosition ?: null,
+                    signerName: trim(($signer?->name ?? '').' <'.($signer?->email ?? '').'>'),
+                    certificatePassword: $signingPassword,
+                );
+
                 if ($this->queued) {
-                    $manager->sign($signature, $signingPassword);
+                    $manager->sign($documentSignature, $signingPassword);
                 } else {
-                    $manager->embedAndFinalize($signature, $signingPassword);
+                    $manager->embedAndFinalize($documentSignature, $signingPassword);
                 }
 
                 Notification::make()
