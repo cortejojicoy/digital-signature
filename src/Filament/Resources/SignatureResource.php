@@ -94,8 +94,6 @@ class SignatureResource extends Resource
                 ->label('Your Signature')
                 ->canvasWidth(600)
                 ->canvasHeight(200)
-                ->showUploadTab()
-                ->showDrawTab()
                 ->required(),
 
             TextInput::make('certificate_password')
