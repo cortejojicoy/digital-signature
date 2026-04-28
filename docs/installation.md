@@ -45,8 +45,10 @@ public function panel(Panel $panel): Panel
 ```
 
 This automatically registers:
-- **Signatures resource** — list and view all signature records in the admin panel
-- **Sign Document page** — a standalone signing page
+- **Signatures resource** — register reusable signature images and view signature records in the admin panel
+- **Sign Document actions** — actions inside the Signatures resource for signing with a registered signature
+
+Do not rely on `discoverResources()` to pick up the package resource from `vendor`. The supported setup is to register `SignaturePlugin::make()` on each Filament panel that should show the signature resource.
 
 ---
 
@@ -78,11 +80,18 @@ To hide the resource entirely (e.g. when building your own):
 SignaturePlugin::make()->withoutResource()
 ```
 
-To hide only the standalone Sign Document page:
+If you see `Plugin [signature] is not registered for panel [admin]`, check that the plugin is registered on the same panel that is rendering the resource:
 
 ```php
-SignaturePlugin::make()->withoutPages()
+// app/Providers/Filament/AdminPanelProvider.php
+use Kukux\DigitalSignature\SignaturePlugin;
+
+$panel->plugins([
+    SignaturePlugin::make(),
+]);
 ```
+
+In multi-panel apps, register the plugin on every panel that uses the package resource or actions.
 
 ---
 

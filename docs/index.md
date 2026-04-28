@@ -13,6 +13,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Model Setup](model-setup.md) | Signable interface, HasSignatures trait, model attributes |
 | [Filament Components](filament-components.md) | SignaturePlugin, SignatureResource, SignaturePad, SignatureColumn, SignDocumentAction |
 | [Signing Workflow](signing-workflow.md) | Full lifecycle, SignatureManager API, sync vs queued, events, statuses |
+| [Ad-hoc Signing](ad-hoc-signing.md) | How to sign documents from your own resources, controllers, and pages |
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
 
@@ -40,8 +41,8 @@ Register the plugin:
 ```
 
 This registers:
-- **Signatures** — full admin resource (list + view all signature records)
-- **Sign Document** — a standalone page for ad-hoc signing
+- **Signatures** — full admin resource for registering reusable signature images and viewing signature records
+- **Sign Document** — header actions inside the Signatures resource for signing with a registered signature
 
 ---
 
@@ -67,6 +68,8 @@ class Contract extends Model implements Signable
 
 ## Adding the sign action to your own resource
 
+First let users register a reusable signature in the built-in **Signatures** resource. Then add the signing action to resources whose model implements `Signable`.
+
 ```php
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
@@ -91,7 +94,9 @@ class ContractResource extends Resource
 }
 ```
 
-`SignDocumentAction` handles `ForgedSignatureException` and `MachineBindingException` automatically as Filament danger notifications — no extra try/catch needed.
+`SignDocumentAction` validates the selected signature and surfaces signing errors as Filament danger notifications.
+
+For custom controller, page, or Livewire flows, see [Ad-hoc Signing](ad-hoc-signing.md).
 
 ---
 

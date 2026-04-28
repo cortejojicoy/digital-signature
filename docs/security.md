@@ -67,7 +67,7 @@ If a conflict is found, `ForgedSignatureException` is thrown and the submission 
 SignaturePad::make('signature_data')->withoutUploadTab()
 ```
 
-**Automatic handling:** `SignDocumentAction` catches `ForgedSignatureException` and shows a "Invalid signature image" danger notification automatically. No extra code required in your resource.
+**Automatic handling:** signature registration flows should catch `ForgedSignatureException` and show a clear rejection message. `SignDocumentAction` signs with an already registered signature, so upload validation normally happens before that action is used.
 
 ---
 
@@ -247,9 +247,9 @@ Or in `config/signature.php`:
 ],
 ```
 
-### Built-in exception handling in SignDocumentAction
+### Exception handling in signing flows
 
-`SignDocumentAction` catches both exceptions automatically and shows Filament danger notifications — no extra code required in your resource:
+Signature registration can throw these exceptions while storing uploaded signature images:
 
 | Exception | Notification title |
 |---|---|
@@ -337,7 +337,7 @@ TCPDF contacts the TSA during `Output()` and embeds the `TimeStampToken` in the 
 | `MachineBindingException` | `SignatureManager::store()` | Machine lock enabled and device doesn't match (PNG or DB layer) |
 | `CertificateRevokedException` | `SignatureManager::embedAndFinalize()` | Certificate serial is on a downloaded CRL |
 
-All three extend `\RuntimeException`. `SignDocumentAction` handles `ForgedSignatureException` and `MachineBindingException` automatically as Filament notifications.
+All three extend `\RuntimeException`. `SignDocumentAction` signs with an existing signature record; custom registration flows that call `SignatureManager::store()` should handle `ForgedSignatureException` and `MachineBindingException` and show the user a clear rejection message.
 
 ---
 

@@ -4,7 +4,7 @@
 
 ## SignaturePlugin — panel plugin
 
-Registers the Signatures resource and Sign Document page on your Filament panel.
+Registers the Signatures resource on your Filament panel.
 
 ### Basic registration
 
@@ -17,6 +17,8 @@ use Kukux\DigitalSignature\SignaturePlugin;
     SignaturePlugin::make(),
 ])
 ```
+
+Register the plugin on each panel that should use the package. Avoid manually discovering the package resource from `vendor`; the plugin registers it for you.
 
 ### Fluent configuration
 
@@ -34,9 +36,6 @@ SignaturePlugin::make()
 // Hide the Signatures resource (bring your own resource):
 SignaturePlugin::make()->withoutResource()
 
-// Hide only the standalone Sign Document page:
-SignaturePlugin::make()->withoutPages()
-
 // Disable the resource via env (useful for non-admin panels):
 // SIGNATURE_RESOURCE_ENABLED=false
 ```
@@ -51,7 +50,8 @@ Registered automatically by `SignaturePlugin`. Provides a full admin interface f
 
 - Table with signature thumbnail, signer name + email, status badge, capture method, and dates
 - Per-row **View** and **Revoke** actions
-- Header **Sign Document** action (opens `SignDocumentAction` modal)
+- Header **Add Signature** action for registering a reusable signature
+- Header **Sign Document** action for signing with a registered signature
 - Filters for status and capture method
 
 ### View page
@@ -144,7 +144,9 @@ For disks that support temporary URLs (S3, etc.) the URL expires after 5 minutes
 
 ## SignDocumentAction — action
 
-A Filament action that opens a modal with a `SignaturePad` and a certificate password field, then signs the document when submitted.
+A Filament action that opens a modal where the current user selects one of their registered signatures, enters a certificate password when needed, and signs the document when submitted.
+
+Before using this action, the signer must have a stored signature record. Users can create one from the built-in **Signatures** resource, or you can create one yourself with `SignatureManager::store()`.
 
 ### In a resource header
 
@@ -158,6 +160,8 @@ protected function getHeaderActions(): array
     ];
 }
 ```
+
+Use header actions only when the page can provide a `Signable` record to the action. For document-specific signing, table row actions are usually the clearest integration.
 
 ### In a table row
 
@@ -194,15 +198,11 @@ SignDocumentAction::make()->queued()   // dispatches EmbedSignatureJob to queue
 
 ### What happens internally
 
-1. Reads `signature_data` (base64 PNG) and `password` from the submitted form
-2. Validates the signature is not empty — shows a danger notification if missing
-3. Calls `SignatureManager::store()`:
-   - Runs forgery detection (`DuplicateSignatureGuard`)
-   - Validates existing PNG metadata if uploaded (HMAC, user ID, machine fingerprint, DB record)
-   - Embeds HMAC-signed `tEXt` + XMP metadata into the PNG (signer name, email, timestamp, device fingerprint, record UUID)
-   - Saves enriched PNG to disk
-   - Creates `Signature` DB record
-4. Calls `embedAndFinalize()` (or queues `EmbedSignatureJob`):
+1. Reads `signature_id` and `password` from the submitted form
+2. Validates the selected signature belongs to the authenticated user
+3. Rejects revoked signatures
+4. Uses the stored certificate password, or the submitted password when no stored password exists
+5. Calls `embedAndFinalize()` or queues `EmbedSignatureJob`:
    - CRL check (if enabled)
    - PKCS#7 PDF signing
    - Captures signed-document hash
@@ -213,19 +213,10 @@ SignDocumentAction::make()->queued()   // dispatches EmbedSignatureJob to queue
 
 | Exception | Notification title |
 |---|---|
-| `MachineBindingException` | "Signature rejected — wrong device" |
 | `ForgedSignatureException` | "Invalid signature image" |
 
 ---
 
-## SignDocumentPage — standalone page
+## Ad-hoc signing
 
-Registered automatically by the plugin. Provides a dedicated signing page without a custom resource.
-
-Access URL: `/admin/sign-document` (or whatever your panel path is)
-
-To disable:
-
-```php
-SignaturePlugin::make()->withoutPages()
-```
+For custom resources, controllers, or pages that need to sign documents outside the built-in resource, see [Ad-hoc Signing](ad-hoc-signing.md).

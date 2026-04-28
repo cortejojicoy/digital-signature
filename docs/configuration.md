@@ -106,6 +106,8 @@ SignaturePlugin::make()
     ->navigationLabel('Document Signatures')
 ```
 
+If you manually register or discover `SignatureResource` without `SignaturePlugin::make()`, the resource falls back to these config values. The recommended setup is still to register the plugin on the panel.
+
 ---
 
 ## Metadata & machine binding

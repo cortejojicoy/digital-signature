@@ -7,7 +7,7 @@ This page covers the full lifecycle of a signature — from form submission to a
 ## Lifecycle overview
 
 ```
-User submits form (SignDocumentAction)
+User registers signature image (SignatureResource or SignatureManager::store)
       |
       v
 SignatureManager::store()
@@ -18,6 +18,9 @@ SignatureManager::store()
   - UUID generated
   - PNG metadata embedded (tEXt + XMP: signer name, machine hash, UUID)
   - Signature record created (status: pending)
+      |
+      v
+User signs a document (SignDocumentAction or custom flow)
       |
       v
 SignatureManager::embedAndFinalize()   ← called directly (synchronous default)
@@ -33,7 +36,7 @@ SignatureManager::embedAndFinalize()
   - DocumentSigned event fired
 ```
 
-By default, `SignDocumentAction` calls `embedAndFinalize()` synchronously — no queue worker is required. Opt into queued signing with `.queued()`.
+By default, `SignDocumentAction` signs with an existing registered signature and calls `embedAndFinalize()` synchronously — no queue worker is required. Opt into queued signing with `.queued()`.
 
 ---
 
