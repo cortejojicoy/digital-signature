@@ -3,13 +3,13 @@
 namespace Kukux\DigitalSignature\Filament\Actions;
 
 use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Filament\Fields\SignaturePickerField;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
@@ -37,37 +37,30 @@ class SignDocumentAction extends Action
 
         $this->label('Sign Document');
 
+        $this->modalHeading('Sign Document');
+
+        $this->modalWidth('lg');
+
         $this->form(function () {
             $user = Auth::user();
             $storedPassword = null;
-            $storedSignatures = [];
 
             if ($user) {
-                $signatures = Signature::where('user_id', $user->id)
+                $latestWithPassword = Signature::where('user_id', $user->id)
                     ->whereNotNull('certificate_password')
                     ->where('status', '!=', 'revoked')
                     ->latest()
-                    ->get();
+                    ->first();
 
-                foreach ($signatures as $sig) {
-                    $label = $sig->uuid.' - '.($sig->source === 'draw' ? 'Drawn' : 'Uploaded');
-                    $label .= $sig->signed_at ? ' (Signed)' : ' (Pending)';
-                    $storedSignatures[$sig->id] = $label;
-                }
-
-                $latestWithPassword = $signatures->first();
                 if ($latestWithPassword) {
                     $storedPassword = $latestWithPassword->getCertificatePassword();
                 }
             }
 
             return [
-                Select::make('signature_id')
+                SignaturePickerField::make('signature_id')
                     ->label('Select Signature')
-                    ->options($storedSignatures)
-                    ->required()
-                    ->placeholder('Choose your signature')
-                    ->helperText('Select a signature that you have previously registered'),
+                    ->required(),
 
                 TextInput::make('password')
                     ->label('Certificate Password')
@@ -82,7 +75,7 @@ class SignDocumentAction extends Action
 
         $this->action(function (array $data, $record = null) {
             $signatureId = $data['signature_id'] ?? null;
-            $password = $data['password'] ?? '';
+            $password    = $data['password'] ?? '';
 
             if (! $signatureId) {
                 Notification::make()
@@ -155,9 +148,9 @@ class SignDocumentAction extends Action
             $manager = app(SignatureManager::class);
 
             try {
-                $disk = Storage::disk(config('signature.storage_disk'));
+                $disk           = Storage::disk(config('signature.storage_disk'));
                 $signatureImage = 'data:image/png;base64,'.base64_encode($disk->get($signature->image_path));
-                $signer = Auth::user();
+                $signer         = Auth::user();
 
                 $documentSignature = $manager->store(
                     userId: Auth::id(),
@@ -203,10 +196,10 @@ class SignDocumentAction extends Action
     public function stampAt(int $page, float $x, float $y, float $w, float $h): static
     {
         $this->defaultPosition = [
-            'page' => $page,
-            'x' => $x,
-            'y' => $y,
-            'width' => $w,
+            'page'   => $page,
+            'x'      => $x,
+            'y'      => $y,
+            'width'  => $w,
             'height' => $h,
         ];
 
