@@ -2,6 +2,8 @@
 
 namespace Kukux\DigitalSignature\Filament\Resources;
 
+use Filament\Actions\Action as BaseAction;
+use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
@@ -9,15 +11,13 @@ use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontFamily;
-use Filament\Tables\Actions\Action;
-use Filament\Actions\ViewAction;
-use Filament\Actions\Action as BaseAction;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
@@ -37,8 +37,8 @@ class SignatureResource extends Resource
 
     private static function sectionClass(): string
     {
-        return class_exists(\Filament\Schemas\Components\Section::class)
-            ? \Filament\Schemas\Components\Section::class
+        return class_exists(Section::class)
+            ? Section::class
             : \Filament\Infolists\Components\Section::class;
     }
 
@@ -49,22 +49,28 @@ class SignatureResource extends Resource
 
     public static function getNavigationIcon(): ?string
     {
-        return static::plugin()->getNavigationIcon();
+        return static::plugin()?->getNavigationIcon()
+            ?? config('signature.resource.navigation_icon', 'heroicon-o-pencil-square');
     }
 
     public static function getNavigationGroup(): ?string
     {
-        return static::plugin()->getNavigationGroup();
+        return static::plugin()?->getNavigationGroup()
+            ?? config('signature.resource.navigation_group');
     }
 
     public static function getNavigationSort(): ?int
     {
-        return static::plugin()->getNavigationSort();
+        $sort = static::plugin()?->getNavigationSort()
+            ?? config('signature.resource.navigation_sort');
+
+        return $sort !== null ? (int) $sort : null;
     }
 
     public static function getNavigationLabel(): string
     {
-        return static::plugin()->getNavigationLabel();
+        return static::plugin()?->getNavigationLabel()
+            ?? config('signature.resource.navigation_label', 'Signatures');
     }
 
     public static function getModelLabel(): string
@@ -74,7 +80,7 @@ class SignatureResource extends Resource
 
     public static function getPluralModelLabel(): string
     {
-        return static::plugin()->getNavigationLabel();
+        return static::getNavigationLabel();
     }
 
     // -------------------------------------------------------------------------
@@ -315,9 +321,13 @@ class SignatureResource extends Resource
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    private static function plugin(): SignaturePlugin
+    private static function plugin(): ?SignaturePlugin
     {
-        /** @var SignaturePlugin */
-        return Filament::getPlugin('signature');
+        try {
+            /** @var SignaturePlugin */
+            return Filament::getPlugin('signature');
+        } catch (\LogicException) {
+            return null;
+        }
     }
 }
