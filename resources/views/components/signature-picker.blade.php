@@ -8,8 +8,11 @@
     @endphp
 
     <div
-        x-data="{ selected: '{{ $getState() ?? '' }}' }"
-        x-init="$watch('selected', v => { if (v !== null && v !== '') $wire.set('{{ $statePath }}', v); })"
+        x-data="{
+            state: $wire.entangle(@js($statePath)),
+            select(id) { this.state = id; },
+            isSelected(id) { return String(this.state ?? '') === String(id); },
+        }"
         class="w-full space-y-3"
     >
         @if ($signatures->isEmpty())
@@ -42,8 +45,8 @@
                 @endphp
                 <button
                     type="button"
-                    x-on:click="selected = '{{ $sigId }}'"
-                    x-bind:class="selected === '{{ $sigId }}'
+                    x-on:click="select(@js($sigId))"
+                    x-bind:class="isSelected(@js($sigId))
                         ? 'ring-2 ring-primary-500 border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                         : 'border-gray-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-600'"
                     class="relative flex flex-col items-center gap-2 rounded-xl border-2 p-3
@@ -83,7 +86,7 @@
 
                     {{-- Selected checkmark --}}
                     <span
-                        x-show="selected === '{{ $sigId }}'"
+                        x-show="isSelected(@js($sigId))"
                         x-cloak
                         class="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center
                                rounded-full bg-primary-500"
@@ -100,7 +103,7 @@
 
             {{-- Selected hint --}}
             <p
-                x-show="!selected"
+                x-show="!state"
                 x-cloak
                 class="text-xs text-gray-400 dark:text-gray-500"
             >
