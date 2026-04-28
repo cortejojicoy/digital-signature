@@ -19,6 +19,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Model Setup](docs/model-setup.md) | Signable interface and HasSignatures trait |
 | [Filament Components](docs/filament-components.md) | SignaturePad, SignatureColumn, SignatureResource, SignDocumentAction |
 | [Signing Workflow](docs/signing-workflow.md) | Full lifecycle and SignatureManager API |
+| [Ad-hoc Signing](docs/ad-hoc-signing.md) | Implement document signing outside a package resource |
 | [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
 | [Security](docs/security.md) | HMAC metadata, machine binding, DB cross-validation, forgery detection |
 
@@ -56,8 +57,8 @@ use Kukux\DigitalSignature\SignaturePlugin;
 ```
 
 This registers:
-- **Signatures** — a full admin resource (list + view all signature records)
-- **Sign Document** — a standalone page for ad-hoc signing
+- **Signatures** — a full admin resource for registering reusable signature images and viewing signature records
+- **Sign Document** — header actions inside the Signatures resource for signing with a registered signature
 
 ---
 
@@ -83,6 +84,8 @@ class Contract extends Model implements Signable
 
 ## Adding the Sign Action to Your Own Resource
 
+First let the signer register a reusable signature from the built-in **Signatures** resource. Then add `SignDocumentAction` to any resource whose model implements `Signable`.
+
 ```php
 use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;
 use Kukux\DigitalSignature\Filament\Columns\SignatureColumn;
@@ -104,11 +107,15 @@ class ContractResource extends Resource
 }
 ```
 
+For controller-driven or custom page flows, see [Ad-hoc Signing](docs/ad-hoc-signing.md).
+
 ---
 
 ## Built-in Signatures Admin Resource
 
 When the plugin is registered, a **Signatures** resource appears in the sidebar automatically.
+
+Register `SignaturePlugin::make()` on every Filament panel that should use the package. If a panel discovers or registers `SignatureResource` without the plugin, Filament can report `Plugin [signature] is not registered for panel [admin]`.
 
 **List page** — table of all signature records with thumbnail, signer, status, and method.  
 **View page** — full infolist showing the large signature image, signer details, security metadata.
@@ -127,8 +134,6 @@ SignaturePlugin::make()
 // Disable the resource entirely (bring your own):
 SignaturePlugin::make()->withoutResource()
 
-// Disable only the standalone sign page:
-SignaturePlugin::make()->withoutPages()
 ```
 
 ---

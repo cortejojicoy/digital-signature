@@ -99,9 +99,9 @@ class ContractResource extends Resource
 }
 ```
 
-The action modal asks the user to choose one of their stored signatures and enter a certificate password if the selected signature does not already have one stored.
+The action modal asks the user to choose one of their stored signatures and enter a certificate password if the selected signature does not already have one stored. When submitted, the action creates a new document-specific `Signature` record linked to the current `Signable` record, then signs that document.
 
-For document-specific signing, make sure the signature record you finalize is associated with the target model. The service-level example below shows the most explicit way to do that in a custom ad-hoc flow.
+For non-Filament flows, make sure the signature record you finalize is associated with the target model. The service-level example below shows the most explicit way to do that in a custom ad-hoc flow.
 
 Use queued signing only when you have a worker running:
 

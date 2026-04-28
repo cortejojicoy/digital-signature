@@ -201,8 +201,10 @@ SignDocumentAction::make()->queued()   // dispatches EmbedSignatureJob to queue
 1. Reads `signature_id` and `password` from the submitted form
 2. Validates the selected signature belongs to the authenticated user
 3. Rejects revoked signatures
-4. Uses the stored certificate password, or the submitted password when no stored password exists
-5. Calls `embedAndFinalize()` or queues `EmbedSignatureJob`:
+4. Copies the selected signature image into a new document-specific `Signature` record linked to the current `Signable` record
+5. Applies the `stampAt()` position when one is configured
+6. Uses the stored certificate password, or the submitted password when no stored password exists
+7. Calls `embedAndFinalize()` or queues `EmbedSignatureJob`:
    - CRL check (if enabled)
    - PKCS#7 PDF signing
    - Captures signed-document hash
