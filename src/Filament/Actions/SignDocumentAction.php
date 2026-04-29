@@ -3,7 +3,6 @@
 namespace Kukux\DigitalSignature\Filament\Actions;
 
 use Filament\Actions\Action;
-use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -41,41 +40,14 @@ class SignDocumentAction extends Action
 
         $this->modalWidth('lg');
 
-        $this->form(function () {
-            $user = Auth::user();
-            $storedPassword = null;
-
-            if ($user) {
-                $latestWithPassword = Signature::where('user_id', $user->id)
-                    ->whereNotNull('certificate_password')
-                    ->where('status', '!=', 'revoked')
-                    ->latest()
-                    ->first();
-
-                if ($latestWithPassword) {
-                    $storedPassword = $latestWithPassword->getCertificatePassword();
-                }
-            }
-
-            return [
-                SignaturePickerField::make('signature_id')
-                    ->label('Select Signature')
-                    ->required(),
-
-                TextInput::make('password')
-                    ->label('Certificate Password')
-                    ->password()
-                    ->required()
-                    ->default($storedPassword)
-                    ->hint('Protects your signing certificate')
-                    ->hintIcon('heroicon-m-lock-closed')
-                    ->placeholder('Enter your certificate password'),
-            ];
-        });
+        $this->form(fn () => [
+            SignaturePickerField::make('signature_id')
+                ->label('Select Signature')
+                ->required(),
+        ]);
 
         $this->action(function (array $data, $record = null) {
             $signatureId = $data['signature_id'] ?? null;
-            $password    = $data['password'] ?? '';
 
             if (! $signatureId) {
                 Notification::make()
@@ -116,10 +88,10 @@ class SignDocumentAction extends Action
             }
 
             $certificatePassword = $signature->getCertificatePassword();
-            if (! $certificatePassword && empty($password)) {
+            if (! $certificatePassword) {
                 Notification::make()
-                    ->title('Password required')
-                    ->body('Please enter your certificate password.')
+                    ->title('Certificate password missing')
+                    ->body('This signature has no stored certificate password. Re-create it from the Signatures page.')
                     ->danger()
                     ->send();
 
@@ -142,7 +114,7 @@ class SignDocumentAction extends Action
                 return;
             }
 
-            $signingPassword = $certificatePassword ?: $password;
+            $signingPassword = $certificatePassword;
 
             /** @var SignatureManager $manager */
             $manager = app(SignatureManager::class);
