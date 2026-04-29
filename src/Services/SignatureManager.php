@@ -151,6 +151,61 @@ class SignatureManager
         return $sig;
     }
 
+    /**
+     * Create a new pending Signature record for a document-signing event,
+     * reusing an already-trusted Signature owned by the signer.
+     *
+     * The source signature has already passed the upload-validation pipeline
+     * when it was first registered; re-running it here would re-check the
+     * device fingerprint against the *current* request and fail whenever the
+     * user signs from any context other than the one in which they drew the
+     * signature. That's the wrong contract for a server-side reuse: the
+     * binding we actually care about is "the authenticated user owns this
+     * signature", which we enforce explicitly below.
+     *
+     * @throws ForgedSignatureException
+     */
+    public function storeForDocument(
+        Signature $source,
+        int $signerUserId,
+        Signable $signable,
+        ?array $position = null,
+    ): Signature {
+        if ((int) $source->user_id !== $signerUserId) {
+            throw new ForgedSignatureException(
+                'You can only sign documents with a signature registered to your own account.'
+            );
+        }
+
+        if ($source->isRevoked()) {
+            throw new ForgedSignatureException(
+                'This signature has been revoked and can no longer be used.'
+            );
+        }
+
+        $documentHash = $this->documentIntegrity->hash($signable->getSignablePdfPath());
+
+        $sig = Signature::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $signerUserId,
+            'image_path' => $source->image_path,
+            'image_hash' => $source->image_hash,
+            'document_hash' => $documentHash,
+            'machine_fingerprint' => $source->machine_fingerprint,
+            'source' => $source->source,
+            'status' => 'pending',
+            'signable_type' => get_class($signable),
+            'signable_id' => $signable->getSignableId(),
+            'certificate_password' => $source->getCertificatePassword(),
+        ]);
+
+        if ($position) {
+            SignaturePosition::create(array_merge(['signature_id' => $sig->id], $position));
+        }
+
+        return $sig;
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
