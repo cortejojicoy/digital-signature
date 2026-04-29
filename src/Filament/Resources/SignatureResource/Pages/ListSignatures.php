@@ -6,7 +6,6 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
-use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\SignatureManager;
@@ -60,11 +59,6 @@ class ListSignatures extends ListRecords
                         ->success()
                         ->send();
                 }),
-
-            // ── Sign Document ─────────────────────────────────────────────────
-            SignDocumentAction::make()
-                ->label('Sign Document')
-                ->icon('heroicon-o-pencil-square'),
         ];
     }
 }
