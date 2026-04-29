@@ -4,6 +4,8 @@ namespace Kukux\DigitalSignature;
 
 use Filament\Contracts\Plugin;
 use Filament\Panel;
+use Filament\Support\Assets\Js;
+use Filament\Support\Facades\FilamentAsset;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 
 class SignaturePlugin implements Plugin
@@ -135,6 +137,10 @@ class SignaturePlugin implements Plugin
         if ($this->registerResource && config('signature.resource.enabled', true)) {
             $panel->resources([SignatureResource::class]);
         }
+
+        FilamentAsset::register([
+            Js::make('signature-plugin', __DIR__ . '/../resources/dist/signature.js'),
+        ], 'kukux/digital-signature');
     }
 
     public function boot(Panel $panel): void
