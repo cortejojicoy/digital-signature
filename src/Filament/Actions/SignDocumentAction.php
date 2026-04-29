@@ -5,7 +5,6 @@ namespace Kukux\DigitalSignature\Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePickerField;
@@ -47,6 +46,20 @@ class SignDocumentAction extends Action
         ]);
 
         $this->action(function (array $data, $record = null) {
+            $userId = Auth::id();
+
+            if (! $userId) {
+                Notification::make()
+                    ->title('Not authenticated')
+                    ->body('You must be logged in to sign a document.')
+                    ->danger()
+                    ->send();
+
+                $this->halt();
+
+                return;
+            }
+
             $signatureId = $data['signature_id'] ?? null;
 
             if (! $signatureId) {
@@ -63,10 +76,10 @@ class SignDocumentAction extends Action
 
             $signature = Signature::find($signatureId);
 
-            if (! $signature || $signature->user_id !== Auth::id()) {
+            if (! $signature || (int) $signature->user_id !== (int) $userId) {
                 Notification::make()
-                    ->title('Invalid signature')
-                    ->body('The selected signature was not found or does not belong to you.')
+                    ->title('Signature not yours')
+                    ->body('You can only use signatures registered to your own account.')
                     ->danger()
                     ->send();
 
@@ -87,8 +100,9 @@ class SignDocumentAction extends Action
                 return;
             }
 
-            $certificatePassword = $signature->getCertificatePassword();
-            if (! $certificatePassword) {
+            $signingPassword = $signature->getCertificatePassword();
+
+            if (! $signingPassword) {
                 Notification::make()
                     ->title('Certificate password missing')
                     ->body('This signature has no stored certificate password. Re-create it from the Signatures page.')
@@ -114,24 +128,15 @@ class SignDocumentAction extends Action
                 return;
             }
 
-            $signingPassword = $certificatePassword;
-
             /** @var SignatureManager $manager */
             $manager = app(SignatureManager::class);
 
             try {
-                $disk           = Storage::disk(config('signature.storage_disk'));
-                $signatureImage = 'data:image/png;base64,'.base64_encode($disk->get($signature->image_path));
-                $signer         = Auth::user();
-
-                $documentSignature = $manager->store(
-                    userId: Auth::id(),
-                    input: $signatureImage,
-                    source: 'upload',
+                $documentSignature = $manager->storeForDocument(
+                    source: $signature,
+                    signerUserId: (int) $userId,
                     signable: $signable,
                     position: $this->defaultPosition ?: null,
-                    signerName: trim(($signer?->name ?? '').' <'.($signer?->email ?? '').'>'),
-                    certificatePassword: $signingPassword,
                 );
 
                 if ($this->queued) {
@@ -147,7 +152,7 @@ class SignDocumentAction extends Action
                     ->send();
             } catch (ForgedSignatureException $e) {
                 Notification::make()
-                    ->title('Invalid signature')
+                    ->title('Signature rejected')
                     ->body($e->getMessage())
                     ->danger()
                     ->send();
