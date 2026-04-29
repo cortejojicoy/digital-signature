@@ -5,15 +5,17 @@ import { mountIsland, unmountIsland } from './react/SignaturePadIsland.jsx';
 
 // ── Alpine plugin registration ───────────────────────────────────────────────
 
-/**
- * Usage in app:
- *   import SignaturePlugin from '@conduit/signature';
- *   Alpine.plugin(SignaturePlugin);
- */
 export default function SignaturePlugin(Alpine) {
     Alpine.data('signatureField',   signatureField);
     Alpine.data('signaturePreview', signaturePreview);
 }
+
+// Auto-register when bundled and loaded directly (Filament asset).
+document.addEventListener('alpine:init', () => {
+    if (window.Alpine) {
+        window.Alpine.plugin(SignaturePlugin);
+    }
+});
 
 // ── React island bootstrap ───────────────────────────────────────────────────
 
