@@ -1,0 +1,17 @@
+{
+    "name": "@kukux/digital-signature",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "build": "node esbuild.config.js",
+        "dev": "node esbuild.config.js --watch"
+    },
+    "dependencies": {
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1"
+    },
+    "devDependencies": {
+        "esbuild": "^0.24.0"
+    }
+}
