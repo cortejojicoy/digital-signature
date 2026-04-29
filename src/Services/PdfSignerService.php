@@ -21,6 +21,26 @@ class PdfSignerService
             position:  $position,
             certData:  $certData,
             reason:    'Signed via '.config('app.name'),
+            qrPayload: $this->buildQrPayload($signature),
         );
+    }
+
+    private function buildQrPayload(Signature $signature): string
+    {
+        $signer = $signature->user;
+        $appUrl = rtrim((string) config('app.url'), '/');
+
+        $lines = [
+            'App: '.config('app.name'),
+            'Signer: '.($signer?->name ?? 'Unknown').' <'.($signer?->email ?? '').'>',
+            'Signature: '.$signature->uuid,
+            'Signed: '.now()->toIso8601String(),
+        ];
+
+        if ($appUrl !== '') {
+            $lines[] = 'Verify: '.$appUrl.'/signatures/'.$signature->uuid;
+        }
+
+        return implode("\n", $lines);
     }
 }
