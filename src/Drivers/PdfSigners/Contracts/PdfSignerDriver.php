@@ -14,5 +14,6 @@ interface PdfSignerDriver
         array  $position,
         array  $certData,
         string $reason,
+        string $qrPayload = '',
     ): string;
 }
