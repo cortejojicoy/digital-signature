@@ -32,10 +32,23 @@ class SignaturePickerField extends Field
 
     public function getSignatureImageUrl(Signature $signature): string
     {
-        try {
-            return Storage::disk(config('signature.storage_disk'))->url($signature->image_path);
-        } catch (\Exception) {
+        $disk = Storage::disk(config('signature.storage_disk'));
+
+        if (! $signature->image_path || ! $disk->exists($signature->image_path)) {
             return '';
+        }
+
+        try {
+            return $disk->temporaryUrl(
+                $signature->image_path,
+                now()->addMinutes(config('signature.preview_url_ttl', 5)),
+            );
+        } catch (\Throwable) {
+            try {
+                return $disk->url($signature->image_path);
+            } catch (\Throwable) {
+                return '';
+            }
         }
     }
 }
