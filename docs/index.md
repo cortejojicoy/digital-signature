@@ -14,6 +14,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Filament Components](filament-components.md) | SignaturePlugin, SignatureResource, SignaturePad, SignatureColumn, SignDocumentAction |
 | [Signing Workflow](signing-workflow.md) | Full lifecycle, SignatureManager API, sync vs queued, events, statuses |
 | [Ad-hoc Signing](ad-hoc-signing.md) | How to sign documents from your own resources, controllers, and pages |
+| [On-Demand PDF Signing](on-demand-pdf-signing.md) | Signing records whose PDF is generated (DomPDF, etc.), not stored |
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
 
