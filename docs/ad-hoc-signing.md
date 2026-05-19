@@ -45,7 +45,11 @@ class Contract extends Model implements Signable
 
 ## Register Signatures
 
-The built-in **Signatures** resource lets users add a signature image and certificate password. That creates a reusable `Signature` record for the current user.
+The built-in **Signatures** resource lets users add a signature image and certificate password. That creates a reusable (primary) `Signature` record for the current user.
+
+> **Each user is limited to a single active primary signature.** Attempting to create a second one — whether through the UI or programmatically via `SignatureManager::store()` without a `$signable` — throws `Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException`. The user must revoke the existing signature first. Document-specific signature records created during signing (i.e. with a `signable`) are not counted against this limit.
+>
+> Because of this limit, the `SignaturePickerField` automatically pre-selects the user's single primary signature when the `Sign Document` modal opens — the user only needs to confirm.
 
 If you disabled the built-in resource, create the signature yourself with `SignatureManager::store()`:
 
@@ -99,7 +103,7 @@ class ContractResource extends Resource
 }
 ```
 
-The action modal asks the user to choose one of their stored signatures and enter a certificate password if the selected signature does not already have one stored. When submitted, the action creates a new document-specific `Signature` record linked to the current `Signable` record, then signs that document.
+The action modal opens with the user's primary signature **already selected** — they confirm rather than choose, since each user has only one. The action then creates a new document-specific `Signature` record linked to the current `Signable` record, copying the certificate password from the primary signature, and signs the document.
 
 You can also mount the action as a header action on a View or Edit page — the same picker modal is rendered:
 
