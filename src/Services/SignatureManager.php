@@ -143,6 +143,10 @@ class SignatureManager
             : null;
 
         // ── 9. Create record (UUID was already embedded in the PNG above) ─────
+        // Primary (no-signable) records are immediately usable; only
+        // document-signing records go through the pending → signed lifecycle.
+        $status = $signable === null ? 'active' : 'pending';
+
         $sig = Signature::create([
             'uuid' => $uuid,
             'user_id' => $userId,
@@ -151,7 +155,7 @@ class SignatureManager
             'document_hash' => $documentHash,
             'machine_fingerprint' => $machineFingerprint,
             'source' => $source,
-            'status' => 'pending',
+            'status' => $status,
             'signable_type' => $signable ? get_class($signable) : null,
             'signable_id' => $signable?->getSignableId(),
             'certificate_password' => $certificatePassword,

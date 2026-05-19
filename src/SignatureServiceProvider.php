@@ -10,6 +10,7 @@ use Kukux\DigitalSignature\Drivers\PdfSigners\FpdiDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\TcpdfDriver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
+use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
@@ -81,6 +82,14 @@ class SignatureServiceProvider extends ServiceProvider
         Route::post('/signature/device-fingerprint', [DeviceFingerprintController::class, 'store'])
             ->middleware(['web'])
             ->name('signature.device-fingerprint');
+
+        // Signed-URL endpoint that streams signature images from the (typically
+        // private) storage disk. The `signed` middleware enforces the URL's
+        // HMAC + expiry — see Signature::getTemporaryImageUrl() for the
+        // generator side.
+        Route::get('/signature/assets/{signature:uuid}', [SignatureAssetController::class, 'show'])
+            ->middleware(['web', 'signed'])
+            ->name('signature.asset');
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
