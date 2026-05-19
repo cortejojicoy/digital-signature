@@ -95,8 +95,14 @@ class SignatureServiceProvider extends ServiceProvider
                 __DIR__ . '/../resources/views' => resource_path('views/vendor/signature'),
             ], 'signature-views');
 
+            // Publish the bundled JS to public/vendor/digital-signature/.
+            // Filament's own asset pipeline (php artisan filament:assets) handles
+            // this automatically via FilamentAsset::register() in SignaturePlugin —
+            // this publish tag is the manual fallback for projects that don't run
+            // filament:assets (e.g. when serving the JS directly without the
+            // panel's bundler integration).
             $this->publishes([
-                __DIR__ . '/../public' => public_path('vendor/signature'),
+                __DIR__ . '/../resources/dist' => public_path('vendor/digital-signature'),
             ], 'signature-assets');
         }
     }
