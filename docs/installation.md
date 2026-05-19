@@ -4,7 +4,7 @@
 
 - PHP 8.2+ with `ext-openssl` and `ext-gd`
 - Laravel 11 or 12
-- Filament 4 or 5
+- Filament 3, 4, or 5
 
 ---
 
@@ -23,6 +23,14 @@ php artisan vendor:publish --tag=signature-migrations
 php artisan vendor:publish --tag=signature-config
 php artisan migrate
 ```
+
+Then publish the plugin's JS bundle so the signature pad and picker components work in the browser:
+
+```bash
+php artisan filament:assets
+```
+
+`filament:assets` reads the asset registered via `FilamentAsset::register()` in `SignaturePlugin` and links it under `public/js/filament/kukux/digital-signature/`. Run it again after every `composer update` of this package so the published JS stays in sync with the installed version.
 
 ---
 
@@ -107,9 +115,16 @@ php artisan queue:work
 
 ## 6. Publish views and assets (optional)
 
-Only needed if you want to customise the Blade templates or override compiled JS/CSS.
+Customise the Blade templates by publishing them into your app's view directory:
 
 ```bash
 php artisan vendor:publish --tag=signature-views
+```
+
+To copy the compiled JS into `public/vendor/digital-signature/` (instead of letting Filament symlink it via `filament:assets`), use:
+
+```bash
 php artisan vendor:publish --tag=signature-assets
 ```
+
+This is only needed when you're serving the JS directly outside Filament's asset pipeline — most projects should use `php artisan filament:assets` from step 2 instead. If you publish manually, re-run this command after every `composer update` of this package.

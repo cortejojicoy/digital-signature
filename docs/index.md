@@ -27,6 +27,7 @@ composer require kukux/digital-signature
 php artisan vendor:publish --tag=signature-migrations
 php artisan vendor:publish --tag=signature-config
 php artisan migrate
+php artisan filament:assets
 ```
 
 Register the plugin:
