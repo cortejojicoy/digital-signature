@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 class Signature extends Model
 {
@@ -65,6 +67,17 @@ class Signature extends Model
         return $query->where('user_id', $userId)->primary()->active();
     }
 
+    /**
+     * "Active" means a registered, reusable primary signature ready to sign
+     * documents. Only primary records (signable_id IS NULL) ever reach this
+     * status; document-signing records go pending → signed → (optionally)
+     * revoked instead.
+     */
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
+    }
+
     public function isPending(): bool
     {
         return $this->status === 'pending';
@@ -78,6 +91,44 @@ class Signature extends Model
     public function isRevoked(): bool
     {
         return $this->status === 'revoked';
+    }
+
+    public function isPrimary(): bool
+    {
+        return $this->signable_id === null;
+    }
+
+    /**
+     * Build a short-lived URL the browser can use to render this signature's
+     * image. Cloud drivers (s3, r2, gcs) sign their own URLs natively; local
+     * and other no-temporary-URL drivers fall back to a signed route handled
+     * by SignatureAssetController.
+     *
+     * Pass $ttlMinutes when you need a longer window than the configured
+     * `signature.preview_url_ttl` default (e.g. for download links).
+     */
+    public function getTemporaryImageUrl(?int $ttlMinutes = null): ?string
+    {
+        if (! $this->image_path) {
+            return null;
+        }
+
+        $ttl = $ttlMinutes ?? (int) config('signature.preview_url_ttl', 5);
+        $expires = now()->addMinutes($ttl);
+
+        try {
+            return Storage::disk(config('signature.storage_disk'))
+                ->temporaryUrl($this->image_path, $expires);
+        } catch (\RuntimeException) {
+            // Driver doesn't support native temporary URLs (e.g. local).
+            // Fall through to the signed-route fallback below.
+        }
+
+        return URL::temporarySignedRoute(
+            'signature.asset',
+            $expires,
+            ['signature' => $this->uuid],
+        );
     }
 
     public function getCertificatePassword(): ?string

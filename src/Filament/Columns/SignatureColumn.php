@@ -2,10 +2,8 @@
 
 namespace Kukux\DigitalSignature\Filament\Columns;
 
-use Kukux\DigitalSignature\Models\Signature;
 use Filament\Tables\Columns\Column;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Storage;
 
 class SignatureColumn extends Column
 {
@@ -35,13 +33,7 @@ class SignatureColumn extends Column
             ? $record->latestSignature()
             : ($record->signature ?? null);
 
-        if (!$sig || !$sig->image_path) return null;
-
-        $disk = Storage::disk(config('signature.storage_disk'));
-
-        return method_exists($disk, 'temporaryUrl')
-            ? $disk->temporaryUrl($sig->image_path, now()->addMinutes(5))
-            : $disk->url($sig->image_path);
+        return $sig?->getTemporaryImageUrl();
     }
 
     public function getStatusBadge(Model $record): ?string
