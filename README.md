@@ -29,7 +29,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 - PHP 8.2+ with `ext-openssl` and `ext-gd`
 - Laravel 11 or 12
-- Filament 4 or 5
+- Filament 3, 4, or 5
 
 ---
 
@@ -40,7 +40,10 @@ composer require kukux/digital-signature
 php artisan vendor:publish --tag=signature-migrations
 php artisan vendor:publish --tag=signature-config
 php artisan migrate
+php artisan filament:assets
 ```
+
+`filament:assets` publishes the plugin's JS bundle (signature pad + picker) so it's reachable from the panel — re-run it after every `composer update` of this package.
 
 Register the plugin in your panel provider:
 
