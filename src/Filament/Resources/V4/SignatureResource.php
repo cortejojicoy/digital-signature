@@ -307,6 +307,21 @@ class SignatureResource extends Resource
     }
 
     // -------------------------------------------------------------------------
+    // Authorization — enforce one active primary signature per user
+    // -------------------------------------------------------------------------
+
+    public static function canCreate(): bool
+    {
+        $userId = auth()->id();
+
+        if (! $userId) {
+            return false;
+        }
+
+        return ! Signature::primaryActiveFor((int) $userId)->exists();
+    }
+
+    // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
 
