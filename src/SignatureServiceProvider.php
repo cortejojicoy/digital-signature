@@ -8,6 +8,7 @@ use Kukux\DigitalSignature\Drivers\Certificates\CfsslDriver;
 use Kukux\DigitalSignature\Drivers\Certificates\OpenSslDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\FpdiDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\TcpdfDriver;
+use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
@@ -22,6 +23,10 @@ class SignatureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // Alias the canonical SignatureResource to the v3/v4 implementation BEFORE
+        // anything references the canonical name (panel registration, plugin, etc.).
+        ResourceResolver::registerAlias();
+
         $this->mergeConfigFrom(__DIR__ . '/../config/signature.php', 'signature');
 
         $this->app->singleton(CertificateService::class, function () {
