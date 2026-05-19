@@ -1,0 +1,322 @@
+<?php
+
+namespace Kukux\DigitalSignature\Filament\Resources\V4;
+
+use Filament\Actions\Action as BaseAction;
+use Filament\Actions\ViewAction;
+use Filament\Facades\Filament;
+use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\ImageEntry;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontFamily;
+use Filament\Tables\Columns\ImageColumn;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
+use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
+use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Services\SignatureManager;
+use Kukux\DigitalSignature\SignaturePlugin;
+
+/**
+ * Filament v4 / v5 implementation. The package's service provider class_aliases
+ * the canonical Kukux\DigitalSignature\Filament\Resources\SignatureResource
+ * to either this class or the V3 variant, depending on the installed Filament
+ * major version detected at boot.
+ */
+class SignatureResource extends Resource
+{
+    protected static ?string $model = Signature::class;
+
+    protected static ?string $recordTitleAttribute = 'uuid';
+
+    // -------------------------------------------------------------------------
+    // Navigation — reads from the plugin instance so runtime overrides take
+    // effect without needing to extend/republish this class.
+    // -------------------------------------------------------------------------
+
+    public static function getNavigationIcon(): ?string
+    {
+        return static::plugin()?->getNavigationIcon()
+            ?? config('signature.resource.navigation_icon', 'heroicon-o-pencil-square');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return static::plugin()?->getNavigationGroup()
+            ?? config('signature.resource.navigation_group');
+    }
+
+    public static function getNavigationSort(): ?int
+    {
+        $sort = static::plugin()?->getNavigationSort()
+            ?? config('signature.resource.navigation_sort');
+
+        return $sort !== null ? (int) $sort : null;
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return static::plugin()?->getNavigationLabel()
+            ?? config('signature.resource.navigation_label', 'Signatures');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return 'Signature';
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return static::getNavigationLabel();
+    }
+
+    // -------------------------------------------------------------------------
+    // Form — for creating new signatures
+    // -------------------------------------------------------------------------
+
+    public static function form(Schema $form): Schema
+    {
+        return $form->components([
+            SignaturePad::make('signature')
+                ->label('Your Signature')
+                ->canvasWidth(600)
+                ->canvasHeight(200)
+                ->required(),
+
+            TextInput::make('certificate_password')
+                ->label('Certificate Password')
+                ->password()
+                ->required()
+                ->hint('Protects your signing certificate')
+                ->hintIcon('heroicon-m-lock-closed')
+                ->placeholder('Enter your certificate password'),
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Infolist — used by the View page
+    // -------------------------------------------------------------------------
+
+    public static function infolist(Schema $infolist): Schema
+    {
+        return $infolist
+            ->columns(3)
+            ->components([
+
+                // ── Signature image (spans left 2 columns) ────────────────────
+                Section::make()
+                    ->columnSpan(2)
+                    ->schema([
+                        ImageEntry::make('image_path')
+                            ->label('Signature Image')
+                            ->disk(config('signature.storage_disk'))
+                            ->height(160)
+                            ->extraImgAttributes([
+                                'class' => 'object-contain mx-auto dark:invert dark:brightness-90',
+                                'style' => 'background:white;border-radius:8px;padding:10px;max-width:480px;',
+                            ]),
+                    ]),
+
+                // ── Signer + status (right column) ───────────────────────────
+                Section::make('Signer')
+                    ->columnSpan(1)
+                    ->schema([
+                        TextEntry::make('user.name')
+                            ->label('Name')
+                            ->placeholder('—'),
+
+                        TextEntry::make('user.email')
+                            ->label('Email')
+                            ->placeholder('—'),
+
+                        TextEntry::make('status')
+                            ->badge()
+                            ->color(fn (string $state): string => match ($state) {
+                                'signed' => 'success',
+                                'revoked' => 'danger',
+                                default => 'warning',
+                            }),
+
+                        TextEntry::make('source')
+                            ->label('Capture Method')
+                            ->badge()
+                            ->formatStateUsing(fn (string $state): string => ucfirst($state))
+                            ->color(fn (string $state): string => $state === 'draw' ? 'info' : 'primary'),
+
+                        TextEntry::make('signed_at')
+                            ->label('Signed At')
+                            ->dateTime()
+                            ->placeholder('Not yet signed'),
+
+                        TextEntry::make('created_at')
+                            ->label('Registered')
+                            ->dateTime(),
+                    ]),
+
+                // ── Security metadata (collapsed) ─────────────────────────────
+                Section::make('Security Metadata')
+                    ->columnSpanFull()
+                    ->collapsed()
+                    ->columns(2)
+                    ->schema([
+                        TextEntry::make('uuid')
+                            ->label('Record ID')
+                            ->fontFamily(FontFamily::Mono)
+                            ->copyable(),
+
+                        TextEntry::make('image_hash')
+                            ->label('Image Hash (SHA-256)')
+                            ->fontFamily(FontFamily::Mono)
+                            ->copyable(),
+
+                        TextEntry::make('machine_fingerprint')
+                            ->label('Device Fingerprint')
+                            ->fontFamily(FontFamily::Mono)
+                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20).'…' : '—')
+                            ->copyable(),
+
+                        TextEntry::make('certificate_fingerprint')
+                            ->label('Certificate Fingerprint')
+                            ->fontFamily(FontFamily::Mono)
+                            ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20).'…' : '—')
+                            ->placeholder('—')
+                            ->copyable(),
+                    ]),
+
+            ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Table — used by the List page
+    // -------------------------------------------------------------------------
+
+    public static function table(Table $table): Table
+    {
+        return $table
+            ->defaultSort('created_at', 'desc')
+            ->columns([
+
+                // Signature thumbnail
+                ImageColumn::make('image_path')
+                    ->label('Signature')
+                    ->disk(config('signature.storage_disk'))
+                    ->height(32)
+                    ->width(90)
+                    ->extraImgAttributes([
+                        'class' => 'object-contain dark:invert dark:brightness-90',
+                        'style' => 'background:white;border-radius:4px;padding:2px;',
+                    ]),
+
+                // Signer
+                TextColumn::make('user.name')
+                    ->label('Signer')
+                    ->searchable()
+                    ->description(fn (Signature $record): string => $record->user?->email ?? ''),
+
+                // Status badge
+                TextColumn::make('status')
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
+                        'signed' => 'success',
+                        'revoked' => 'danger',
+                        default => 'warning',
+                    }),
+
+                // Capture method
+                TextColumn::make('source')
+                    ->label('Method')
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
+                    ->color(fn (string $state): string => $state === 'draw' ? 'info' : 'primary'),
+
+                // Dates
+                TextColumn::make('signed_at')
+                    ->label('Signed')
+                    ->dateTime()
+                    ->placeholder('Pending')
+                    ->sortable(),
+
+                TextColumn::make('created_at')
+                    ->label('Created')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+            ])
+            ->filters([
+                SelectFilter::make('status')
+                    ->options([
+                        'pending' => 'Pending',
+                        'signed' => 'Signed',
+                        'revoked' => 'Revoked',
+                    ]),
+
+                SelectFilter::make('source')
+                    ->label('Capture Method')
+                    ->options([
+                        'draw' => 'Draw',
+                        'upload' => 'Upload',
+                    ]),
+            ])
+            ->recordActions([
+                ViewAction::make(),
+
+                BaseAction::make('revoke')
+                    ->label('Revoke')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading('Revoke Signature')
+                    ->modalDescription('This signature will be marked as revoked and can no longer be used to sign documents. This cannot be undone.')
+                    ->visible(fn (Signature $record): bool => ! $record->isRevoked())
+                    ->action(function (Signature $record): void {
+                        app(SignatureManager::class)->revoke($record);
+                    }),
+            ])
+            ->toolbarActions([
+                //
+            ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Pages
+    // -------------------------------------------------------------------------
+
+    public static function getPages(): array
+    {
+        return [
+            'index'  => Pages\ListSignatures::route('/'),
+            'create' => Pages\CreateSignature::route('/create'),
+            'view'   => Pages\ViewSignature::route('/{record}'),
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Query
+    // -------------------------------------------------------------------------
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with('user');
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    private static function plugin(): ?SignaturePlugin
+    {
+        try {
+            /** @var SignaturePlugin */
+            return Filament::getPlugin('signature');
+        } catch (\LogicException) {
+            return null;
+        }
+    }
+}
