@@ -115,7 +115,7 @@ class SignatureResource extends Resource
                     ->schema([
                         ImageEntry::make('image_path')
                             ->label('Signature Image')
-                            ->disk(config('signature.storage_disk'))
+                            ->getStateUsing(fn (Signature $record): ?string => $record->getTemporaryImageUrl())
                             ->height(160)
                             ->extraImgAttributes([
                                 'class' => 'object-contain mx-auto dark:invert dark:brightness-90',
@@ -138,9 +138,9 @@ class SignatureResource extends Resource
                         TextEntry::make('status')
                             ->badge()
                             ->color(fn (string $state): string => match ($state) {
-                                'signed' => 'success',
-                                'revoked' => 'danger',
-                                default => 'warning',
+                                'active', 'signed' => 'success',
+                                'revoked', 'failed' => 'danger',
+                                default => 'warning', // pending
                             }),
 
                         TextEntry::make('source')
@@ -152,7 +152,8 @@ class SignatureResource extends Resource
                         TextEntry::make('signed_at')
                             ->label('Signed At')
                             ->dateTime()
-                            ->placeholder('Not yet signed'),
+                            ->placeholder('Not yet signed')
+                            ->visible(fn (Signature $record): bool => ! $record->isPrimary()),
 
                         TextEntry::make('created_at')
                             ->label('Registered')
@@ -205,7 +206,7 @@ class SignatureResource extends Resource
                 // Signature thumbnail
                 ImageColumn::make('image_path')
                     ->label('Signature')
-                    ->disk(config('signature.storage_disk'))
+                    ->getStateUsing(fn (Signature $record): ?string => $record->getTemporaryImageUrl())
                     ->height(32)
                     ->width(90)
                     ->extraImgAttributes([
@@ -223,9 +224,9 @@ class SignatureResource extends Resource
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        'signed' => 'success',
-                        'revoked' => 'danger',
-                        default => 'warning',
+                        'active', 'signed' => 'success',
+                        'revoked', 'failed' => 'danger',
+                        default => 'warning', // pending
                     }),
 
                 // Capture method
@@ -239,7 +240,7 @@ class SignatureResource extends Resource
                 TextColumn::make('signed_at')
                     ->label('Signed')
                     ->dateTime()
-                    ->placeholder('Pending')
+                    ->placeholder(fn (Signature $record): string => $record->isPrimary() ? '—' : 'Pending')
                     ->sortable(),
 
                 TextColumn::make('created_at')
@@ -252,8 +253,9 @@ class SignatureResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->options([
+                        'active'  => 'Active',
                         'pending' => 'Pending',
-                        'signed' => 'Signed',
+                        'signed'  => 'Signed',
                         'revoked' => 'Revoked',
                     ]),
 
