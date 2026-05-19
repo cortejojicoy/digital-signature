@@ -45,7 +45,7 @@
                 <li class="py-3 flex items-center justify-between gap-4">
                     <div class="flex items-center gap-3">
                         <img
-                            src="{{ Storage::disk(config('signature.storage_disk'))->url($sig->image_path) }}"
+                            src="{{ $sig->getTemporaryImageUrl() }}"
                             class="h-8 object-contain rounded border border-gray-200 dark:border-white/10"
                             alt="sig"
                         />
