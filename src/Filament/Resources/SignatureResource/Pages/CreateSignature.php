@@ -2,8 +2,10 @@
 
 namespace Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
+use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
@@ -29,13 +31,21 @@ class CreateSignature extends CreateRecord
         $userId = auth()->user()?->id
             ?? throw new \RuntimeException('No authenticated user found.');
 
-        $signature = $signatureManager->store(
-            userId: $userId,
-            input: $data['signature'],
-            source: $data['source'] ?? 'draw',
-            certificatePassword: $data['certificate_password'] ?? null,
-        );
+        try {
+            return $signatureManager->store(
+                userId: $userId,
+                input: $data['signature'],
+                source: $data['source'] ?? 'draw',
+                certificatePassword: $data['certificate_password'] ?? null,
+            );
+        } catch (PrimarySignatureExistsException $e) {
+            Notification::make()
+                ->title('Signature already exists')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
 
-        return $signature;
+            $this->halt();
+        }
     }
 }

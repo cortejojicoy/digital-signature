@@ -6,8 +6,10 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
+use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
 class ListSignatures extends ListRecords
@@ -22,6 +24,13 @@ class ListSignatures extends ListRecords
                 ->label('Add Signature')
                 ->icon('heroicon-o-plus')
                 ->color('primary')
+                ->visible(function (): bool {
+                    $userId = auth()->id();
+
+                    return $userId
+                        ? ! Signature::primaryActiveFor((int) $userId)->exists()
+                        : false;
+                })
                 ->modalHeading('Add Signature')
                 ->modalDescription('Draw your signature or upload an image.')
                 ->modalWidth('xl')
@@ -46,12 +55,25 @@ class ListSignatures extends ListRecords
 
                     $source = str_contains($data['signature'] ?? '', 'data:image') ? 'upload' : 'draw';
 
-                    app(SignatureManager::class)->store(
-                        userId: $userId,
-                        input: $data['signature'],
-                        source: $source,
-                        certificatePassword: $data['certificate_password'] ?? null,
-                    );
+                    try {
+                        app(SignatureManager::class)->store(
+                            userId: $userId,
+                            input: $data['signature'],
+                            source: $source,
+                            certificatePassword: $data['certificate_password'] ?? null,
+                        );
+                    } catch (PrimarySignatureExistsException $e) {
+                        // Handles the race between the visibility check and submit
+                        // (e.g. user created a signature in another tab before
+                        // submitting this modal).
+                        Notification::make()
+                            ->title('Signature already exists')
+                            ->body($e->getMessage())
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
 
                     Notification::make()
                         ->title('Signature added')
