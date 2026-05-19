@@ -10,6 +10,7 @@ use Kukux\DigitalSignature\Events\DocumentSigned;
 use Kukux\DigitalSignature\Events\SignatureRevoked;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
 use Kukux\DigitalSignature\Jobs\EmbedSignatureJob;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignaturePosition;
@@ -64,6 +65,18 @@ class SignatureManager
         string $signerName = '',
         ?string $certificatePassword = null,
     ): Signature {
+        // ── 0. Single-primary-signature guard ─────────────────────────────────
+        //     A "primary" signature is one not tied to a specific Signable —
+        //     i.e. the user's reusable signature image. Each user may have at
+        //     most one active primary at a time so document-signing flows can
+        //     unambiguously default to it. Revoking the existing primary
+        //     lifts the restriction.
+        if ($signable === null && Signature::primaryActiveFor($userId)->exists()) {
+            throw new PrimarySignatureExistsException(
+                'This user already has an active signature. Revoke the existing one before creating another.'
+            );
+        }
+
         $disk = Storage::disk(config('signature.storage_disk'));
         $dir = config('signature.signatures_path');
 
