@@ -2,6 +2,7 @@
 
 namespace Kukux\DigitalSignature\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -41,6 +42,27 @@ class Signature extends Model
     public function position(): HasOne
     {
         return $this->hasOne(SignaturePosition::class);
+    }
+
+    /**
+     * Primary (reusable) signatures are not tied to a specific Signable —
+     * they are the user's registered, document-agnostic signature image.
+     * Document signing creates additional Signature rows with signable_id set;
+     * those are not "primary" and are not counted against the one-per-user limit.
+     */
+    public function scopePrimary(Builder $query): Builder
+    {
+        return $query->whereNull('signable_id');
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', '!=', 'revoked');
+    }
+
+    public function scopePrimaryActiveFor(Builder $query, int $userId): Builder
+    {
+        return $query->where('user_id', $userId)->primary()->active();
     }
 
     public function isPending(): bool
