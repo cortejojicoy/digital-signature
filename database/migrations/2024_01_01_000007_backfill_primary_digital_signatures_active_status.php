@@ -14,7 +14,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::table('signatures')
+        DB::table('digital_signatures')
             ->whereNull('signable_id')
             ->where('status', 'pending')
             ->update(['status' => 'active']);
@@ -22,7 +22,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::table('signatures')
+        DB::table('digital_signatures')
             ->whereNull('signable_id')
             ->where('status', 'active')
             ->update(['status' => 'pending']);

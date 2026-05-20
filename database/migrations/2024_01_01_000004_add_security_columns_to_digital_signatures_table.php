@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('signatures', function (Blueprint $t) {
+        Schema::table('digital_signatures', function (Blueprint $t) {
             // Unique token per signing request — used to build tamper-evident audit trails
             $t->uuid('uuid')->nullable()->unique()->after('id');
 
@@ -25,7 +25,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('signatures', function (Blueprint $t) {
+        Schema::table('digital_signatures', function (Blueprint $t) {
             $t->dropUnique(['uuid']);
             $t->dropColumn(['uuid', 'document_hash', 'signed_document_hash']);
         });

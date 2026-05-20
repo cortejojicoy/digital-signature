@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('signatures', function (Blueprint $t) {
+        Schema::table('digital_signatures', function (Blueprint $t) {
             // SHA-256 hash of (userId | userAgent | ip | deviceFingerprint).
             // Stored so you can audit which machine created a given signature
             // and enforce machine-lock validation on re-upload.
@@ -19,7 +19,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('signatures', function (Blueprint $t) {
+        Schema::table('digital_signatures', function (Blueprint $t) {
             $t->dropColumn('machine_fingerprint');
         });
     }

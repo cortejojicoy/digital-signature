@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('signature_positions', function (Blueprint $t) {
             $t->id();
-            $t->foreignId('signature_id')->constrained()->cascadeOnDelete();
+            $t->foreignId('signature_id')->constrained('digital_signatures')->cascadeOnDelete();
 
             $t->unsignedSmallInteger('page')->default(1);
             $t->float('x');       // points from left
