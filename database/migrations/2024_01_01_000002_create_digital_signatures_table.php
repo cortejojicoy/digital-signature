@@ -10,19 +10,24 @@ return new class extends Migration
     {
         Schema::create('digital_signatures', function (Blueprint $t) {
             $t->id();
+            $t->uuid('uuid')->nullable()->unique();
             $t->foreignId('user_id')->constrained()->cascadeOnDelete();
 
             // Polymorphic: any model that implements Signable
             $t->nullableMorphs('signable');
 
             $t->string('image_path');               // raw PNG stored on disk
+            $t->string('document_hash', 64)->nullable();
             $t->string('image_hash', 64);           // SHA-256 of raw image bytes
             $t->string('signed_document_path')->nullable(); // final PDF path
+            $t->string('signed_document_hash', 64)->nullable();
+            $t->string('machine_fingerprint', 64)->nullable();
 
             $t->string('source', 16)->default('draw'); // draw | upload
             $t->string('status', 16)->default('pending'); // pending | signed | revoked | failed
 
             $t->string('certificate_fingerprint', 64)->nullable();
+            $t->text('certificate_password')->nullable();
             $t->text('pades_info')->nullable();     // JSON: TSA url, subfilter, reason
 
             $t->timestamp('signed_at')->nullable();
