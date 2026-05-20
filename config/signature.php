@@ -87,6 +87,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PDF Templates
+    |--------------------------------------------------------------------------
+    | Host apps register Blade-rendered PDFs here so the plugin can offer them
+    | as targets in the placement designer and "apply signature to PDF" flows.
+    |
+    | Each entry must be a class implementing
+    | Kukux\DigitalSignature\Contracts\PdfTemplate. Templates can also be added
+    | at runtime via SignaturePlugin::make()->templates([...]) or by calling
+    | app(PdfTemplateRegistry::class)->register(...).
+    |
+    | Example:
+    |   'templates' => [
+    |       \App\Pdf\DtrTemplate::class,
+    |       \App\Pdf\PayslipTemplate::class,
+    |   ],
+    */
+    'templates' => [
+        //
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Admin Resource
     |--------------------------------------------------------------------------
     | When enabled, a SignatureResource is automatically registered on the
