@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\URL;
 
 class Signature extends Model
 {
+    protected $table = 'digital_signatures';
+
     protected $fillable = [
         'uuid',
         'user_id', 'signable_type', 'signable_id',
