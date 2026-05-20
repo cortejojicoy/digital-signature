@@ -10,6 +10,7 @@ use Kukux\DigitalSignature\Drivers\PdfSigners\FpdiDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\TcpdfDriver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
+use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
@@ -17,6 +18,7 @@ use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
 use Kukux\DigitalSignature\Security\PngMetaEmbedder;
 use Kukux\DigitalSignature\Security\SignatureMetadataService;
 use Kukux\DigitalSignature\Services\CertificateService;
+use Kukux\DigitalSignature\Pdf\PdfPageRasterizer;
 use Kukux\DigitalSignature\Services\PdfSignerService;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 use Kukux\DigitalSignature\Services\SignatureManager;
@@ -64,6 +66,12 @@ class SignatureServiceProvider extends ServiceProvider
 
         $this->app->singleton(PdfTemplateRegistry::class);
 
+        $this->app->singleton(PdfPageRasterizer::class, function () {
+            return new PdfPageRasterizer(
+                dpi: (int) config('signature.designer.dpi', 144),
+            );
+        });
+
         $this->app->singleton(SignatureManager::class, function ($app) {
             return new SignatureManager(
                 $app->make(CertificateService::class),
@@ -100,6 +108,21 @@ class SignatureServiceProvider extends ServiceProvider
         Route::get('/signature/assets/{digitalSignature:uuid}', [SignatureAssetController::class, 'show'])
             ->middleware(['web', 'signed'])
             ->name('signature.asset');
+
+        // Placement-designer endpoints. Behind the panel auth middleware
+        // because they expose template metadata and accept slot writes.
+        Route::prefix('signature/pdf-templates')
+            ->middleware(['web', 'auth'])
+            ->name('signature.pdf-templates.')
+            ->group(function () {
+                Route::get('{template}/meta', [PdfTemplateDesignerController::class, 'meta'])
+                    ->name('meta');
+                Route::get('{template}/pages/{page}', [PdfTemplateDesignerController::class, 'page'])
+                    ->whereNumber('page')
+                    ->name('page');
+                Route::post('{template}/slots/{slot}', [PdfTemplateDesignerController::class, 'save'])
+                    ->name('slot.save');
+            });
 
         if ($this->app->runningInConsole()) {
             $this->publishes([

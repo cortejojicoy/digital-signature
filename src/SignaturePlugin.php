@@ -7,6 +7,7 @@ use Filament\Panel;
 use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 
@@ -168,6 +169,11 @@ class SignaturePlugin implements Plugin
         if ($this->templates !== []) {
             app(PdfTemplateRegistry::class)->registerMany($this->templates);
         }
+
+        // Register the placement designer page so /signature-templates/{key}/design
+        // resolves on this panel. The page itself has shouldRegisterNavigation = false;
+        // host apps link to it from their own UI (e.g. a "Design layout" header action).
+        $panel->pages([PdfTemplateDesigner::class]);
 
         FilamentAsset::register([
             Js::make('signature-plugin', __DIR__ . '/../resources/dist/signature.js'),
