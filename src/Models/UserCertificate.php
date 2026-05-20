@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class UserCertificate extends Model
 {
+    protected $table = 'digital_user_certificates';
+
     protected $fillable = [
         'user_id', 
         'pfx_path', 
