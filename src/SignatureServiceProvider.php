@@ -18,6 +18,7 @@ use Kukux\DigitalSignature\Security\PngMetaEmbedder;
 use Kukux\DigitalSignature\Security\SignatureMetadataService;
 use Kukux\DigitalSignature\Services\CertificateService;
 use Kukux\DigitalSignature\Services\PdfSignerService;
+use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
 class SignatureServiceProvider extends ServiceProvider
@@ -61,6 +62,8 @@ class SignatureServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(PdfTemplateRegistry::class);
+
         $this->app->singleton(SignatureManager::class, function ($app) {
             return new SignatureManager(
                 $app->make(CertificateService::class),
@@ -77,6 +80,13 @@ class SignatureServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'signature');
+
+        // Register templates declared in config. Runtime registration via the
+        // plugin or container can add more on top of this baseline.
+        $configured = (array) config('signature.templates', []);
+        if ($configured !== []) {
+            $this->app->make(PdfTemplateRegistry::class)->registerMany($configured);
+        }
 
         // Route for receiving the browser device fingerprint and storing it in session
         Route::post('/signature/device-fingerprint', [DeviceFingerprintController::class, 'store'])

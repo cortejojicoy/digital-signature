@@ -6,7 +6,9 @@ use Filament\Contracts\Plugin;
 use Filament\Panel;
 use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
+use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
+use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 
 class SignaturePlugin implements Plugin
 {
@@ -19,6 +21,9 @@ class SignaturePlugin implements Plugin
     protected ?int $navigationSort = null;
 
     protected ?string $navigationLabel = null;
+
+    /** @var array<PdfTemplate|class-string<PdfTemplate>> */
+    protected array $templates = [];
 
     // -------------------------------------------------------------------------
     // Factory
@@ -99,6 +104,28 @@ class SignaturePlugin implements Plugin
         return $this;
     }
 
+    /**
+     * Register PdfTemplate implementations the placement designer and
+     * "apply signature to PDF" flows should know about. Stacks on top
+     * of templates already declared in config('signature.templates').
+     *
+     * @param iterable<PdfTemplate|class-string<PdfTemplate>> $templates
+     *
+     * Example:
+     *   SignaturePlugin::make()->templates([
+     *       \App\Pdf\DtrTemplate::class,
+     *       \App\Pdf\PayslipTemplate::class,
+     *   ])
+     */
+    public function templates(iterable $templates): static
+    {
+        foreach ($templates as $template) {
+            $this->templates[] = $template;
+        }
+
+        return $this;
+    }
+
     // -------------------------------------------------------------------------
     // Getters (used by SignatureResource to read resolved values)
     // -------------------------------------------------------------------------
@@ -136,6 +163,10 @@ class SignaturePlugin implements Plugin
     {
         if ($this->registerResource && config('signature.resource.enabled', true)) {
             $panel->resources([SignatureResource::class]);
+        }
+
+        if ($this->templates !== []) {
+            app(PdfTemplateRegistry::class)->registerMany($this->templates);
         }
 
         FilamentAsset::register([
