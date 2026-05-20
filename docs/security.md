@@ -54,7 +54,7 @@ If someone opens the signed PDF, edits a page, and saves it, any conforming PDF 
 
 `DuplicateSignatureGuard::check()` is called inside `SignatureManager::store()` before any record is written.
 
-Every signature image is hashed with SHA-256. Before storing a new submission, the guard queries the `signatures` table for any row where:
+Every signature image is hashed with SHA-256. Before storing a new submission, the guard queries the `digital_signatures` table for any row where:
 - `image_hash` matches the submitted image
 - `user_id` is different from the submitting user
 - `status` is `pending` or `signed`
@@ -77,8 +77,8 @@ SignaturePad::make('signature_data')->withoutUploadTab()
 
 | Column | Table | Populated when |
 |---|---|---|
-| `document_hash` | `signatures` | `store()` — before signing |
-| `signed_document_hash` | `signatures` | `embedAndFinalize()` — after signing |
+| `document_hash` | `digital_signatures` | `store()` — before signing |
+| `signed_document_hash` | `digital_signatures` | `embedAndFinalize()` — after signing |
 
 `document_hash` — SHA-256 of the original PDF at the moment the signer submitted the form.
 
@@ -104,7 +104,7 @@ if ($currentHash !== $signature->signed_document_hash) {
 
 ## 5. Unique UUID per signing request
 
-`SignatureManager::store()` generates a UUID (RFC 4122 v4) and stores it in `signatures.uuid` for every new record. The UUID is also **embedded inside the PNG metadata** (see §6 below), creating a link between the image file and its database record.
+`SignatureManager::store()` generates a UUID (RFC 4122 v4) and stores it in `digital_signatures.uuid` for every new record. The UUID is also **embedded inside the PNG metadata** (see §6 below), creating a link between the image file and its database record.
 
 ```php
 $signature = $manager->store(...);
@@ -132,7 +132,7 @@ Six `tEXt` chunks are injected at the binary PNG level:
 | `Sig-Signer-Name` | Signer's display name + email, e.g. `"Jane Doe <jane@example.com>"` |
 | `Sig-Machine-Hash` | SHA-256 of `userId\|userAgent\|deviceFp` |
 | `Sig-Timestamp` | ISO 8601 UTC datetime of embedding |
-| `Sig-Record-Id` | UUID of the `signatures` DB record |
+| `Sig-Record-Id` | UUID of the `digital_signatures` DB record |
 | `Sig-Hmac` | HMAC-SHA256 over all five values above, keyed by `APP_KEY` |
 
 The HMAC covers `userId|signerName|machineHash|timestamp|recordId`, so any tampering with any field invalidates it.
@@ -415,7 +415,7 @@ app(CrlValidator::class)->validate($certData);
 
 ## Database columns
 
-Migration `2024_01_01_000004_add_security_columns_to_signatures_table`:
+Migration `2024_01_01_000004_add_security_columns_to_digital_signatures_table`:
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|
@@ -423,7 +423,7 @@ Migration `2024_01_01_000004_add_security_columns_to_signatures_table`:
 | `document_hash` | `varchar(64)` | yes | SHA-256 of source PDF before signing |
 | `signed_document_hash` | `varchar(64)` | yes | SHA-256 of signed PDF after signing |
 
-Migration `2024_01_01_000005_add_machine_fingerprint_to_signatures_table`:
+Migration `2024_01_01_000005_add_machine_fingerprint_to_digital_signatures_table`:
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|
