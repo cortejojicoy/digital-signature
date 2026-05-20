@@ -87,7 +87,7 @@ class SignatureServiceProvider extends ServiceProvider
         // private) storage disk. The `signed` middleware enforces the URL's
         // HMAC + expiry — see Signature::getTemporaryImageUrl() for the
         // generator side.
-        Route::get('/signature/assets/{signature:uuid}', [SignatureAssetController::class, 'show'])
+        Route::get('/signature/assets/{digitalSignature:uuid}', [SignatureAssetController::class, 'show'])
             ->middleware(['web', 'signed'])
             ->name('signature.asset');
 
