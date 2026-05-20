@@ -415,18 +415,13 @@ app(CrlValidator::class)->validate($certData);
 
 ## Database columns
 
-Migration `2024_01_01_000004_add_security_columns_to_digital_signatures_table`:
+Defined in `2024_01_01_000002_create_digital_signatures_table`:
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|
 | `uuid` | `char(36)` unique | yes | RFC 4122 v4 UUID, also embedded in PNG as `Sig-Record-Id` |
 | `document_hash` | `varchar(64)` | yes | SHA-256 of source PDF before signing |
 | `signed_document_hash` | `varchar(64)` | yes | SHA-256 of signed PDF after signing |
-
-Migration `2024_01_01_000005_add_machine_fingerprint_to_digital_signatures_table`:
-
-| Column | Type | Nullable | Description |
-|---|---|---|---|
 | `machine_fingerprint` | `varchar(64)` | yes | SHA-256 of `userId\|userAgent\|deviceFp` at signing time |
 
 The `machine_fingerprint` column stores the same formula used in `Sig-Machine-Hash`, enabling the DB cross-validation layer to independently verify device binding without relying on the PNG's own HMAC.
