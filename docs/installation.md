@@ -88,6 +88,20 @@ To hide the resource entirely (e.g. when building your own):
 SignaturePlugin::make()->withoutResource()
 ```
 
+## 5. Register PDF templates (optional)
+
+If your app produces fixed-layout PDFs (DTRs, payslips, contracts) that should be sign-able through the plugin's placement designer, register them via `templates()`:
+
+```php
+SignaturePlugin::make()
+    ->templates([
+        \App\Pdf\DtrTemplate::class,
+        \App\Pdf\PayslipTemplate::class,
+    ])
+```
+
+See [PDF Templates](pdf-templates.md) for the `PdfTemplate` contract and slot definitions. This is purely additive — Signable models without a template continue to work via the ad-hoc and on-demand flows.
+
 If you see `Plugin [signature] is not registered for panel [admin]`, check that the plugin is registered on the same panel that is rendering the resource:
 
 ```php
@@ -103,7 +117,7 @@ In multi-panel apps, register the plugin on every panel that uses the package re
 
 ---
 
-## 5. Start the queue worker
+## 6. Start the queue worker
 
 By default, `SignDocumentAction` signs synchronously — no queue needed. If you opt into queued signing (`.queued()`), start a worker:
 
@@ -113,7 +127,7 @@ php artisan queue:work
 
 ---
 
-## 6. Publish views and assets (optional)
+## 7. Publish views and assets (optional)
 
 Customise the Blade templates by publishing them into your app's view directory:
 
