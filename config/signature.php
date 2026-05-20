@@ -109,6 +109,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Placement designer
+    |--------------------------------------------------------------------------
+    | The PDF Template Designer rasterizes the sample PDF at this DPI to
+    | produce the page preview. Higher = sharper but slower and larger
+    | cache files. 144 is a good balance for screen preview.
+    */
+    'designer' => [
+        'dpi' => env('SIGNATURE_DESIGNER_DPI', 144),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Admin Resource
     |--------------------------------------------------------------------------
     | When enabled, a SignatureResource is automatically registered on the
