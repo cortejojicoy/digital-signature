@@ -16,23 +16,26 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * preview rendering: drivers like `local` don't expose a public URL and
  * don't support Storage::temporaryUrl() natively.
  *
- * Route: GET /signature/assets/{signature:uuid}
+ * Route: GET /signature/assets/{digitalSignature:uuid}
+ *
+ * Parameter name is `digitalSignature` (not `signature`) because Laravel
+ * reserves `signature` as a query-string key on signed URLs for the HMAC.
  */
 class SignatureAssetController extends Controller
 {
-    public function show(Request $request, Signature $signature): StreamedResponse
+    public function show(Request $request, Signature $digitalSignature): StreamedResponse
     {
-        abort_unless($signature->image_path, 404);
+        abort_unless($digitalSignature->image_path, 404);
 
         $disk = Storage::disk(config('signature.storage_disk'));
 
-        abort_unless($disk->exists($signature->image_path), 404);
+        abort_unless($disk->exists($digitalSignature->image_path), 404);
 
         $cacheTtl = (int) config('signature.preview_url_ttl', 5) * 60;
 
         // Storage::response() returns a StreamedResponse with the file's
         // Content-Type already populated from the disk's mime resolver.
-        return $disk->response($signature->image_path, headers: [
+        return $disk->response($digitalSignature->image_path, headers: [
             'Cache-Control' => "private, max-age={$cacheTtl}",
         ]);
     }
