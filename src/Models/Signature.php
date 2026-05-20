@@ -129,7 +129,7 @@ class Signature extends Model
         return URL::temporarySignedRoute(
             'signature.asset',
             $expires,
-            ['signature' => $this->uuid],
+            ['digitalSignature' => $this->uuid],
         );
     }
 
