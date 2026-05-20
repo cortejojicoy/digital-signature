@@ -96,9 +96,7 @@ class SignatureServiceProvider extends ServiceProvider
                 __DIR__ . '/../config/signature.php' => config_path('signature.php'),
             ], 'signature-config');
 
-            $this->publishes([
-                __DIR__ . '/../database/migrations' => database_path('migrations'),
-            ], 'signature-migrations');
+            $this->publishes($this->migrationPublishMap(), 'signature-migrations');
 
             $this->publishes([
                 __DIR__ . '/../resources/views' => resource_path('views/vendor/signature'),
@@ -114,5 +112,39 @@ class SignatureServiceProvider extends ServiceProvider
                 __DIR__ . '/../resources/dist' => public_path('vendor/digital-signature'),
             ], 'signature-assets');
         }
+    }
+
+    /**
+     * Build a source-to-destination map for publishing migrations.
+     *
+     * Each migration is stamped with a fresh, sequential timestamp at publish
+     * time so the files (a) don't collide with the host app's existing
+     * migrations and (b) run after them. If a host already has a published
+     * copy (matched by suffix), the existing destination is reused so
+     * re-publishing is idempotent.
+     */
+    protected function migrationPublishMap(): array
+    {
+        $sourceDir = __DIR__ . '/../database/migrations';
+        $files = glob($sourceDir . '/*.php') ?: [];
+        sort($files);
+
+        $map = [];
+        $timestamp = time();
+
+        foreach ($files as $index => $sourcePath) {
+            $suffix = preg_replace('/^\d{4}_\d{2}_\d{2}_\d{6}_/', '', basename($sourcePath));
+
+            $existing = glob(database_path('migrations/*_' . $suffix)) ?: [];
+            if ($existing !== []) {
+                $map[$sourcePath] = $existing[0];
+                continue;
+            }
+
+            $stamp = date('Y_m_d_His', $timestamp + $index);
+            $map[$sourcePath] = database_path('migrations/' . $stamp . '_' . $suffix);
+        }
+
+        return $map;
     }
 }
