@@ -3,6 +3,7 @@
 namespace Kukux\DigitalSignature\Services;
 
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Pdf\BladePdfTemplate;
 
 /**
  * Holds the set of PdfTemplate implementations the host app has registered.
@@ -45,13 +46,44 @@ class PdfTemplateRegistry
     }
 
     /**
-     * Register many at once. Accepts a mixed array of instances and class names.
+     * Register a config-driven Blade template. Internally builds a
+     * BladePdfTemplate from the array — see that class's docblock for the
+     * accepted schema. This is the plug-and-play registration path used
+     * by config('signature.templates') entries that are arrays.
      *
-     * @param iterable<PdfTemplate|class-string<PdfTemplate>> $templates
+     * @param  array<string, mixed>  $config
+     */
+    public function registerBlade(string $key, array $config): static
+    {
+        return $this->register(BladePdfTemplate::fromConfig($key, $config));
+    }
+
+    /**
+     * Register many at once. Mixed input is supported:
+     *
+     *  - PdfTemplate instance               → registered directly
+     *  - class-string<PdfTemplate>          → resolved via container
+     *  - ['key' => 'dtr', ...config...]     → built via BladePdfTemplate::fromConfig
+     *  - 'key' => [...config...]            → built via BladePdfTemplate::fromConfig
+     *
+     * @param iterable<PdfTemplate|class-string<PdfTemplate>|array<string, mixed>> $templates
      */
     public function registerMany(iterable $templates): static
     {
-        foreach ($templates as $template) {
+        foreach ($templates as $key => $template) {
+            // Associative array (string key) → array-form Blade template
+            if (is_string($key) && is_array($template)) {
+                $this->registerBlade($key, $template);
+                continue;
+            }
+
+            // Array without a string key but with an inline 'key' field
+            if (is_array($template) && isset($template['key'])) {
+                $this->registerBlade($template['key'], $template);
+                continue;
+            }
+
+            // Instance or class name — original path
             $this->register($template);
         }
 
