@@ -37,9 +37,111 @@ A `PdfTemplate` and the underlying `Signable` model are not mutually exclusive �
 
 ---
 
-## Implementing a template
+## Registering a template (plug-and-play)
 
-A template is a small class. Example for a DTR (Daily Time Record):
+The fastest path: drop an array into `config/signature.php` pointing at a Blade view you already have. No PHP class required.
+
+```php
+// config/signature.php
+'templates' => [
+    'dtr' => [
+        'label'         => 'Daily Time Record',
+        'view'          => 'pdf.dtr',  // your existing Blade
+        'sample_data'   => ['user' => ['name' => 'Sample User']],
+        'data_resolver' => fn ($record) => ['record' => $record],
+        'slots'         => ['employee', 'in_charge'],
+    ],
+],
+```
+
+That's it. The array gets read on boot, instantiated into a `BladePdfTemplate`, and registered automatically. The plugin renders the Blade via `barryvdh/laravel-dompdf` (auto-detected); install it once if you don't have it:
+
+```bash
+composer require barryvdh/laravel-dompdf
+```
+
+### What the keys mean
+
+| Key | Required | Type | What it does |
+|---|---|---|---|
+| `label` | no | string | Human-readable name shown in the designer / signer UI. Defaults to titlecased key. |
+| `view` | **yes** | string | Blade view name (e.g. `pdf.dtr` for `resources/views/pdf/dtr.blade.php`). |
+| `sample_data` | no | array \| callable | Data passed to the Blade when rendering the sample preview. Use a callable for expensive seed data. |
+| `data_resolver` | no | `fn($record) => array` | Maps a record to the data the Blade needs at sign time. Defaults to `['record' => $record]`. |
+| `slots` | no | array | Slot definitions — see the three accepted shapes below. |
+| `renderer` | no | class-string | Custom `PdfRenderer` class if you don't want DomPDF. |
+
+### Slot shapes
+
+Three accepted shapes, mix freely:
+
+```php
+// 1) Bare keys — label auto-derived (Title Case of the key)
+'slots' => ['employee', 'in_charge'],
+
+// 2) Keyed associative entries — full control over each slot
+'slots' => [
+    'employee'  => ['label' => 'Employee', 'required' => true],
+    'in_charge' => ['label' => 'In Charge', 'required' => true],
+],
+
+// 3) Numbered list of associative entries — useful when you want a stable order
+'slots' => [
+    ['key' => 'employee',  'label' => 'Employee',  'required' => true],
+    ['key' => 'in_charge', 'label' => 'In Charge', 'required' => true],
+],
+```
+
+Each slot may also carry an initial placement (`page`, `x`, `y`, `width`, `height` in PDF points) — they seed the placement designer the first time a slot is opened. Once an admin saves coordinates via the designer, the persisted row wins.
+
+### Verifying it worked
+
+After editing config and running `php artisan config:clear`:
+
+```php
+app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class)->all();
+// → ['dtr' => Kukux\DigitalSignature\Pdf\BladePdfTemplate { … }]
+```
+
+Then visit a signature's view page — the registered templates now appear as cards.
+
+### Using a different PDF renderer
+
+DomPDF is the default. To use Browsershot, Snappy, or anything else, implement [`PdfRenderer`](../src/Pdf/Renderers/PdfRenderer.php) once and reference it in the template config:
+
+```php
+// app/Pdf/BrowsershotRenderer.php
+use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
+
+class BrowsershotRenderer implements PdfRenderer
+{
+    public function render(string $view, array $data, string $destinationPath): string
+    {
+        \Spatie\LaravelPdf\Facades\Pdf::view($view, $data)->save($destinationPath);
+        return $destinationPath;
+    }
+
+    public static function isAvailable(): bool
+    {
+        return class_exists(\Spatie\LaravelPdf\Facades\Pdf::class);
+    }
+}
+
+// config/signature.php
+'templates' => [
+    'dtr' => [
+        'view'     => 'pdf.dtr',
+        'renderer' => \App\Pdf\BrowsershotRenderer::class,
+        // …
+    ],
+],
+```
+
+---
+
+## Implementing a template (full class)
+
+When you need more than the config form gives you — conditional slots, complex data resolution, multi-source sample data — implement the contract directly. Example for a DTR (Daily Time Record):
 
 ```php
 namespace App\Pdf;
@@ -138,9 +240,9 @@ class DtrTemplate implements PdfTemplate
 
 ---
 
-## Registering a template
+## Registration paths
 
-Three places, all merge into the same registry. Pick whichever fits your project:
+Three places to register, all merge into the same registry. Each accepts the **plug-and-play array form**, **class strings**, or **PdfTemplate instances** — mix as you like.
 
 ### 1. Eager — via config
 
@@ -148,7 +250,13 @@ Three places, all merge into the same registry. Pick whichever fits your project
 // config/signature.php
 
 'templates' => [
-    \App\Pdf\DtrTemplate::class,
+    // Plug-and-play (array form)
+    'dtr' => [
+        'view'  => 'pdf.dtr',
+        'slots' => ['employee', 'in_charge'],
+    ],
+
+    // Full class (class-string form)
     \App\Pdf\PayslipTemplate::class,
 ],
 ```
@@ -163,7 +271,10 @@ Loaded by [`SignatureServiceProvider::boot()`](../src/SignatureServiceProvider.p
 ->plugins([
     \Kukux\DigitalSignature\SignaturePlugin::make()
         ->templates([
-            \App\Pdf\DtrTemplate::class,
+            'dtr' => [
+                'view'  => 'pdf.dtr',
+                'slots' => ['employee', 'in_charge'],
+            ],
             \App\Pdf\PayslipTemplate::class,
         ]),
 ])
@@ -178,13 +289,22 @@ use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 
 public function boot(): void
 {
-    app(PdfTemplateRegistry::class)->register(\App\Pdf\DtrTemplate::class);
+    $registry = app(PdfTemplateRegistry::class);
+
+    // Array form via dedicated helper
+    $registry->registerBlade('dtr', [
+        'view'  => 'pdf.dtr',
+        'slots' => ['employee', 'in_charge'],
+    ]);
+
+    // Class or instance
+    $registry->register(\App\Pdf\PayslipTemplate::class);
 }
 ```
 
 Good for package integrations or conditional registration.
 
-> Registration is **idempotent and keyed by `key()`**. Registering the same template twice replaces, doesn't duplicate.
+> Registration is **idempotent and keyed by the template key**. Registering the same key twice replaces, doesn't duplicate.
 
 ---
 
