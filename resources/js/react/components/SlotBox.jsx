@@ -17,10 +17,14 @@ export function SlotBox({
     rect,                 // { x, y, width, height } in CSS pixels
     onChange,             // (next) => void
     onSelect,             // () => void
+    onRemove,             // () => void  (optional × button when present)
     selected,
     canvasWidth,          // CSS pixels — used to clamp inside bounds
     canvasHeight,
     minSize = 24,
+    backgroundImageUrl,   // optional — when set, renders the image inside
+                          //            the box (used by the signer flow to
+                          //            preview the placed signature)
 }) {
     const ref = useRef(null);
     const [mode, setMode] = useState(null);   // 'drag' | 'resize' | null
@@ -124,6 +128,23 @@ export function SlotBox({
                 userSelect: 'none',
             }}
         >
+            {backgroundImageUrl && (
+                <img
+                    src={backgroundImageUrl}
+                    alt=""
+                    draggable={false}
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                    }}
+                />
+            )}
+
             <div style={{
                 position: 'absolute',
                 top: '2px',
@@ -133,9 +154,37 @@ export function SlotBox({
                 fontWeight: 600,
                 color: selected ? 'rgb(15 118 110)' : 'rgb(71 85 105)',
                 pointerEvents: 'none',
+                textShadow: backgroundImageUrl ? '0 1px 2px rgba(255,255,255,0.8)' : 'none',
             }}>
                 {label}
             </div>
+
+            {onRemove && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                        position: 'absolute',
+                        top: '-8px',
+                        right: '-8px',
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        border: '2px solid white',
+                        background: 'rgb(239 68 68)',
+                        color: 'white',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        cursor: 'pointer',
+                        display: selected ? 'flex' : 'none',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}
+                    aria-label="Remove placement"
+                >×</button>
+            )}
 
             <div
                 onPointerDown={beginResize}

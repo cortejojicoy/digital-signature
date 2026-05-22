@@ -3,6 +3,7 @@ import signatureField   from './alpine/signatureField.js';
 import signaturePreview from './alpine/signaturePreview.js';
 import { mountIsland, unmountIsland } from './react/SignaturePadIsland.jsx';
 import { mountDesigner, unmountDesigner } from './react/PdfDesignerIsland.jsx';
+import { mountSigner, unmountSigner } from './react/PdfSigningIsland.jsx';
 
 // ── Alpine plugin registration ───────────────────────────────────────────────
 
@@ -34,6 +35,11 @@ const ISLANDS = [
         attr:    'data-pdf-designer',
         mount:   mountDesigner,
         unmount: unmountDesigner,
+    },
+    {
+        attr:    'data-pdf-signer',
+        mount:   mountSigner,
+        unmount: unmountSigner,
     },
 ];
 
