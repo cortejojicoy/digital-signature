@@ -1,19 +1,16 @@
 {{-- View page for a single signature record.
 
-     Layout shape matches the Signature Library mockup: the existing
-     Filament infolist sits in a compact section at the top so the signer
-     metadata remains visible, and the main surface below is a card grid
-     of registered PdfTemplates this signature can be applied to.
+     Layout shape matches the Signature Library mockup: a heading at the
+     top describing the action, followed by a card grid of registered
+     PdfTemplates this signature can be applied to.
 
-     Each card mirrors the mockup's Signature Library card style — title
-     bar with a 3-dot menu, large preview area, twin metadata sections.
-     Clicking a card opens the placement designer today; once the signer
-     flow (step 5) lands, the link target switches without changing the
-     card markup. --}}
+     The page header (set by Filament from ViewRecord::getTitle()) and
+     the header actions (Sign Document, Download Image, Revoke) already
+     identify the signature and provide all the actions a user needs on
+     it — so the previous inline infolist (image / signer / security
+     metadata) is intentionally omitted here to keep focus on placement
+     and match the mockup's clean library-style layout. --}}
 <x-filament-panels::page>
-    {{-- ───── Existing infolist (compact) ────────────────────────────── --}}
-    {{ $this->infolist }}
-
     @php
         /** @var \Kukux\DigitalSignature\Services\PdfTemplateRegistry $registry */
         $registry  = app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class);
@@ -70,10 +67,10 @@
     @endphp
 
     {{-- ───── Apply this signature ─────────────────────────────────── --}}
-    <x-filament::section class="mt-6">
+    <x-filament::section>
         <x-slot name="heading">Apply this signature</x-slot>
         <x-slot name="description">
-            Pick a PDF template to place this signature on. Clicking a card opens the designer.
+            Pick a PDF template to place this signature on. Click a card to open the signer; use the menu for the placement designer.
         </x-slot>
 
         @if (empty($cards))
