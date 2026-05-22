@@ -16,6 +16,13 @@ class ListSignatures extends ListRecords
 {
     protected static string $resource = SignatureResource::class;
 
+    /**
+     * Card-grid layout replacing Filament's default table.
+     * Search, sort, filters, and pagination still flow through the
+     * resource's table() definition — only the rendering is custom.
+     */
+    protected static string $view = 'signature::filament.pages.list-signatures-library';
+
     protected function getHeaderActions(): array
     {
         return [
