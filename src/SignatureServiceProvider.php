@@ -11,6 +11,7 @@ use Kukux\DigitalSignature\Drivers\PdfSigners\TcpdfDriver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
+use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
@@ -122,6 +123,15 @@ class SignatureServiceProvider extends ServiceProvider
                     ->name('page');
                 Route::post('{template}/slots/{slot}', [PdfTemplateDesignerController::class, 'save'])
                     ->name('slot.save');
+
+                // End-user signer endpoints. Same prefix because they
+                // operate on the same template surface; subroutes are
+                // scoped by signature uuid so the URL itself encodes who
+                // is signing.
+                Route::get('{template}/sign/{signature}/meta', [PdfTemplateSignerController::class, 'meta'])
+                    ->name('signer.meta');
+                Route::post('{template}/sign/{signature}/finalize', [PdfTemplateSignerController::class, 'finalize'])
+                    ->name('signer.finalize');
             });
 
         if ($this->app->runningInConsole()) {
