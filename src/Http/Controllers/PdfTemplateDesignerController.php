@@ -39,7 +39,17 @@ class PdfTemplateDesignerController extends Controller
     {
         $tpl = $this->resolveTemplate($template);
 
-        $pages = $this->resolvePageDimensions($tpl);
+        try {
+            $pages = $this->resolvePageDimensions($tpl);
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json([
+                'error' => 'Failed to render template preview: '.$e->getMessage(),
+                'hint'  => 'Common causes: the Blade view threw, Imagick + Ghostscript not installed, '
+                         .'or the PDF renderer (DomPDF / custom) is misconfigured. '
+                         .'See storage/logs/laravel.log for the full stacktrace.',
+            ], 422);
+        }
 
         $slots = collect($tpl->slots())->map(function ($slot) use ($tpl) {
             $saved = PdfTemplateSlot::query()

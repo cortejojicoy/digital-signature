@@ -43,7 +43,22 @@ class PdfTemplateSignerController extends Controller
         $tpl = $this->resolveTemplate($template);
         $sig = $this->resolveSignature($signature);
 
-        $pages = $this->resolvePageDimensions($tpl);
+        try {
+            $pages = $this->resolvePageDimensions($tpl);
+        } catch (\Throwable $e) {
+            // Surface render/rasterize failures (missing Blade view, missing
+            // Imagick / Ghostscript, bad data in resolver, etc.) as a 422
+            // with a useful message so the React side can show it instead
+            // of a bare 500. Server logs still have the full stacktrace.
+            report($e);
+            return response()->json([
+                'error' => 'Failed to render template preview: '.$e->getMessage(),
+                'hint'  => 'Common causes: the Blade view threw, Imagick + Ghostscript not installed, '
+                         .'or the PDF renderer (DomPDF / custom) is misconfigured. '
+                         .'See storage/logs/laravel.log for the full stacktrace.',
+            ], 422);
+        }
+
         $slots = $this->resolveSlots($tpl);
 
         return response()->json([
