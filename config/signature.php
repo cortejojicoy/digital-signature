@@ -89,19 +89,40 @@ return [
     |--------------------------------------------------------------------------
     | PDF Templates
     |--------------------------------------------------------------------------
-    | Host apps register Blade-rendered PDFs here so the plugin can offer them
+    | Host apps register signable PDF templates here. The plugin uses them
     | as targets in the placement designer and "apply signature to PDF" flows.
     |
-    | Each entry must be a class implementing
-    | Kukux\DigitalSignature\Contracts\PdfTemplate. Templates can also be added
-    | at runtime via SignaturePlugin::make()->templates([...]) or by calling
-    | app(PdfTemplateRegistry::class)->register(...).
+    | Two registration styles — pick whichever fits:
     |
-    | Example:
-    |   'templates' => [
-    |       \App\Pdf\DtrTemplate::class,
-    |       \App\Pdf\PayslipTemplate::class,
-    |   ],
+    | 1) Config-only (plug-and-play). Just point at a Blade view + declare
+    |    the slots your signature lives in. Requires barryvdh/laravel-dompdf
+    |    or a custom PdfRenderer.
+    |
+    |    'templates' => [
+    |        'dtr' => [
+    |            'label'         => 'Daily Time Record',
+    |            'view'          => 'pdf.dtr',
+    |            'sample_data'   => ['user' => ['name' => 'Sample User']],
+    |            'data_resolver' => fn ($record) => ['record' => $record],
+    |            'slots'         => ['employee', 'in_charge'],
+    |            // or, with metadata:
+    |            // 'slots' => [
+    |            //     'employee'  => ['label' => 'Employee', 'required' => true],
+    |            //     'in_charge' => ['label' => 'In Charge', 'required' => true],
+    |            // ],
+    |        ],
+    |    ],
+    |
+    | 2) Full class. Implement PdfTemplate yourself when you need a custom
+    |    renderer, conditional slots, or domain-aware sample data.
+    |
+    |    'templates' => [
+    |        \App\Pdf\DtrTemplate::class,
+    |    ],
+    |
+    | Both styles can be mixed in one array. You can also add templates at
+    | runtime via SignaturePlugin::make()->templates([...]) or
+    | app(PdfTemplateRegistry::class)->register(...).
     */
     'templates' => [
         //
