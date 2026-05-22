@@ -8,7 +8,7 @@ A **PDF template** declares to the plugin that the host app produces a particula
 
 Templates are **additive**. The existing `Signable` flow ([Model Setup](model-setup.md), [Ad-hoc Signing](ad-hoc-signing.md), [On-Demand PDF Signing](on-demand-pdf-signing.md)) continues to work unchanged — templates simply give you a way to register, enumerate, and configure those signables centrally.
 
-> **Status.** Steps 1 and 4 are landed: the contract + registry + persistence (step 1) and the interactive placement designer (step 4). Sign-time auto-resolution of slot coordinates (step 2) is the next piece — until it lands, the designer writes coordinates and your own code reads them to populate a `SignaturePosition` row.
+> **Status.** Steps 1, 4, and 5 (UI) are landed: the contract + registry + persistence (step 1), the placement designer (step 4), and the end-user signer page UI with stub finalize (step 5 — Phase A). Sign-time auto-resolution of slot coordinates inside `SignatureManager` (step 2) and the production finalize wiring (step 5 — Phase B) are next.
 
 ---
 
@@ -324,19 +324,73 @@ The `SlotDefinition::$defaultX/Y/...` fields still serve as the initial position
 
 ---
 
+## The signer page
+
+In addition to the admin designer, the plugin ships an end-user **signer page** — the SignFlow-style view where a user drops their signature onto a target PDF and clicks "Finish & Save".
+
+### URL pattern
+
+```
+/<panel-path>/signature-templates/{templateKey}/sign/{signatureUuid}
+```
+
+The route is built for you from the Signature view page's card grid (`view-signature-with-templates.blade.php`). Each card's body click navigates to the signer with that signature's UUID pre-bound to the URL.
+
+### What the page does
+
+```
+PdfSigningIsland (React)
+├─ Top bar:   Template label    [Cancel]  [Finish & Save]
+├─ Canvas:    Rasterized PDF page with SlotBox overlays
+│             ├─ Active signature image is rendered inside each placed slot
+│             └─ Page selector when the template has > 1 page
+├─ Slot picker (chips below the canvas):
+│             ├─ "+ Employee", "+ In Charge", … one chip per declared slot
+│             └─ Click adds the slot at the canvas center; click again removes
+└─ Bottom strip: Your stored signatures
+              ├─ Active signature highlighted with primary ring
+              └─ Up to 12 other primary signatures (chip = click to swap)
+```
+
+The frontend talks to two endpoints, both prefixed by signer/:
+
+| Method | Route name | Purpose |
+|---|---|---|
+| GET  | `signature.pdf-templates.signer.meta`      | Bootstrap: template + page dims + saved slots + user's signature library |
+| POST | `signature.pdf-templates.signer.finalize`  | Submit chosen placements + finalize signing |
+
+### Phase A: stub finalize
+
+The `finalize` endpoint currently validates the payload structure and slot keys, then returns an acknowledgement without producing a signed PDF. This lets you exercise the entire UI loop (open card → place → Finish & Save → success view) before the cryptographic pipeline wires in.
+
+The acknowledgement view shows the validated placements back to the user as JSON — useful while iterating on the UX.
+
+### Phase B (next): production finalize
+
+The remaining work is wiring `PdfTemplateSignerController::finalize` to the existing signing pipeline. The shape we'll move to:
+
+1. Accept a target Signable from the request (`signable_type` + `signable_id`, validated against the host app's `Signable` contract).
+2. Render the target PDF via `$template->renderFor($record)`.
+3. For each placement, call `SignatureManager::storeForDocument()` with the slot's coordinates.
+4. Run `SignatureManager::embedAndFinalize()` to embed the signature image, the PKCS#7 envelope, and the DocMDP marker.
+5. Return the signed-document URL so the UI can offer a download / redirect.
+
+The signature image and certificate password already live on the source primary signature, so the signer doesn't need to re-enter anything at sign time.
+
+---
+
 ## What's still ahead
 
-These pieces land in upcoming steps:
-
 - **Step 2** — `SignatureManager` populating `SignaturePosition` from `digital_pdf_template_slots` automatically when a Signable maps to a registered template. Until this lands you can read the slot row yourself in your action and pass coordinates to `SignatureManager::store(...)`.
-- **Step 5** — "Apply signature to PDF" launcher from a primary-signature card (the SignFlow-style entry point that walks a user from "pick a signature" → "pick a PDF" → designer → finish).
+- **Step 5 — Phase B** — the production finalize wiring described above.
 
 You can already use the system today to:
 
 - declare templates and slot definitions,
 - open the designer for any registered template,
 - have admins place slots visually and persist them,
-- read those coordinates from your own code to drive `SignatureManager::store(...)`.
+- open the signer page for any registered template + owned signature (Phase A stub),
+- read coordinates from your own code to drive `SignatureManager::store(...)`.
 
 ---
 
