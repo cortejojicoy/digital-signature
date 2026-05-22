@@ -176,7 +176,7 @@ class SignaturePlugin implements Plugin
         $panel->pages([PdfTemplateDesigner::class]);
 
         FilamentAsset::register([
-            Js::make('signature-plugin', __DIR__ . '/../resources/dist/signature.js'),
+            Js::make('signature-plugin', __DIR__ . '/../resources/dist/digital-signature.js'),
         ], 'kukux/digital-signature');
     }
 

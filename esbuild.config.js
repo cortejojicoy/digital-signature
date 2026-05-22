@@ -4,7 +4,7 @@ const watch = process.argv.includes('--watch');
 
 const options = {
     entryPoints: ['resources/js/index.js'],
-    outfile: 'resources/dist/signature.js',
+    outfile: 'resources/dist/digital-signature.js',
     bundle: true,
     minify: !watch,
     sourcemap: watch ? 'inline' : false,
