@@ -51,9 +51,15 @@ class BladePdfTemplate implements PdfTemplate
     ) {
     }
 
+    /** @var class-string<PdfRenderer>|null  set when 'renderer' was in config */
+    protected ?string $rendererClass = null;
+
     /**
      * Build an instance from a config array. The array key from
      * config('signature.templates') becomes the template key.
+     *
+     * Note: renderer detection is deferred to first render so a missing
+     * PDF library doesn't break boot — only the eventual render call.
      */
     public static function fromConfig(string $key, array $config): self
     {
@@ -63,23 +69,21 @@ class BladePdfTemplate implements PdfTemplate
             );
         }
 
-        $label = $config['label'] ?? Str::title(str_replace(['_', '-'], ' ', $key));
-
-        $slots = static::normalizeSlots($config['slots'] ?? []);
-
-        $renderer = isset($config['renderer'])
-            ? app($config['renderer'])
-            : static::detectRenderer();
-
-        return new self(
+        $instance = new self(
             key:          $key,
-            label:        $label,
+            label:        $config['label'] ?? Str::title(str_replace(['_', '-'], ' ', $key)),
             view:         $config['view'],
-            slots:        $slots,
+            slots:        static::normalizeSlots($config['slots'] ?? []),
             sampleData:   $config['sample_data']   ?? [],
             dataResolver: $config['data_resolver'] ?? null,
-            renderer:     $renderer,
+            renderer:     null,
         );
+
+        if (isset($config['renderer'])) {
+            $instance->rendererClass = $config['renderer'];
+        }
+
+        return $instance;
     }
 
     public function key(): string

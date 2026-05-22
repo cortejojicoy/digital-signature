@@ -110,10 +110,21 @@ class SignatureServiceProvider extends ServiceProvider
             ->middleware(['web', 'signed'])
             ->name('signature.asset');
 
-        // Placement-designer endpoints. Behind the panel auth middleware
-        // because they expose template metadata and accept slot writes.
+        // Placement-designer + signer endpoints.
+        //
+        // We use only the `web` middleware (not `auth`) because the bare
+        // `auth` middleware uses Laravel's default guard, which often
+        // differs from the Filament panel's guard. When they differ, an
+        // already-logged-in panel user gets redirected to a panel login
+        // route that may not exist under that name → 500 with
+        // "Route [filament.<panel>.auth.login] not defined".
+        //
+        // Authorization is enforced inside the controllers via
+        // `auth()->id()` checks on the records (signatures must be
+        // owned by the current user). The `web` group is sufficient to
+        // load the session so `auth()` resolves correctly.
         Route::prefix('signature/pdf-templates')
-            ->middleware(['web', 'auth'])
+            ->middleware(['web'])
             ->name('signature.pdf-templates.')
             ->group(function () {
                 Route::get('{template}/meta', [PdfTemplateDesignerController::class, 'meta'])
