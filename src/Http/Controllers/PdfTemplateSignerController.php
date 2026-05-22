@@ -7,10 +7,13 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Contracts\RendersSamplePageImage;
+use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Models\PdfTemplateSlot;
 use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Pdf\BladePdfTemplate;
 use Kukux\DigitalSignature\Pdf\PdfPageRasterizer;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
+use Kukux\DigitalSignature\Services\SignatureManager;
 
 /**
  * HTTP surface for the end-user signing experience.
@@ -35,6 +38,7 @@ class PdfTemplateSignerController extends Controller
     public function __construct(
         protected PdfTemplateRegistry $registry,
         protected PdfPageRasterizer $rasterizer,
+        protected SignatureManager $signatureManager,
     ) {
     }
 
@@ -95,10 +99,17 @@ class PdfTemplateSignerController extends Controller
     }
 
     /**
-     * Phase A stub. Validates structure and returns an ack so the
-     * frontend can confirm the round-trip works. The actual signing
-     * call into SignatureManager arrives in Phase B once the host-app
-     * Signable selection mechanism is in place.
+     * Produce a signed PDF.
+     *
+     * Phase B: resolve the host-app record from `signable_id`, render its
+     * PDF via $template->renderFor(), then run the existing
+     * SignatureManager pipeline (storeForDocument + embedAndFinalize) so
+     * the result lands in `digital_signatures.signed_document_path`.
+     *
+     * When `signable_id` isn't provided OR the template has no bound
+     * model class, the endpoint stays in acknowledgement mode (returns
+     * the validated placements). That keeps the React UI loop testable
+     * before host apps have wired their own resource entry points.
      */
     public function finalize(Request $request, string $template, string $signature): JsonResponse
     {
@@ -113,11 +124,11 @@ class PdfTemplateSignerController extends Controller
             'placements.*.y'          => ['required', 'numeric', 'min:0'],
             'placements.*.width'      => ['required', 'numeric', 'min:1'],
             'placements.*.height'     => ['required', 'numeric', 'min:1'],
+            'signable_id'             => ['sometimes', 'nullable'],
         ]);
 
-        // Validate slot keys exist on the template — refuse anything else
-        // so an attacker can't write arbitrary slot identifiers via the
-        // signing endpoint.
+        // Refuse unknown slot keys so an attacker can't write arbitrary
+        // identifiers via the endpoint.
         $declared = collect($tpl->slots())->pluck('key')->all();
         foreach ($data['placements'] as $p) {
             if (! in_array($p['slot'], $declared, true)) {
@@ -127,23 +138,117 @@ class PdfTemplateSignerController extends Controller
             }
         }
 
-        // Phase B will:
-        //   1. Resolve the Signable target (currently TBD — likely from a
-        //      query string or a host-app contract enumerating signables).
-        //   2. Call SignatureManager::storeForDocument(source, userId,
-        //      signable, position) once per placement (or once with a
-        //      composite position if we support multi-slot signing).
-        //   3. Call SignatureManager::embedAndFinalize() to produce the
-        //      signed PDF.
-        //   4. Return the signed PDF URL.
+        // Phase B v1 supports one placement per signing call. Multi-slot
+        // signing requires the signer driver to stamp multiple images in
+        // one pass — current pipeline signs the unsigned PDF each time,
+        // so calling it N times produces N separate signed copies rather
+        // than one PDF with N stamps.
+        if (count($data['placements']) > 1) {
+            return response()->json([
+                'error' => 'Multi-slot signing is not yet supported. Place the signature on exactly one slot per signing call.',
+            ], 422);
+        }
+
+        $signable = $this->resolveSignable($tpl, $data['signable_id'] ?? null);
+
+        // Stub path — no signable supplied, return the validated payload
+        // so the React UI loop is testable without a real record.
+        if (! $signable) {
+            return response()->json([
+                'status'  => 'ack',
+                'message' => 'No signable_id was provided, so no PDF was signed. Pass a signable_id to produce a signed document. '
+                            .'Note: the template must declare a [signable => Model::class] config so the controller can resolve the record.',
+                'template'   => $tpl->key(),
+                'signature'  => $sig->uuid,
+                'placements' => $data['placements'],
+            ]);
+        }
+
+        $password = $sig->getCertificatePassword();
+        if (! $password) {
+            return response()->json([
+                'error' => 'No certificate password is stored for this signature — re-create the signature and provide a certificate password.',
+            ], 422);
+        }
+
+        $placement = $data['placements'][0];
+
+        try {
+            $signed = $this->signatureManager->storeForDocument(
+                source:        $sig,
+                signerUserId:  (int) auth()->id(),
+                signable:      $signable,
+                position:      [
+                    'page'   => $placement['page'],
+                    'x'      => $placement['x'],
+                    'y'      => $placement['y'],
+                    'width'  => $placement['width'],
+                    'height' => $placement['height'],
+                ],
+            );
+
+            $this->signatureManager->embedAndFinalize($signed, $password);
+            $signed->refresh();
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json([
+                'error' => 'Signing failed: '.$e->getMessage(),
+                'hint'  => 'See storage/logs/laravel.log for the full stacktrace. Common causes: '
+                         .'the host model does not implement Signable, the signer driver could not read the PDF, '
+                         .'or the certificate password is incorrect.',
+            ], 422);
+        }
 
         return response()->json([
-            'status'   => 'ack',
-            'message'  => 'Signer pipeline is in stub mode — placements were validated but no PDF was produced yet.',
-            'template' => $tpl->key(),
-            'signature' => $sig->uuid,
-            'placements' => $data['placements'],
+            'status'               => 'signed',
+            'signature_uuid'       => $signed->uuid,
+            'signed_document_path' => $signed->signed_document_path,
+            'signed_at'            => optional($signed->signed_at)->toIso8601String(),
+            'message'              => 'Document signed successfully.',
         ]);
+    }
+
+    /**
+     * Resolve the Signable from the request.
+     *
+     * Returns null when:
+     *  - no signable_id was supplied (stub mode), or
+     *  - the template config doesn't bind a model class.
+     *
+     * Throws aborting 404/422 when:
+     *  - the model class is missing, the record doesn't exist, or the
+     *    model doesn't implement the Signable contract.
+     */
+    protected function resolveSignable(PdfTemplate $tpl, string|int|null $signableId): ?Signable
+    {
+        if ($signableId === null || $signableId === '') {
+            return null;
+        }
+
+        // Only BladePdfTemplate currently carries a declared signable
+        // class. Full-class PdfTemplate implementations can resolve
+        // their own records inside renderFor(), so this path doesn't
+        // require a registered class for them.
+        $modelClass = $tpl instanceof BladePdfTemplate
+            ? $tpl->getSignableClass()
+            : null;
+
+        if (! $modelClass) {
+            abort(422, "Template [{$tpl->key()}] does not declare a signable model class. "
+                ."Add ['signable' => YourModel::class] to its config to enable signable_id-based signing.");
+        }
+
+        $record = $modelClass::query()->find($signableId);
+        if (! $record) {
+            abort(404, "Record [{$modelClass} #{$signableId}] not found.");
+        }
+
+        if (! $record instanceof Signable) {
+            abort(422, "Model [{$modelClass}] must implement ".Signable::class
+                ." to be signed. Use the HasPdfTemplate trait for a 2-line implementation.");
+        }
+
+        return $record;
     }
 
     protected function resolveTemplate(string $key): PdfTemplate

@@ -34,6 +34,15 @@ class PdfTemplateSigner extends Page
 
     public ?string $templateLabel = null;
 
+    /**
+     * Target record id, read from ?signable= on the URL. When set, the
+     * finalize call signs that specific record's PDF. When null, the
+     * controller returns the validated placements in acknowledgement
+     * mode (useful for testing the UI before host apps wire entry
+     * points from their own resources).
+     */
+    public ?string $signableId = null;
+
     public function mount(string $templateKey, string $signatureUuid): void
     {
         $registry = app(PdfTemplateRegistry::class);
@@ -52,6 +61,11 @@ class PdfTemplateSigner extends Page
         $this->templateKey   = $template->key();
         $this->signatureUuid = $signatureUuid;
         $this->templateLabel = $template->label();
+
+        // Pick up the target record id from the URL query string. Stored
+        // as a string so we don't coerce slugs / uuids to int.
+        $sid = request()->query('signable');
+        $this->signableId = is_scalar($sid) ? (string) $sid : null;
     }
 
     public function getTitle(): string

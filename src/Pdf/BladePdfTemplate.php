@@ -39,6 +39,10 @@ class BladePdfTemplate implements PdfTemplate
      * @param  list<SlotDefinition>          $slots
      * @param  array|callable                $sampleData
      * @param  Closure|null                  $dataResolver  fn(Model $record): array
+     * @param  class-string<Model>|null      $signableClass Host-app model bound to this template.
+     *                                                     Used by the signer flow to find the
+     *                                                     specific record being signed via
+     *                                                     `signableClass::find($id)`.
      */
     public function __construct(
         protected string $key,
@@ -48,7 +52,21 @@ class BladePdfTemplate implements PdfTemplate
         protected $sampleData = [],
         protected ?Closure $dataResolver = null,
         protected ?PdfRenderer $renderer = null,
+        protected ?string $signableClass = null,
     ) {
+    }
+
+    /**
+     * Class name of the host-app model this template renders. Returns
+     * null when the config didn't declare one — in that case the signer
+     * page can't auto-resolve a record from an id and must be passed
+     * the fully-qualified type as well.
+     *
+     * @return class-string<Model>|null
+     */
+    public function getSignableClass(): ?string
+    {
+        return $this->signableClass;
     }
 
     /** @var class-string<PdfRenderer>|null  set when 'renderer' was in config */
@@ -70,13 +88,14 @@ class BladePdfTemplate implements PdfTemplate
         }
 
         $instance = new self(
-            key:          $key,
-            label:        $config['label'] ?? Str::title(str_replace(['_', '-'], ' ', $key)),
-            view:         $config['view'],
-            slots:        static::normalizeSlots($config['slots'] ?? []),
-            sampleData:   $config['sample_data']   ?? [],
-            dataResolver: $config['data_resolver'] ?? null,
-            renderer:     null,
+            key:           $key,
+            label:         $config['label'] ?? Str::title(str_replace(['_', '-'], ' ', $key)),
+            view:          $config['view'],
+            slots:         static::normalizeSlots($config['slots'] ?? []),
+            sampleData:    $config['sample_data']   ?? [],
+            dataResolver:  $config['data_resolver'] ?? null,
+            renderer:      null,
+            signableClass: $config['signable'] ?? null,
         );
 
         if (isset($config['renderer'])) {
