@@ -1,14 +1,17 @@
 {{-- View page for a single signature record.
 
-     Layout: the default Filament ViewRecord infolist on top (signature
-     image, signer details, security metadata), followed by a card grid
+     Layout shape matches the Signature Library mockup: the existing
+     Filament infolist sits in a compact section at the top so the signer
+     metadata remains visible, and the main surface below is a card grid
      of registered PdfTemplates this signature can be applied to.
 
-     Each card links to the placement designer for that template. Once
-     the signer flow (step 5) lands, the card link target switches to
-     the signer page — the card markup stays the same. --}}
+     Each card mirrors the mockup's Signature Library card style — title
+     bar with a 3-dot menu, large preview area, twin metadata sections.
+     Clicking a card opens the placement designer today; once the signer
+     flow (step 5) lands, the link target switches without changing the
+     card markup. --}}
 <x-filament-panels::page>
-    {{-- ───── Default infolist section (image / signer / metadata) ───── --}}
+    {{-- ───── Existing infolist (compact) ────────────────────────────── --}}
     {{ $this->infolist }}
 
     @php
@@ -16,17 +19,65 @@
         $registry  = app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class);
         $templates = $registry->all();
         $signature = $this->getRecord();
+
+        // Pre-compute per-template stats (configured slot count) so the
+        // card markup stays declarative below. Filament dark theme tokens
+        // are used directly so the cards look right against both themes.
+        $cards = [];
+        foreach ($templates as $template) {
+            $allSlots = $template->slots();
+            $requiredKeys = collect($allSlots)->filter(fn ($s) => $s->required)->pluck('key')->all();
+            $declaredKeys = collect($allSlots)->pluck('key')->all();
+
+            $savedKeys = \Kukux\DigitalSignature\Models\PdfTemplateSlot::query()
+                ->where('template_key', $template->key())
+                ->whereIn('slot_key', $declaredKeys)
+                ->pluck('slot_key')
+                ->all();
+
+            $allRequiredSaved = empty(array_diff($requiredKeys, $savedKeys));
+
+            try {
+                $designerUrl = \Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner::getUrl([
+                    'templateKey' => $template->key(),
+                ]);
+            } catch (\Throwable) {
+                $designerUrl = null;
+            }
+
+            try {
+                $signerUrl = \Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner::getUrl([
+                    'templateKey'   => $template->key(),
+                    'signatureUuid' => $signature->uuid,
+                ]);
+            } catch (\Throwable) {
+                $signerUrl = null;
+            }
+
+            $cards[] = [
+                'template'     => $template,
+                'designerUrl'  => $designerUrl,
+                'signerUrl'    => $signerUrl,
+                'previewUrl'   => route('signature.pdf-templates.page', [
+                    'template' => $template->key(),
+                    'page'     => 1,
+                ]),
+                'slotCount'    => count($allSlots),
+                'savedCount'   => count($savedKeys),
+                'configured'   => $allRequiredSaved,
+            ];
+        }
     @endphp
 
-    {{-- ───── PDFs this signature can be applied to ────────────────── --}}
-    <x-filament::section
-        :heading="'Apply this signature'"
-        :description="'PDFs you can place this signature on. Each card opens the placement designer for the chosen template.'"
-        class="mt-6"
-    >
-        @if (empty($templates))
-            {{-- Empty state when no PdfTemplates have been registered yet.
-                 Points users at the docs so they know how to register one. --}}
+    {{-- ───── Apply this signature ─────────────────────────────────── --}}
+    <x-filament::section class="mt-6">
+        <x-slot name="heading">Apply this signature</x-slot>
+        <x-slot name="description">
+            Pick a PDF template to place this signature on. Clicking a card opens the designer.
+        </x-slot>
+
+        @if (empty($cards))
+            {{-- Empty state when no PdfTemplates have been registered yet. --}}
             <div class="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center text-sm text-gray-500 dark:border-white/10 dark:bg-white/5 dark:text-gray-400">
                 <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10">
                     <x-filament::icon icon="heroicon-o-document-text" class="h-5 w-5" />
@@ -36,73 +87,117 @@
                 </div>
                 <p class="mt-1 text-xs">
                     Register a <code class="rounded bg-gray-200 px-1 py-0.5 text-[10px] dark:bg-white/10">PdfTemplate</code> in your app to expose signable PDFs here.
-                    See <code class="text-[10px]">docs/pdf-templates.md</code> for the contract.
                 </p>
             </div>
         @else
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                @foreach ($templates as $template)
+                @foreach ($cards as $card)
                     @php
-                        // Designer URL for this template. Wrapped in try/catch
-                        // because Filament throws when the current request
-                        // isn't tied to a panel (rare here but defensive).
-                        try {
-                            $designerUrl = \Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner::getUrl([
-                                'templateKey' => $template->key(),
-                            ]);
-                        } catch (\Throwable) {
-                            $designerUrl = null;
-                        }
-
-                        $slotCount = count($template->slots());
+                        $template    = $card['template'];
+                        $designerUrl = $card['designerUrl'];
+                        $signerUrl   = $card['signerUrl'];
+                        // Card body link prefers the signer flow; falls back
+                        // to the designer when the signer URL can't be built
+                        // (defensive — same context shouldn't usually happen).
+                        $primaryUrl  = $signerUrl ?: $designerUrl;
                     @endphp
 
-                    <a
-                        @if ($designerUrl) href="{{ $designerUrl }}" @endif
+                    {{-- The card itself is a wrapper <div>. We avoid making
+                         the whole card a single <a> because the 3-dot menu
+                         needs its own click target. The big preview area
+                         is the link. --}}
+                    <div
                         wire:key="template-card-{{ $template->key() }}"
-                        class="group flex flex-col overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 transition hover:-translate-y-0.5 hover:shadow-md hover:ring-primary-500 dark:bg-gray-900 dark:ring-white/10 dark:hover:ring-primary-400 {{ $designerUrl ? '' : 'pointer-events-none opacity-60' }}"
+                        class="group relative flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-gray-900"
                     >
-                        {{-- Header --}}
+                        {{-- Title bar: uppercase label + 3-dot menu --}}
                         <div class="flex items-start justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-white/10">
                             <div class="min-w-0">
-                                <div class="truncate text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200">
+                                <div class="truncate text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200">
                                     {{ $template->label() }}
                                 </div>
                                 <div class="truncate text-[11px] text-gray-500 dark:text-gray-400">
                                     {{ $template->key() }}
                                 </div>
                             </div>
-                            <span class="rounded-md bg-primary-50 px-2 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
-                                {{ $slotCount }} {{ \Illuminate\Support\Str::plural('slot', $slotCount) }}
-                            </span>
+                            <div x-data="{ open: false }" class="relative">
+                                <button
+                                    type="button"
+                                    x-on:click.stop="open = !open"
+                                    class="-mr-1 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/10 dark:hover:text-gray-200"
+                                    aria-label="Actions"
+                                >
+                                    <x-filament::icon icon="heroicon-m-ellipsis-vertical" class="h-4 w-4" />
+                                </button>
+                                <div
+                                    x-show="open"
+                                    x-on:click.outside="open = false"
+                                    x-transition
+                                    class="absolute right-0 z-10 mt-1 w-44 origin-top-right rounded-lg bg-white py-1 shadow-lg ring-1 ring-gray-950/5 dark:bg-gray-800 dark:ring-white/10"
+                                    style="display: none;"
+                                >
+                                    @if ($signerUrl)
+                                        <a href="{{ $signerUrl }}" class="block px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/5">
+                                            Sign document
+                                        </a>
+                                    @endif
+                                    @if ($designerUrl)
+                                        <a href="{{ $designerUrl }}" class="block px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/5">
+                                            Open designer
+                                        </a>
+                                    @endif
+                                </div>
+                            </div>
                         </div>
 
-                        {{-- Visual: signature preview, faintly tinted, as a
-                             quick reminder which signature is being placed --}}
-                        <div class="relative flex h-32 items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-white/5 dark:to-white/10">
-                            @if ($signature->image_path && ($preview = $signature->getTemporaryImageUrl()))
-                                <img
-                                    src="{{ $preview }}"
-                                    alt="Signature preview"
-                                    class="max-h-20 w-auto object-contain opacity-80 transition group-hover:opacity-100"
-                                    loading="lazy"
-                                />
-                            @else
-                                <x-filament::icon icon="heroicon-o-document-text" class="h-10 w-10 text-gray-400" />
-                            @endif
-                        </div>
+                        {{-- Preview area: rasterized first page of the template's sample.
+                             The <img> loads from the rasterizer endpoint. Browsers will
+                             cache it within the session, so revisiting the page is fast.
+                             Falls back to an icon if the image fails to load. --}}
+                        <a
+                            @if ($primaryUrl) href="{{ $primaryUrl }}" @endif
+                            class="relative block aspect-[4/3] w-full overflow-hidden border-b border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 dark:border-white/10 dark:from-white/5 dark:to-white/10 {{ $primaryUrl ? '' : 'pointer-events-none' }}"
+                        >
+                            <img
+                                src="{{ $card['previewUrl'] }}"
+                                alt="{{ $template->label() }} preview"
+                                class="h-full w-full object-contain p-2"
+                                loading="lazy"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                            />
+                            <div
+                                class="absolute inset-0 hidden items-center justify-center text-gray-400"
+                                style="display: none;"
+                            >
+                                <x-filament::icon icon="heroicon-o-document-text" class="h-12 w-12" />
+                            </div>
+                        </a>
 
-                        {{-- Footer --}}
-                        <div class="flex items-center justify-between gap-2 px-4 py-3 text-xs">
-                            <span class="text-gray-500 dark:text-gray-400">
-                                {{ $designerUrl ? 'Open placement designer' : 'Designer unavailable' }}
-                            </span>
-                            <span class="inline-flex items-center gap-1 font-medium text-primary-600 group-hover:text-primary-700 dark:text-primary-400 dark:group-hover:text-primary-300">
-                                Apply
-                                <x-filament::icon icon="heroicon-m-arrow-up-right" class="h-3.5 w-3.5" />
-                            </span>
+                        {{-- Twin metadata sections: STATUS + SLOTS --}}
+                        <div class="space-y-3 px-4 py-3 text-xs">
+                            <div>
+                                <div class="font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    Status
+                                </div>
+                                <span class="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium {{
+                                    $card['configured']
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                        : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                                }}">
+                                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-current"></span>
+                                    {{ $card['configured'] ? 'Ready' : 'Setup needed' }}
+                                </span>
+                            </div>
+                            <div>
+                                <div class="font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    Slots
+                                </div>
+                                <span class="mt-1 inline-flex rounded-md bg-gray-100 px-2 py-0.5 font-medium uppercase tracking-wide text-gray-700 dark:bg-white/5 dark:text-gray-300">
+                                    {{ $card['savedCount'] }} / {{ $card['slotCount'] }} placed
+                                </span>
+                            </div>
                         </div>
-                    </a>
+                    </div>
                 @endforeach
             </div>
         @endif
