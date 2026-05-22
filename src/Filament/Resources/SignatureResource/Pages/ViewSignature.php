@@ -13,6 +13,12 @@ class ViewSignature extends ViewRecord
 {
     protected static string $resource = SignatureResource::class;
 
+    /**
+     * Custom view renders the default infolist plus a card grid below it
+     * listing every registered PdfTemplate this signature can be applied to.
+     */
+    protected static string $view = 'signature::filament.pages.view-signature-with-templates';
+
     protected function getHeaderActions(): array
     {
         /** @var Signature $record */
