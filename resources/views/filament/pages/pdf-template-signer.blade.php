@@ -10,6 +10,9 @@
         data-pdf-signer
         data-template-key="{{ $templateKey }}"
         data-signature-uuid="{{ $signatureUuid }}"
+        @if ($signableId !== null)
+            data-signable-id="{{ $signableId }}"
+        @endif
         data-meta-url="{{ route('signature.pdf-templates.signer.meta', ['template' => $templateKey, 'signature' => $signatureUuid]) }}"
         data-page-url-template="{{ route('signature.pdf-templates.page', ['template' => $templateKey, 'page' => '__PAGE__']) }}"
         data-finalize-url="{{ route('signature.pdf-templates.signer.finalize', ['template' => $templateKey, 'signature' => $signatureUuid]) }}"

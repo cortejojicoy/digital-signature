@@ -27,6 +27,7 @@ function PdfSigningIsland({ el }) {
         finalizeUrl:     el.dataset.finalizeUrl,
         backUrl:         el.dataset.backUrl,
         csrfToken:       el.dataset.csrfToken,
+        signableId:      el.dataset.signableId ?? null,
     }), [el]);
 
     const [meta, setMeta]     = useState(null);
@@ -135,7 +136,10 @@ function PdfSigningIsland({ el }) {
                     'Accept':       'application/json',
                     'X-CSRF-TOKEN': config.csrfToken,
                 },
-                body: JSON.stringify({ placements }),
+                body: JSON.stringify({
+                    placements,
+                    signable_id: config.signableId,
+                }),
             });
             const body = await res.json();
             if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
@@ -188,20 +192,42 @@ function PdfSigningIsland({ el }) {
     const pageImageUrl = config.pageUrlTemplate.replace('__PAGE__', String(activePage));
 
     if (finishedAck) {
+        const signed = finishedAck.status === 'signed';
         return (
             <div className="rounded-xl bg-white p-8 text-center shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
                     ✓
                 </div>
                 <h3 className="text-base font-semibold text-gray-950 dark:text-white">
-                    Signing pipeline acknowledged
+                    {signed ? 'Document signed' : 'Placements acknowledged'}
                 </h3>
                 <p className="mx-auto mt-2 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                    {finishedAck.message ?? 'Placements received.'}
+                    {finishedAck.message ?? (signed ? 'PDF signed successfully.' : 'Placements received.')}
                 </p>
-                <pre className="mx-auto mt-4 max-w-md overflow-auto rounded-md bg-gray-100 p-3 text-left text-[11px] text-gray-700 dark:bg-white/5 dark:text-gray-300">
-                    {JSON.stringify(finishedAck.placements, null, 2)}
-                </pre>
+
+                {signed ? (
+                    <dl className="mx-auto mt-4 max-w-md space-y-1 rounded-md bg-gray-100 p-3 text-left text-[11px] text-gray-700 dark:bg-white/5 dark:text-gray-300">
+                        <div className="flex gap-2">
+                            <dt className="font-semibold">Signature</dt>
+                            <dd className="break-all">{finishedAck.signature_uuid}</dd>
+                        </div>
+                        <div className="flex gap-2">
+                            <dt className="font-semibold">Path</dt>
+                            <dd className="break-all">{finishedAck.signed_document_path}</dd>
+                        </div>
+                        {finishedAck.signed_at && (
+                            <div className="flex gap-2">
+                                <dt className="font-semibold">Signed at</dt>
+                                <dd>{finishedAck.signed_at}</dd>
+                            </div>
+                        )}
+                    </dl>
+                ) : (
+                    <pre className="mx-auto mt-4 max-w-md overflow-auto rounded-md bg-gray-100 p-3 text-left text-[11px] text-gray-700 dark:bg-white/5 dark:text-gray-300">
+                        {JSON.stringify(finishedAck.placements, null, 2)}
+                    </pre>
+                )}
+
                 {config.backUrl && (
                     <a
                         href={config.backUrl}

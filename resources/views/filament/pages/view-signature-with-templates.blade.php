@@ -107,8 +107,9 @@
                         wire:key="template-card-{{ $template->key() }}"
                         class="group relative flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-gray-900"
                     >
-                        {{-- Title bar: uppercase label + 3-dot menu --}}
-                        <div class="flex items-start justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-white/10">
+                        {{-- Title bar: uppercase label + 3-dot menu. Compact padding to
+                             match the shrunken preview area. --}}
+                        <div class="flex items-start justify-between gap-2 border-b border-gray-200 px-3 py-2 dark:border-white/10">
                             <div class="min-w-0">
                                 <div class="truncate text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200">
                                     {{ $template->label() }}
@@ -147,18 +148,17 @@
                             </div>
                         </div>
 
-                        {{-- Preview area: rasterized first page of the template's sample.
-                             The <img> loads from the rasterizer endpoint. Browsers will
-                             cache it within the session, so revisiting the page is fast.
-                             Falls back to an icon if the image fails to load. --}}
+                        {{-- Preview area — fixed compact height (h-24) so the card stays
+                             short. The preview is a hint, not the focus. Falls back to
+                             an icon when the image fails to load. --}}
                         <a
                             @if ($primaryUrl) href="{{ $primaryUrl }}" @endif
-                            class="relative block aspect-[4/3] w-full overflow-hidden border-b border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 dark:border-white/10 dark:from-white/5 dark:to-white/10 {{ $primaryUrl ? '' : 'pointer-events-none' }}"
+                            class="relative block h-24 w-full overflow-hidden border-b border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 dark:border-white/10 dark:from-white/5 dark:to-white/10 {{ $primaryUrl ? '' : 'pointer-events-none' }}"
                         >
                             <img
                                 src="{{ $card['previewUrl'] }}"
                                 alt="{{ $template->label() }} preview"
-                                class="h-full w-full object-contain p-2"
+                                class="h-full w-full object-contain p-1"
                                 loading="lazy"
                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
                             />
@@ -166,33 +166,24 @@
                                 class="absolute inset-0 hidden items-center justify-center text-gray-400"
                                 style="display: none;"
                             >
-                                <x-filament::icon icon="heroicon-o-document-text" class="h-12 w-12" />
+                                <x-filament::icon icon="heroicon-o-document-text" class="h-8 w-8" />
                             </div>
                         </a>
 
-                        {{-- Twin metadata sections: STATUS + SLOTS --}}
-                        <div class="space-y-3 px-4 py-3 text-xs">
-                            <div>
-                                <div class="font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                    Status
-                                </div>
-                                <span class="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium {{
-                                    $card['configured']
-                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
-                                        : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
-                                }}">
-                                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-current"></span>
-                                    {{ $card['configured'] ? 'Ready' : 'Setup needed' }}
-                                </span>
-                            </div>
-                            <div>
-                                <div class="font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                    Slots
-                                </div>
-                                <span class="mt-1 inline-flex rounded-md bg-gray-100 px-2 py-0.5 font-medium uppercase tracking-wide text-gray-700 dark:bg-white/5 dark:text-gray-300">
-                                    {{ $card['savedCount'] }} / {{ $card['slotCount'] }} placed
-                                </span>
-                            </div>
+                        {{-- Single-line footer — STATUS pill on the left, slot count on
+                             the right. Collapses the previous two-row block to one row. --}}
+                        <div class="flex items-center justify-between gap-2 px-3 py-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium {{
+                                $card['configured']
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                    : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                            }}">
+                                <span class="inline-block h-1.5 w-1.5 rounded-full bg-current"></span>
+                                {{ $card['configured'] ? 'Ready' : 'Setup' }}
+                            </span>
+                            <span class="text-gray-500 dark:text-gray-400">
+                                {{ $card['savedCount'] }}/{{ $card['slotCount'] }} slots
+                            </span>
                         </div>
                     </div>
                 @endforeach
