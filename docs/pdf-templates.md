@@ -8,7 +8,7 @@ A **PDF template** declares to the plugin that the host app produces a particula
 
 Templates are **additive**. The existing `Signable` flow ([Model Setup](model-setup.md), [Ad-hoc Signing](ad-hoc-signing.md), [On-Demand PDF Signing](on-demand-pdf-signing.md)) continues to work unchanged — templates simply give you a way to register, enumerate, and configure those signables centrally.
 
-> **Status.** Steps 1, 4, and 5 (UI) are landed: the contract + registry + persistence (step 1), the placement designer (step 4), and the end-user signer page UI with stub finalize (step 5 — Phase A). Sign-time auto-resolution of slot coordinates inside `SignatureManager` (step 2) and the production finalize wiring (step 5 — Phase B) are next.
+> **Status.** Steps 1, 4, and 5 are landed: the contract + registry + persistence (step 1), the placement designer (step 4), and the end-user signer page with real finalize wiring (step 5 — Phase B). Sign-time auto-resolution of slot coordinates inside `SignatureManager` (step 2) is the remaining piece — useful if you want signing to read saved slots from the database instead of accepting them in the request body, but not required for the basic flow.
 
 ---
 
@@ -479,38 +479,91 @@ The frontend talks to two endpoints, both prefixed by signer/:
 | GET  | `signature.pdf-templates.signer.meta`      | Bootstrap: template + page dims + saved slots + user's signature library |
 | POST | `signature.pdf-templates.signer.finalize`  | Submit chosen placements + finalize signing |
 
-### Phase A: stub finalize
+### Finalize: two modes
 
-The `finalize` endpoint currently validates the payload structure and slot keys, then returns an acknowledgement without producing a signed PDF. This lets you exercise the entire UI loop (open card → place → Finish & Save → success view) before the cryptographic pipeline wires in.
+The `finalize` endpoint has two response paths depending on whether the URL carries a `?signable=ID` query param.
 
-The acknowledgement view shows the validated placements back to the user as JSON — useful while iterating on the UX.
+**Acknowledgement mode** (no `?signable`). Validates the placements and echoes them back. Useful when you want to exercise the UI without producing a real PDF — convenient while calibrating slot positions or testing the rendering pipeline.
 
-### Phase B (next): production finalize
+**Production mode** (with `?signable=ID`). Runs the real signing pipeline:
 
-The remaining work is wiring `PdfTemplateSignerController::finalize` to the existing signing pipeline. The shape we'll move to:
+1. Resolves the host model via the template's `signable` config: `($template->getSignableClass())::find($id)`.
+2. Asserts the model implements [`Signable`](../src/Contracts/Signable.php). Use the [`HasPdfTemplate`](../src/Concerns/HasPdfTemplate.php) trait to satisfy that in two lines.
+3. Renders the production PDF via `$template->renderFor($record)`.
+4. Calls `SignatureManager::storeForDocument()` — creates the `digital_signatures` child row + `signature_positions` row from the placement.
+5. Calls `SignatureManager::embedAndFinalize()` — stamps the signature image, embeds PKCS#7 + DocMDP, writes the signed PDF, returns the disk-relative path.
+6. Returns `{ status: 'signed', signature_uuid, signed_document_path, signed_at }` so the UI can offer a download.
 
-1. Accept a target Signable from the request (`signable_type` + `signable_id`, validated against the host app's `Signable` contract).
-2. Render the target PDF via `$template->renderFor($record)`.
-3. For each placement, call `SignatureManager::storeForDocument()` with the slot's coordinates.
-4. Run `SignatureManager::embedAndFinalize()` to embed the signature image, the PKCS#7 envelope, and the DocMDP marker.
-5. Return the signed-document URL so the UI can offer a download / redirect.
+The certificate password is read from the source signature row (stored encrypted at registration time), so the signer doesn't have to enter it again at sign time.
 
-The signature image and certificate password already live on the source primary signature, so the signer doesn't need to re-enter anything at sign time.
+### Making your model signable in 2 lines
+
+```php
+use Illuminate\Database\Eloquent\Model;
+use Kukux\DigitalSignature\Concerns\HasPdfTemplate;
+use Kukux\DigitalSignature\Contracts\Signable;
+
+class Dtr extends Model implements Signable
+{
+    use HasPdfTemplate;
+
+    protected string $signaturePdfTemplate = 'dtr';   // matches the config key
+}
+```
+
+That's all that's needed. The trait implements `getSignableTitle()`, `getSignablePdfPath()`, and `getSignableId()` for you — `getSignablePdfPath()` calls back into the registered template's `renderFor($this)`. Override any of the three methods if you need different behavior.
+
+### Linking to the signer from your own resource
+
+The signer page slug is `signature-templates/{templateKey}/sign/{signatureUuid}`. The target record is passed via `?signable=ID`.
+
+A typical Filament resource header action looks like this:
+
+```php
+use Filament\Actions\Action;
+use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner;
+use Kukux\DigitalSignature\Models\Signature;
+
+Action::make('sign_with_my_signature')
+    ->label('Sign')
+    ->icon('heroicon-o-pencil-square')
+    ->url(function ($record) {
+        $signature = Signature::query()
+            ->where('user_id', auth()->id())
+            ->whereNull('signable_id')
+            ->where('status', 'active')
+            ->latest('id')
+            ->firstOrFail();
+
+        return PdfTemplateSigner::getUrl([
+            'templateKey'   => 'dtr',
+            'signatureUuid' => $signature->uuid,
+        ]).'?signable='.$record->getKey();
+    });
+```
+
+The user lands on the signer page with their signature pre-selected, the DTR record loaded, and a "Finish & Save" button that produces a real signed PDF.
+
+### Phase B limitations (single placement)
+
+The current finalize requires **exactly one placement per call**. Multi-slot signing (e.g., employee + in_charge in one operation) isn't supported yet — calling `storeForDocument` + `embedAndFinalize` N times produces N separate signed PDFs because each pass signs the *unsigned* source. Native multi-stamp signing requires the signer driver to apply all images in one pass, which is a future enhancement.
+
+If you submit more than one placement, the endpoint returns `422` with a clear error.
 
 ---
 
 ## What's still ahead
 
-- **Step 2** — `SignatureManager` populating `SignaturePosition` from `digital_pdf_template_slots` automatically when a Signable maps to a registered template. Until this lands you can read the slot row yourself in your action and pass coordinates to `SignatureManager::store(...)`.
-- **Step 5 — Phase B** — the production finalize wiring described above.
+- **Step 2** — `SignatureManager` populating `SignaturePosition` from `digital_pdf_template_slots` automatically. Today the React island sends placement coords explicitly; this step lets the host call `SignatureManager::store()` with just a template + slot key and have coords looked up.
+- **Multi-placement signing** — stamp multiple slots in one signing event (one Signature row with N positions).
 
-You can already use the system today to:
+You can use the full system today to:
 
-- declare templates and slot definitions,
-- open the designer for any registered template,
-- have admins place slots visually and persist them,
-- open the signer page for any registered template + owned signature (Phase A stub),
-- read coordinates from your own code to drive `SignatureManager::store(...)`.
+- declare templates and slot definitions (array form or full class),
+- open the designer for any registered template and place slots visually,
+- open the signer page for any registered template + owned signature,
+- sign a real document end-to-end via `?signable=ID` and `HasPdfTemplate`,
+- read coordinates from your own code to drive `SignatureManager::store(...)` directly.
 
 ---
 
