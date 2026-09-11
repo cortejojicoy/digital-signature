@@ -18,8 +18,14 @@ class EmbedSignatureJob implements ShouldQueue
     public int $timeout = 120;
 
     public function __construct(
-        public readonly int    $signatureId,
-        public readonly string $userPassword,
+        public readonly int     $signatureId,
+        public readonly string  $userPassword,
+        /**
+         * Disk-relative PDF to sign. Multi-signatory sessions pass their
+         * running document so the queued signature lands on top of the
+         * previous one instead of on a fresh render.
+         */
+        public readonly ?string $sourcePdfPath = null,
     ) {}
 
     public function handle(SignatureManager $manager): void
@@ -30,7 +36,7 @@ class EmbedSignatureJob implements ShouldQueue
             return; // already processed or revoked
         }
 
-        $manager->embedAndFinalize($sig, $this->userPassword);
+        $manager->embedAndFinalize($sig, $this->userPassword, $this->sourcePdfPath);
     }
 
     public function failed(\Throwable $e): void
