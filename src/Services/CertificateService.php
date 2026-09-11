@@ -24,8 +24,7 @@ class CertificateService
 
     public function issue(int $userId, string $password): UserCertificate
     {
-        $cn     = "user-{$userId}@".parse_url(config('app.url'), PHP_URL_HOST);
-        $result = $this->driver->issue($cn, $password);
+        $result = $this->driver->issue($this->commonNameFor($userId), $password);
 
         $disk    = Storage::disk(config('signature.storage_disk'));
         $pfxPath = config('signature.certs_path')."/{$userId}_".time().'.pfx';
@@ -43,6 +42,43 @@ class CertificateService
         event(new CertificateIssued($cert));
 
         return $cert;
+    }
+
+    /**
+     * The certificate's subject CN — the string a PDF reader shows as the
+     * signer's identity, so it has to name the person rather than a row id.
+     * Name plus email, because names are not unique and an email alone reads
+     * as a machine account.
+     *
+     * Falls back to the opaque id form when the user can't be resolved (a
+     * deleted account, a non-standard user provider), which keeps issuing
+     * possible rather than failing the signature outright.
+     */
+    protected function commonNameFor(int $userId): string
+    {
+        $fallback = "user-{$userId}@".parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        $model = config('auth.providers.users.model');
+
+        if (! is_string($model) || ! class_exists($model)) {
+            return $fallback;
+        }
+
+        $user = $model::query()->find($userId);
+
+        if ($user === null) {
+            return $fallback;
+        }
+
+        $name  = trim((string) ($user->name ?? ''));
+        $email = trim((string) ($user->email ?? ''));
+
+        return match (true) {
+            $name !== '' && $email !== '' => "{$name} ({$email})",
+            $name !== ''                  => $name,
+            $email !== ''                 => $email,
+            default                       => $fallback,
+        };
     }
 
     public function load(UserCertificate $cert, string $password): array

@@ -33,6 +33,15 @@ class PdfSignerService
 
     private function buildQrPayload(Signature $signature): string
     {
+        // Opt-out: the QR is drawn immediately to the right of the signature,
+        // which needs roughly another signature's width of clear space. Forms
+        // that put signatures side by side (a three-column "Prepared / Attested
+        // / Noted" row, say) have nowhere to put it, and it lands on top of the
+        // neighbouring block.
+        if (! config('signature.qr.enabled', true)) {
+            return '';
+        }
+
         $signer = $signature->user;
         $appUrl = rtrim((string) config('app.url'), '/');
 

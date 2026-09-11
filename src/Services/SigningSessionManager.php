@@ -275,7 +275,12 @@ class SigningSessionManager
 
         $this->assertModeSupported($session);
 
-        $previous = $session->signatures()->orderByDesc('sequence')->first();
+        // reorder() first: SigningSession::signatures() already applies
+        // orderBy('sequence'), and adding orderByDesc() on top only APPENDS a
+        // second clause — "ORDER BY sequence ASC, sequence DESC" still sorts
+        // ascending, so first() returned signature #1 every time and every
+        // signature after the second was chained to the wrong parent.
+        $previous = $session->signatures()->reorder()->orderByDesc('sequence')->first();
 
         $chain = [
             'signing_session_id'  => $session->id,
