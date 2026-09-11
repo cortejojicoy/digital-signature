@@ -320,6 +320,29 @@ return [
     |   format for those changed between Filament majors, and a launcher that
     |   renders invisible on one of the three supported versions is worse than
     |   one that isn't brand-coloured by default.
+    |
+    | avoid_overlap: a plugin does not own the corner it is dropped into. Host
+    |   apps put chat widgets, cookie bars, "back to top" buttons and their own
+    |   FABs in exactly the same place, and a package that plants itself on top
+    |   of one is a package that gets uninstalled. With this on, the button
+    |   measures what is already pinned in its corner when the page loads and
+    |   stacks itself clear of it, re-measuring when the viewport changes or
+    |   another widget mounts late. Turn it off only if the probing itself
+    |   causes trouble; prefer `offset` to place the button by hand.
+    |
+    | offset: distance from the corner before any stacking. Any CSS length.
+    |
+    | gap: pixels left between the button and whatever it stacks above.
+    |
+    | z_index: the button's layer. The slide-over sits one above it and its
+    |   backdrop one below. Raise it if a host overlay covers the button, lower
+    |   it if the button covers something that matters more.
+    |
+    | avoid / ignore: escape hatches for the detector, as CSS selectors.
+    |   `avoid` always treats a match as occupying the corner (for widgets that
+    |   mount in an iframe or after a long delay); `ignore` never does (for
+    |   full-width toast rails and other decorative fixed elements that the
+    |   size heuristics do not already rule out).
     */
     'launcher' => [
         'enabled'             => env('SIGNATURE_LAUNCHER_ENABLED', true),
@@ -330,6 +353,20 @@ return [
         'color'               => env('SIGNATURE_LAUNCHER_COLOR'),
         'poll_seconds'        => env('SIGNATURE_LAUNCHER_POLL', 60),
         'hide_when_empty'     => env('SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY', false),
+
+        'avoid_overlap'       => env('SIGNATURE_LAUNCHER_AVOID_OVERLAP', true),
+        'offset'              => [
+            'x' => env('SIGNATURE_LAUNCHER_OFFSET_X', '1.5rem'),
+            'y' => env('SIGNATURE_LAUNCHER_OFFSET_Y', '1.5rem'),
+        ],
+        'gap'                 => env('SIGNATURE_LAUNCHER_GAP', 12),
+        'z_index'             => env('SIGNATURE_LAUNCHER_Z_INDEX', 40),
+
+        /** @var array<int, string> Selectors always treated as occupying the corner. */
+        'avoid'  => [],
+
+        /** @var array<int, string> Selectors never treated as occupying the corner. */
+        'ignore' => [],
     ],
 
     /*
