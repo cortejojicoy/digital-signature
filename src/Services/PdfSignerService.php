@@ -9,14 +9,20 @@ class PdfSignerService
 {
     public function __construct(protected PdfSignerDriver $driver) {}
 
-    public function sign(Signature $signature, array $certData): string
+    /**
+     * @param  string|null  $sourcePdfPath  Disk-relative path of the PDF to sign.
+     *   Multi-signatory sessions pass the session's running document so each
+     *   signature lands on top of the previous one's output; without it the
+     *   signable is re-rendered and every earlier stamp is lost.
+     */
+    public function sign(Signature $signature, array $certData, ?string $sourcePdfPath = null): string
     {
         $position = $signature->position
             ? $signature->position->only(['page', 'x', 'y', 'width', 'height'])
             : [];
 
         return $this->driver->sign(
-            pdfPath:   $signature->signable->getSignablePdfPath(),
+            pdfPath:   $sourcePdfPath ?? $signature->signable->getSignablePdfPath(),
             imagePath: $signature->image_path,
             position:  $position,
             certData:  $certData,

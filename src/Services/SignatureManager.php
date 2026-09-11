@@ -187,6 +187,8 @@ class SignatureManager
         int $signerUserId,
         Signable $signable,
         ?array $position = null,
+        ?string $sourcePdfPath = null,
+        ?array $chain = null,
     ): Signature {
         if ((int) $source->user_id !== $signerUserId) {
             throw new ForgedSignatureException(
@@ -200,9 +202,15 @@ class SignatureManager
             );
         }
 
-        $documentHash = $this->documentIntegrity->hash($signable->getSignablePdfPath());
+        // In a multi-signatory session the document being signed is the
+        // session's running PDF, not a fresh render of the record. Hashing the
+        // wrong one would break the chain: signature N's document_hash must
+        // equal signature N-1's signed_document_hash.
+        $documentHash = $this->documentIntegrity->hash(
+            $sourcePdfPath ?? $signable->getSignablePdfPath()
+        );
 
-        $sig = Signature::create([
+        $sig = Signature::create(array_merge([
             'uuid' => (string) Str::uuid(),
             'user_id' => $signerUserId,
             'image_path' => $source->image_path,
@@ -214,7 +222,62 @@ class SignatureManager
             'signable_type' => get_class($signable),
             'signable_id' => $signable->getSignableId(),
             'certificate_password' => $source->getCertificatePassword(),
-        ]);
+        ], $chain ?? []));
+
+        if ($position) {
+            SignaturePosition::create(array_merge(['signature_id' => $sig->id], $position));
+        }
+
+        return $sig;
+    }
+
+    /**
+     * Create a signature row on behalf of a signatory who is not present in
+     * this request, authorised by a standing delegation.
+     *
+     * Deliberately a separate entry point from storeForDocument(): that
+     * method's ownership guard ("the actor owns this signature") is the
+     * package's core anti-forgery rule and must not learn exceptions. Here
+     * the guarantee is different but equally explicit — the delegation was
+     * created by the signature's owner, is still usable, and covers this
+     * record — and AutoAffixService checks all three before calling in.
+     *
+     * @param  array<string, mixed>  $chain  session_id / slot_key / sequence / parent
+     */
+    public function storeDelegated(
+        Signature $source,
+        Signable $signable,
+        ?array $position = null,
+        ?string $sourcePdfPath = null,
+        ?array $chain = null,
+    ): Signature {
+        if ($source->isRevoked()) {
+            throw new ForgedSignatureException(
+                'This signature has been revoked and can no longer be used.'
+            );
+        }
+
+        $documentHash = $this->documentIntegrity->hash(
+            $sourcePdfPath ?? $signable->getSignablePdfPath()
+        );
+
+        $sig = Signature::create(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $source->user_id,
+            'image_path' => $source->image_path,
+            'image_hash' => $source->image_hash,
+            'document_hash' => $documentHash,
+            // The owner was not at a keyboard, so there is no fingerprint to
+            // capture. Carrying the originating one forward keeps the
+            // machine-binding record truthful; fabricating a new one would
+            // corrupt it. `source = auto` is what marks the difference.
+            'machine_fingerprint' => $source->machine_fingerprint,
+            'source' => 'auto',
+            'status' => 'pending',
+            'signable_type' => get_class($signable),
+            'signable_id' => $signable->getSignableId(),
+            'certificate_password' => $source->getCertificatePassword(),
+        ], $chain ?? []));
 
         if ($position) {
             SignaturePosition::create(array_merge(['signature_id' => $sig->id], $position));
@@ -288,9 +351,9 @@ class SignatureManager
     /**
      * Dispatch the signing job to the configured queue.
      */
-    public function sign(Signature $signature, string $userPassword): void
+    public function sign(Signature $signature, string $userPassword, ?string $sourcePdfPath = null): void
     {
-        EmbedSignatureJob::dispatch($signature->id, $userPassword)
+        EmbedSignatureJob::dispatch($signature->id, $userPassword, $sourcePdfPath)
             ->onQueue(config('signature.queue'))
             ->onConnection(config('signature.queue_connection'));
     }
@@ -298,14 +361,22 @@ class SignatureManager
     /**
      * Synchronous signing — called inside EmbedSignatureJob.
      */
-    public function embedAndFinalize(Signature $signature, string $userPassword): void
-    {
+    /**
+     * @param  string|null  $sourcePdfPath  The PDF to stamp and sign. Pass the
+     *   session's running document for multi-signatory flows; omit to
+     *   re-render the signable, which is correct only for a single signer.
+     */
+    public function embedAndFinalize(
+        Signature $signature,
+        string $userPassword,
+        ?string $sourcePdfPath = null,
+    ): void {
         $cert = $this->certService->getOrCreate($signature->user_id, $userPassword);
         $certData = $this->certService->load($cert, $userPassword);
 
         $this->crlValidator->validate($certData);
 
-        $signedPath = $this->pdfSigner->sign($signature, $certData);
+        $signedPath = $this->pdfSigner->sign($signature, $certData, $sourcePdfPath);
 
         $signedDocumentHash = $this->documentIntegrity->hash($signedPath);
 
