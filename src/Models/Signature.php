@@ -17,6 +17,7 @@ class Signature extends Model
     protected $fillable = [
         'uuid',
         'user_id', 'signable_type', 'signable_id',
+        'signing_session_id', 'slot_key', 'sequence', 'parent_signature_id',
         'image_path', 'image_hash',
         'document_hash',          // SHA-256 of source PDF before signing
         'signed_document_path',
@@ -31,6 +32,7 @@ class Signature extends Model
         'pades_info' => 'array',
         'signed_at' => 'datetime',
         'revoked_at' => 'datetime',
+        'sequence' => 'integer',
     ];
 
     public function user(): BelongsTo
@@ -46,6 +48,39 @@ class Signature extends Model
     public function position(): HasOne
     {
         return $this->hasOne(SignaturePosition::class);
+    }
+
+    /**
+     * The multi-signatory session this signature belongs to, when it was
+     * produced as part of one. Null for standalone single-signer flows.
+     */
+    public function session(): BelongsTo
+    {
+        return $this->belongsTo(SigningSession::class, 'signing_session_id');
+    }
+
+    /**
+     * The signature immediately before this one in the session's chain.
+     * This signature's `document_hash` equals the parent's
+     * `signed_document_hash`, which is what makes the chain verifiable.
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_signature_id');
+    }
+
+    public function child(): HasOne
+    {
+        return $this->hasOne(self::class, 'parent_signature_id');
+    }
+
+    /**
+     * True when this signature was applied under a delegation rather than
+     * by its owner acting in the request.
+     */
+    public function wasAutoAffixed(): bool
+    {
+        return $this->source === 'auto';
     }
 
     /**
