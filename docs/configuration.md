@@ -204,6 +204,11 @@ SIGNATURE_LAUNCHER_POSITION=bottom-right
 SIGNATURE_LAUNCHER_LABEL=Signatures
 SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
+SIGNATURE_LAUNCHER_AVOID_OVERLAP=true
+SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
+SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
+SIGNATURE_LAUNCHER_GAP=12
+SIGNATURE_LAUNCHER_Z_INDEX=40
 
 # Optional features
 SIGNATURE_TSA_URL=                  # blank = disabled
@@ -295,9 +300,66 @@ library. On by default.
 | `launcher.color` | `SIGNATURE_LAUNCHER_COLOR` | `null` (built-in neutral) |
 | `launcher.poll_seconds` | `SIGNATURE_LAUNCHER_POLL` | `60` |
 | `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
+| `launcher.avoid_overlap` | `SIGNATURE_LAUNCHER_AVOID_OVERLAP` | `true` |
+| `launcher.offset.x` | `SIGNATURE_LAUNCHER_OFFSET_X` | `1.5rem` |
+| `launcher.offset.y` | `SIGNATURE_LAUNCHER_OFFSET_Y` | `1.5rem` |
+| `launcher.gap` | `SIGNATURE_LAUNCHER_GAP` | `12` (px) |
+| `launcher.z_index` | `SIGNATURE_LAUNCHER_Z_INDEX` | `40` |
+| `launcher.avoid` | — | `[]` |
+| `launcher.ignore` | — | `[]` |
 
 `position` accepts `bottom-right`, `bottom-left`, `top-right`, `top-left`. The
 slide-over enters from whichever side the button sits on.
+
+#### Not landing on the host app's own floating button
+
+A plugin does not own the corner it is dropped into. Host apps put chat
+widgets, cookie bars, "back to top" buttons and their own FABs in exactly the
+same place, so with `avoid_overlap` on (the default) the launcher measures what
+is already pinned in its corner and stacks itself clear of it:
+
+- It probes the corner on load, on resize, on `livewire:navigated`, twice more
+  shortly after load, and whenever something is appended to `<body>` — chat
+  widgets and cookie bars routinely mount seconds late.
+- **Fixed or sticky, short, and clickable** counts as an obstacle: another FAB,
+  a cookie bar, a topbar. It stacks above it, leaving `gap` pixels.
+- **Tall** elements (over 60% of the viewport height) are treated as layout —
+  sidebars, full-height drawers, backdrops. Floating in front of those is the
+  job; stacking above one would push the button off-screen.
+- **`pointer-events: none`** decoration, such as a full-width toast rail, is
+  ignored.
+- A corner crowded past 60% of the viewport height gives up and stays put:
+  drifting into the middle of the page would be worse than the overlap.
+
+Two escape hatches for widgets the detector gets wrong:
+
+```php
+'launcher' => [
+    // Always stack clear of these — for widgets that render into an iframe,
+    // or mount far too late to be probed.
+    'avoid'  => ['#intercom-launcher', '.crisp-client'],
+
+    // Never treat these as obstacles.
+    'ignore' => ['.my-app-toast-rail'],
+],
+```
+
+If you already know where the button should go, placing it by hand is better
+than probing:
+
+```php
+'launcher' => [
+    'position'      => 'bottom-left',
+    'offset'        => ['x' => '1.5rem', 'y' => '6rem'],  // above the host's FAB
+    'avoid_overlap' => false,
+],
+```
+
+`offset` accepts a plain CSS length (`px`, `rem`, `em`, `vh`, `vw`, `%`);
+anything else falls back to the default, since the value lands in a style
+attribute. `z_index` sets the button's layer — the slide-over sits one above,
+its backdrop one below — so raise it if a host overlay covers the button, and
+lower it if the button covers something that matters more.
 
 **`replaces_navigation`** is the key worth understanding. While the launcher is
 on, the inbox page and the Signatures resource stop registering sidebar/topbar

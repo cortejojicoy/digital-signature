@@ -80,9 +80,19 @@ SignaturePlugin::make()->withoutFloatingLauncher()  // off; sidebar items return
 While the launcher is on, the inbox page and the Signatures resource stop
 claiming navigation items — both stay routable, and the slide-over links to
 them. Keep the launcher *and* the sidebar entries with
-`SIGNATURE_LAUNCHER_REPLACES_NAV=false`. Position, icon, label, brand colour
-and badge poll interval are config; see
-[Configuration](docs/configuration.md#launcher).
+`SIGNATURE_LAUNCHER_REPLACES_NAV=false`.
+
+**It won't land on your own floating button.** A plugin doesn't own the corner
+it's dropped into, so before settling the launcher measures what the host app
+already has pinned there — a FAB, a chat widget, a cookie bar — and stacks
+itself clear, re-measuring on resize and when widgets mount late. Sidebars and
+other full-height layout are floated over rather than stacked above. Where the
+detector guesses wrong, name the widget in `launcher.avoid` / `launcher.ignore`;
+where you already know the answer, set `launcher.offset` and turn
+`avoid_overlap` off.
+
+Position, icon, label, brand colour, offsets, z-index and badge poll interval
+are all config; see [Configuration](docs/configuration.md#launcher).
 
 ---
 

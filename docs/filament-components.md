@@ -82,9 +82,28 @@ same ownership checks, same exception handling, and the signature is still
 produced inside that user's own authenticated request with their own
 certificate.
 
+### It gets out of the host app's way
+
+A plugin does not own the corner it is dropped into. Before settling, the
+button measures what the host app already has pinned there — its own FAB, a
+chat widget, a cookie bar — and stacks itself clear of it, re-measuring on
+resize, on `livewire:navigated`, and when a widget mounts late.
+
+Tall fixed elements (sidebars, drawers, backdrops) are treated as layout and
+floated over rather than stacked above; `pointer-events: none` decoration such
+as a toast rail is ignored; and a hopelessly crowded corner is left alone
+rather than drifting the button into mid-page. Two config lists,
+`launcher.avoid` and `launcher.ignore`, override the detector per selector, and
+`launcher.offset` + `avoid_overlap => false` place the button by hand when you
+already know where it belongs. See
+[Configuration](configuration.md#not-landing-on-the-host-apps-own-floating-button).
+
+The algorithm is covered by `npm run test:js`, which runs the shipped code —
+extracted from this view at run time — against a simulated DOM.
+
 Two things it does *not* need: a build step (the styles are namespaced and
 inline, so no host Tailwind utility can go missing under it) and its own JS
-(Alpine handles open/close, Livewire handles data).
+bundle (Alpine handles open/close and placement, Livewire handles data).
 
 Mounting it yourself — outside a panel, or in a custom layout:
 

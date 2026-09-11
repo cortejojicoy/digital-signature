@@ -186,10 +186,29 @@ Appearance is config — position (`bottom-right` default, or any corner), icon,
 label, a brand hex for the button, and how often the badge count refreshes. See
 [Configuration](configuration.md#launcher).
 
+**If your app already has a floating button**, the launcher will find it: it
+measures its corner on load and stacks itself clear of whatever is pinned
+there, re-measuring on resize and when widgets mount late. Sidebars and other
+full-height layout are floated over rather than stacked above, and toast rails
+are ignored. Where the detector guesses wrong, name the widget in
+`launcher.avoid` / `launcher.ignore`; where you already know the answer, place
+the button by hand and skip probing:
+
+```php
+'launcher' => [
+    'position'      => 'bottom-left',
+    'offset'        => ['x' => '1.5rem', 'y' => '6rem'],
+    'avoid_overlap' => false,
+],
+```
+
 ### Done when
 
 - Log into the panel: the floating button is in the corner, and its slide-over
   opens, closes on Escape, and reports "Nothing waiting on you".
+- It does not cover any control the app already had in that corner — and if
+  your app puts one there, confirm the launcher sits above it rather than on
+  it, on a wide screen and a narrow one.
 - A user can reach Signatures → Create from the slide-over footer, draw or
   upload a signature image, and save it. That stored row is the prerequisite
   for every signing flow that follows — a user with no registered signature
@@ -748,6 +767,11 @@ SIGNATURE_LAUNCHER_LABEL=Signatures
 SIGNATURE_LAUNCHER_COLOR=               # brand hex, e.g. #4f46e5
 SIGNATURE_LAUNCHER_POLL=60              # badge refresh seconds; 0 = off
 SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY=false
+SIGNATURE_LAUNCHER_AVOID_OVERLAP=true   # stack clear of the host app's own pinned controls
+SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
+SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
+SIGNATURE_LAUNCHER_GAP=12               # px left between stacked controls
+SIGNATURE_LAUNCHER_Z_INDEX=40
 
 # UI — pages and resource
 SIGNATURE_RESOURCE_ENABLED=true
@@ -790,6 +814,8 @@ that references it.
 |---|---|---|
 | Signatures / Awaiting my signature missing from the sidebar | Expected: the floating launcher replaces them. | Use the launcher, or set `SIGNATURE_LAUNCHER_REPLACES_NAV=false` to show both. |
 | No floating button on any page | Launcher disabled, or the plugin isn't on this panel. | Check `launcher.enabled` and `withoutFloatingLauncher()`, then that `SignaturePlugin::make()` is on that panel. |
+| Floating button sits on top of another floating control | The other control mounts in a way the detector can't see (iframe, `pointer-events: none`, very late). | Name its selector in `launcher.avoid`, or place the button by hand with `launcher.offset` + `avoid_overlap => false`. |
+| Floating button is pushed far up the page | Something tall and fixed in that corner is being read as an obstacle. | Name its selector in `launcher.ignore`. |
 | Floating button appears but the slide-over is empty and never loads | Livewire/Alpine assets not loading on the page. | The launcher needs the panel's own Livewire+Alpine; check the browser console on a standard panel page. |
 | `Plugin [signature] is not registered for panel [admin]` | Resource discovered from `vendor/` without the plugin. | Add `SignaturePlugin::make()` to that panel's provider. |
 | Signature pad renders as an empty box | JS not published, or published from an older version. | `php artisan filament:assets`, hard-reload. |
