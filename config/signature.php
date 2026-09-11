@@ -165,6 +165,124 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Filament version
+    |--------------------------------------------------------------------------
+    | Normally detected from Composer's installed-versions manifest. Set this
+    | only to force a specific branch (3, 4, or 5) — e.g. in a test suite that
+    | needs to exercise the v3 component classes on a v5 install.
+    */
+    'filament_version' => env('SIGNATURE_FILAMENT_VERSION'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Signing sessions (multi-signatory documents)
+    |--------------------------------------------------------------------------
+    | A session owns one document through N signatures. Opening one freezes
+    | the rendered PDF so later signatories sign the same bytes the first one
+    | did — without that, each signature would land on a fresh render and
+    | erase the stamps before it.
+    |
+    | sequence_mode:
+    |   'sequential' — signatories must sign in SlotDefinition::$order.
+    |                  This is what "Prepared by → Attested by → Noted by" wants.
+    |   'parallel'   — any assigned signatory may sign at any time.
+    |
+    | expires_after_days: sessions older than this stop accepting signatures.
+    |   Null disables expiry.
+    */
+    'sessions' => [
+        'sequence_mode'         => env('SIGNATURE_SEQUENCE_MODE', 'sequential'),
+        'expires_after_days'    => env('SIGNATURE_SESSION_EXPIRY_DAYS'),
+        'notification_channels' => ['mail'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-signature mode
+    |--------------------------------------------------------------------------
+    | How several signatures end up on one PDF.
+    |
+    | 'progressive' (default)
+    |     Each signatory's signature is stamped onto the previous signatory's
+    |     output and the document is re-signed with THEIR certificate. The
+    |     finished PDF shows every visible signature, and the database holds a
+    |     verifiable hash chain (signature N's document_hash == signature N-1's
+    |     signed_document_hash). Caveat, stated plainly: because FPDI/TCPDF
+    |     rebuild the file on every pass, only the MOST RECENT PKCS#7 block
+    |     survives inside the PDF. Readers show one cryptographic signature,
+    |     not N.
+    |
+    | 'incremental'
+    |     True PAdES: each signature is appended as an incremental update and
+    |     every earlier signature stays cryptographically valid, so a reader
+    |     shows N distinct signers. Requires a driver implementing
+    |     Kukux\DigitalSignature\Contracts\SupportsIncrementalSigning —
+    |     neither bundled driver can, because FPDI rewrites the document. The
+    |     session fails loudly rather than silently degrading.
+    |
+    | Pick 'incremental' when the legal requirement is N independently
+    | verifiable signer certificates. 'progressive' is right when the bar is a
+    | visible signature block plus tamper-evidence and a full audit trail.
+    */
+    'multi_signature' => [
+        'mode' => env('SIGNATURE_MULTI_MODE', 'progressive'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Auto-affix (consent model)
+    |--------------------------------------------------------------------------
+    | Whether a signature may be applied while its owner is not present in
+    | the request. Automation can remove the effort of signing; it must never
+    | remove the consent.
+    |
+    | 'approval' (default, safest)
+    |     Never auto-signs. Routing still finds the right person and
+    |     pre-places their signature, and the inbox brings the document to
+    |     them — but the PKCS#7 block is produced in their own authenticated
+    |     request. No new trust assumptions over single-signer signing.
+    |
+    | 'delegated'
+    |     Auto-signs only where the signatory has created a SignatureDelegation
+    |     covering this template and role. Grants are scoped, expiring,
+    |     revocable, and can only be created by the grantor in their own
+    |     session. Understand the trade: a standing grant means the server can
+    |     sign as that user for the grant's lifetime.
+    |
+    | 'implicit'  — UNSAFE, off by default
+    |     Treats being tagged on a record as consent to sign it. Anyone who can
+    |     edit the record can then cause that person's certificate to sign it.
+    |     Requires allow_implicit => true as a second, deliberate acknowledgement.
+    |
+    | notify: the signatory is told about every auto-affix. Leave this on.
+    |     Silent signing is not acceptable even with consent.
+    */
+    'auto_affix' => [
+        'mode'                  => env('SIGNATURE_AUTO_AFFIX_MODE', 'approval'),
+        'allow_implicit'        => env('SIGNATURE_ALLOW_IMPLICIT_AFFIX', false),
+        'notify'                => env('SIGNATURE_AUTO_AFFIX_NOTIFY', true),
+        'default_grant_days'    => env('SIGNATURE_GRANT_DAYS', 365),
+        'notification_channels' => ['mail'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Signature inbox
+    |--------------------------------------------------------------------------
+    | The "Awaiting my signature" page the plugin registers on each panel.
+    | Set navigation => false to keep the page routable but out of the sidebar.
+    */
+    'inbox' => [
+        'enabled'          => env('SIGNATURE_INBOX_ENABLED', true),
+        'navigation'       => env('SIGNATURE_INBOX_NAV', true),
+        'navigation_label' => env('SIGNATURE_INBOX_LABEL', 'Awaiting my signature'),
+        'navigation_icon'  => env('SIGNATURE_INBOX_ICON', 'heroicon-o-inbox-arrow-down'),
+        'navigation_group' => env('SIGNATURE_INBOX_GROUP'),
+        'navigation_sort'  => env('SIGNATURE_INBOX_SORT'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Image Metadata (machine-binding security)
     |--------------------------------------------------------------------------
     | Every stored signature PNG receives four HMAC-signed tEXt chunks:
