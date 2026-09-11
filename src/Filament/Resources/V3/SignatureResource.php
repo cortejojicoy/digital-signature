@@ -24,6 +24,7 @@ use Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\SignaturePlugin;
+use Kukux\DigitalSignature\Support\LauncherSettings;
 
 /**
  * Filament v3 implementation.
@@ -39,6 +40,15 @@ use Kukux\DigitalSignature\SignaturePlugin;
  */
 class SignatureResource extends Resource
 {
+    /**
+     * Pinned, because the class lives in a V3\ / V4\ namespace to keep the
+     * Filament majors apart and Filament would otherwise derive the URL from
+     * it — publishing the package's internal versioning as `/admin/v4/signatures`
+     * and, worse, changing every route name and bookmarked URL if a host ever
+     * upgraded Filament.
+     */
+    protected static ?string $slug = 'signatures';
+
     protected static ?string $model = Signature::class;
 
     protected static ?string $recordTitleAttribute = 'uuid';
@@ -46,6 +56,17 @@ class SignatureResource extends Resource
     // -------------------------------------------------------------------------
     // Navigation
     // -------------------------------------------------------------------------
+
+    /**
+     * With the floating launcher on, the launcher is the entry point to
+     * signatures and this resource stops claiming a sidebar item — it stays
+     * fully routable, and the launcher's footer links to it. Set
+     * signature.launcher.replaces_navigation to false to keep both.
+     */
+    public static function shouldRegisterNavigation(): bool
+    {
+        return ! LauncherSettings::replacesNavigation();
+    }
 
     public static function getNavigationIcon(): ?string
     {
@@ -307,7 +328,22 @@ class SignatureResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('user');
+        $query = parent::getEloquentQuery()->with('user');
+
+        // A signature library is personal. The image is the very thing the
+        // package's machine binding, HMAC metadata and private disk exist to
+        // keep from being lifted and reused, so an unscoped list — which also
+        // offers a Download Image action — would hand every user the one
+        // artefact they must never have: somebody else's signature.
+        //
+        // Deliberately not overridable: an administrator who needs to know
+        // whether somebody has registered a signature gets that from the
+        // signatory panel, which reports the state without exposing the image.
+        if ($userId = auth()->id()) {
+            return $query->where('user_id', $userId);
+        }
+
+        return $query->whereRaw('1 = 0');
     }
 
     // -------------------------------------------------------------------------
