@@ -8,6 +8,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 | Doc | What it covers |
 |---|---|
+| [Implementation Plan](implementation-plan.md) | **Start here.** Phase-by-phase plan for integrating the package into a host app |
 | [Installation](installation.md) | Composer, migrations, plugin registration, admin resource config |
 | [Configuration](configuration.md) | Every config key, all env variables, driver options |
 | [Model Setup](model-setup.md) | Signable interface, HasSignatures trait, model attributes |
