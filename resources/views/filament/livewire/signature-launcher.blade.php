@@ -14,6 +14,12 @@
     2. Open/close is Alpine, data is Livewire. Toggling a drawer should never
        wait for a round trip; loading the queue should never happen on pages
        where nobody opens the drawer. `@entangle` would couple the two.
+
+    3. The button measures its corner before settling into it. A plugin does
+       not own the corner it is dropped into — host apps put chat widgets,
+       cookie bars and their own FABs there — so the placement pass below
+       stacks this button clear of whatever is already pinned, instead of on
+       top of it.
 --}}
 @php
     $settings = $this->settings;
@@ -23,27 +29,185 @@
 
 <div
     class="dsig-launcher dsig-launcher--{{ $settings['position'] }}"
-    x-data="{
-        open: false,
-        loaded: @js($this->loaded),
-        toggle() {
-            this.open = ! this.open
-
-            if (this.open && ! this.loaded) {
-                this.loaded = true
-                $wire.loadRequests()
-            }
-        },
-    }"
+    style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}"
+    data-dsig-loaded="{{ $this->loaded ? '1' : '0' }}"
+    x-data="dsigLauncher(@js($this->placement))"
     x-on:keydown.escape.window="open = false"
     @if ($settings['poll'] > 0) wire:poll.{{ $settings['poll'] }}s.visible @endif
 >
+    {{--
+    The placement pass. Defined as a global factory rather than through
+    `alpine:init`, because that event has usually already fired by the time a
+    render hook at the end of the body is parsed — a listener registered here
+    would simply never run.
+--}}
+<script>
+    window.dsigLauncher = window.dsigLauncher ?? function (config) {
+        return {
+            open: false,
+            loaded: false,
+            config,
+            observer: null,
+            timers: [],
+
+            init() {
+                this.loaded = this.$el.dataset.dsigLoaded === '1'
+
+                if (! this.config.enabled) return
+
+                this.schedule()
+
+                // Re-measure when the viewport changes, when Livewire swaps
+                // the page, and twice more shortly after load: chat widgets
+                // and cookie bars routinely mount a second or two late, and a
+                // button that was correctly placed at load would otherwise sit
+                // under one for the rest of the session.
+                this.onResize = () => this.schedule()
+                window.addEventListener('resize', this.onResize, { passive: true })
+                document.addEventListener('livewire:navigated', this.onResize)
+                this.timers.push(setTimeout(() => this.schedule(), 600))
+                this.timers.push(setTimeout(() => this.schedule(), 2500))
+
+                // Body-level additions only. Watching the whole subtree would
+                // fire on every Livewire render in the app for no benefit.
+                if (window.MutationObserver) {
+                    this.observer = new MutationObserver(() => this.schedule())
+                    this.observer.observe(document.body, { childList: true })
+                }
+            },
+
+            destroy() {
+                window.removeEventListener('resize', this.onResize)
+                document.removeEventListener('livewire:navigated', this.onResize)
+                this.timers.forEach(clearTimeout)
+                this.observer?.disconnect()
+            },
+
+            toggle() {
+                this.open = ! this.open
+
+                if (this.open && ! this.loaded) {
+                    this.loaded = true
+                    this.$wire.loadRequests()
+                }
+            },
+
+            schedule() {
+                clearTimeout(this.pending)
+                this.pending = setTimeout(() => requestAnimationFrame(() => this.place()), 120)
+            },
+
+            /**
+             * Walk the button away from the corner until nothing pinned there
+             * overlaps it. Each pass measures the real rendered box, so one
+             * pass per obstacle is enough and nested widgets resolve in order.
+             */
+            place() {
+                const fab = this.$refs.fab
+
+                if (! fab || this.open) return
+
+                const fromTop = this.config.position.startsWith('top')
+                let stack = 0
+
+                for (let pass = 0; pass < 5; pass++) {
+                    this.$el.style.setProperty('--dsig-stack', stack + 'px')
+
+                    const box = fab.getBoundingClientRect()
+                    const blockers = this.blockers(box)
+
+                    if (! blockers.length) break
+
+                    const needed = Math.max(...blockers.map((rect) => fromTop
+                        ? stack + (rect.bottom - box.top) + this.config.gap
+                        : stack + (box.bottom - rect.top) + this.config.gap))
+
+                    // A corner crowded past this point is pathological; drifting
+                    // into the middle of the screen would be worse than the
+                    // overlap we are trying to avoid.
+                    const limit = window.innerHeight * 0.6
+
+                    if (needed <= stack + 0.5 || needed > limit) break
+
+                    stack = needed
+                }
+
+                this.$el.style.setProperty('--dsig-stack', stack + 'px')
+                this.$el.dataset.dsigStack = Math.round(stack)
+            },
+
+            /** Fixed or sticky things overlapping the button's box. */
+            blockers(box) {
+                const found = new Map()
+                const points = [
+                    [box.left + box.width / 2, box.top + box.height / 2],
+                    [box.left + 2, box.top + 2],
+                    [box.right - 2, box.top + 2],
+                    [box.left + 2, box.bottom - 2],
+                    [box.right - 2, box.bottom - 2],
+                ]
+
+                for (const [x, y] of points) {
+                    for (const el of document.elementsFromPoint(x, y)) {
+                        if (this.isBlocker(el)) found.set(el, el.getBoundingClientRect())
+                    }
+                }
+
+                // Widgets the point test cannot see — ones that render into an
+                // iframe, or paint with pointer-events: none — can be named in
+                // config and are measured directly.
+                for (const selector of this.config.avoid) {
+                    document.querySelectorAll(selector).forEach((el) => {
+                        if (this.$el.contains(el)) return
+
+                        const rect = el.getBoundingClientRect()
+                        const overlaps = rect.width > 0 && rect.height > 0
+                            && rect.left < box.right && rect.right > box.left
+                            && rect.top < box.bottom && rect.bottom > box.top
+
+                        if (overlaps) found.set(el, rect)
+                    })
+                }
+
+                return [...found.values()]
+            },
+
+            isBlocker(el) {
+                if (! el || el === document.body || el === document.documentElement) return false
+                if (this.$el.contains(el) || el.contains(this.$el)) return false
+                if (this.config.ignore.some((selector) => el.matches?.(selector))) return false
+                if (this.config.avoid.some((selector) => el.matches?.(selector))) return true
+
+                const style = getComputedStyle(el)
+
+                if (style.position !== 'fixed' && style.position !== 'sticky') return false
+                if (style.pointerEvents === 'none' || style.visibility === 'hidden') return false
+
+                const rect = el.getBoundingClientRect()
+
+                // Tall elements are layout — sidebars, full-height drawers,
+                // backdrops. Stacking above one would push the button off the
+                // screen, and sitting in front of one is what a floating
+                // button is supposed to do. Wide but short elements are the
+                // opposite case: topbars and cookie bars, which must be
+                // cleared.
+                return rect.height > 0 && rect.height <= window.innerHeight * 0.6
+            },
+        }
+    }
+</script>
+
     <style>
-        .dsig-launcher { position: fixed; z-index: 40; }
-        .dsig-launcher--bottom-right { right: 1.5rem; bottom: 1.5rem; }
-        .dsig-launcher--bottom-left  { left: 1.5rem;  bottom: 1.5rem; }
-        .dsig-launcher--top-right    { right: 1.5rem; top: 5.5rem; }
-        .dsig-launcher--top-left     { left: 1.5rem;  top: 5.5rem; }
+        /*
+            --dsig-stack is written by the placement pass: the distance this
+            button has to move along its corner's axis to clear whatever the
+            host app already pinned there. It stays 0 when the corner is free.
+        */
+        .dsig-launcher { position: fixed; z-index: var(--dsig-z, 40); --dsig-stack: 0px; }
+        .dsig-launcher--bottom-right { right: var(--dsig-x); bottom: calc(var(--dsig-y) + var(--dsig-stack)); }
+        .dsig-launcher--bottom-left  { left:  var(--dsig-x); bottom: calc(var(--dsig-y) + var(--dsig-stack)); }
+        .dsig-launcher--top-right    { right: var(--dsig-x); top:    calc(var(--dsig-y) + var(--dsig-stack)); }
+        .dsig-launcher--top-left     { left:  var(--dsig-x); top:    calc(var(--dsig-y) + var(--dsig-stack)); }
 
         .dsig-fab {
             position: relative;
@@ -71,12 +235,12 @@
         .dark .dsig-fab__badge { box-shadow: 0 0 0 2px #18181b; }
 
         .dsig-backdrop {
-            position: fixed; inset: 0; z-index: 39;
+            position: fixed; inset: 0; z-index: calc(var(--dsig-z, 40) - 1);
             background: rgb(0 0 0 / 0.3); backdrop-filter: blur(1px);
         }
 
         .dsig-panel {
-            position: fixed; top: 0; bottom: 0; z-index: 41;
+            position: fixed; top: 0; bottom: 0; z-index: calc(var(--dsig-z, 40) + 1);
             display: flex; flex-direction: column;
             width: min(26rem, 100vw);
             background: #fff; color: #09090b;
@@ -175,6 +339,7 @@
         <button
             type="button"
             class="dsig-fab"
+            x-ref="fab"
             @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
             x-on:click="toggle()"
             x-bind:aria-expanded="open.toString()"
