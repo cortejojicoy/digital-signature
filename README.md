@@ -6,7 +6,7 @@
 
 A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, and embedding cryptographically signed stamps into PDF documents.
 
-**Supports:** Filament v4 and v5 — Laravel 11 / 12 — PHP 8.2+
+**Supports:** Filament v3, v4 and v5 — Laravel 11 / 12 — PHP 8.2+
 
 ---
 
@@ -21,6 +21,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Signing Workflow](docs/signing-workflow.md) | Full lifecycle and SignatureManager API |
 | [Ad-hoc Signing](docs/ad-hoc-signing.md) | Implement document signing outside a package resource |
 | [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
+| [Signatory Routing](docs/signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory documents, Filament version compatibility |
 | [Security](docs/security.md) | HMAC metadata, machine binding, DB cross-validation, forgery detection |
 
 ---
@@ -141,6 +142,60 @@ SignaturePlugin::make()->withoutResource()
 
 ---
 
+## Multi-Signatory Documents
+
+When a document is signed by *roles* rather than by whoever opens it — an
+Accomplishment Report with **Prepared by**, **Attested by** and **Noted by** —
+declare the roles on the template and let the plugin find the people:
+
+```php
+// config/signature.php
+'templates' => [
+    'accomplishment-report' => [
+        'view'     => 'pdf.accomplishment-report',
+        'signable' => \App\Models\AccomplishmentReport::class,
+        'slots'    => [
+            'prepared_by' => ['label' => 'Prepared by', 'signatory' => 'preparedBy', 'order' => 1, 'required' => true],
+            'attested_by' => ['label' => 'Attested by', 'signatory' => 'attestedBy', 'order' => 2, 'required' => true],
+            'noted_by'    => ['label' => 'Noted by',    'signatory' => 'notedBy',    'order' => 3, 'required' => true],
+        ],
+    ],
+],
+```
+
+```php
+class AccomplishmentReport extends Model implements Signable
+{
+    use HasPdfTemplate, HasSignatories;
+
+    protected string $signaturePdfTemplate = 'accomplishment-report';
+
+    public function preparedBy(): BelongsTo { return $this->belongsTo(User::class, 'prepared_by_id'); }
+    public function attestedBy(): BelongsTo { return $this->belongsTo(User::class, 'attested_by_id'); }
+    public function notedBy(): BelongsTo    { return $this->belongsTo(User::class, 'noted_by_id'); }
+}
+```
+
+```php
+// In your resource
+SignatoryPanel::make('signatories');       // who signs, and where they're up to
+RequestSignaturesAction::make();            // freeze the PDF and ask them
+```
+
+Each person registers their signature once in their own panel. Being tagged on
+a record is then enough for the document to reach them — the plugin resolves
+the person, finds their signature, pre-fills the placement, and lists the
+document in their **Awaiting my signature** inbox.
+
+**On consent.** By default the plugin never signs *for* anyone: the signature
+is always produced in the signatory's own authenticated request, with their own
+certificate. Truly hands-off signing requires that person to grant a scoped,
+expiring, revocable authorisation from their own account — and every use of it
+is audited and notified. See
+[Signatory Routing](docs/signatory-routing.md#consent-who-may-sign-and-when).
+
+---
+
 ## Security Highlights
 
 | Feature | Default |
@@ -153,6 +208,9 @@ SignaturePlugin::make()->withoutResource()
 | Forgery / screenshot upload rejection | Always on |
 | Document integrity hashes (before + after) | Always on |
 | Machine binding — DB cross-validation on re-upload | Always on |
+| Signature chain hashes across multi-signatory documents | Always on |
+| Audit row for every auto-affixed signature | Always on |
+| Auto-signing on someone's behalf | Off — requires their explicit grant |
 | Machine lock — reject re-upload from different device | `SIGNATURE_MACHINE_LOCK=true` |
 | CRL certificate revocation check | `SIGNATURE_CRL_ENABLED=true` |
 | RFC 3161 trusted timestamp via TSA | `SIGNATURE_TSA_URL=https://...` |
