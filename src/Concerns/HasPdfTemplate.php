@@ -30,10 +30,36 @@ use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
  */
 trait HasPdfTemplate
 {
-    /**
-     * Key into config('signature.templates'). Override in the host model.
+    /*
+     * NOTE: $signaturePdfTemplate is deliberately NOT declared here.
+     *
+     * The documented host usage gives it a default —
+     *   protected string $signaturePdfTemplate = 'dtr';
+     * — and PHP rejects a class property whose default differs from the
+     * trait's ("define the same property ... the definition differs and is
+     * considered incompatible"). Declaring it in the trait would make the
+     * documented usage a fatal error. The host model owns the property;
+     * signatureTemplateKey() reads it.
      */
-    protected string $signaturePdfTemplate;
+
+    /**
+     * The registered template key that renders this model. Exposed as a
+     * method so SignatoryRouter, HasSignatories and host code can ask any
+     * model for its template without reaching into protected state.
+     */
+    public function signatureTemplateKey(): string
+    {
+        if (! property_exists($this, 'signaturePdfTemplate')) {
+            throw new \LogicException(sprintf(
+                '[%s] uses HasPdfTemplate but declares no template. Add '
+                .'protected string $signaturePdfTemplate = \'…\'; naming a registered template, '
+                .'or override signatureTemplateKey().',
+                static::class,
+            ));
+        }
+
+        return $this->signaturePdfTemplate;
+    }
 
     public function getSignableTitle(): string
     {
@@ -43,7 +69,7 @@ trait HasPdfTemplate
     public function getSignablePdfPath(): string
     {
         return app(PdfTemplateRegistry::class)
-            ->get($this->signaturePdfTemplate)
+            ->get($this->signatureTemplateKey())
             ->renderFor($this);
     }
 
