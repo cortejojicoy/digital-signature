@@ -8,12 +8,18 @@ use Illuminate\Routing\Controller;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Contracts\RendersSamplePageImage;
 use Kukux\DigitalSignature\Contracts\Signable;
+use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\OutOfSequenceException;
+use Kukux\DigitalSignature\Exceptions\SignatoryNotReadyException;
+use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
 use Kukux\DigitalSignature\Models\PdfTemplateSlot;
+use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Pdf\BladePdfTemplate;
 use Kukux\DigitalSignature\Pdf\PdfPageRasterizer;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 use Kukux\DigitalSignature\Services\SignatureManager;
+use Kukux\DigitalSignature\Services\SigningSessionManager;
 
 /**
  * HTTP surface for the end-user signing experience.
@@ -125,6 +131,10 @@ class PdfTemplateSignerController extends Controller
             'placements.*.width'      => ['required', 'numeric', 'min:1'],
             'placements.*.height'     => ['required', 'numeric', 'min:1'],
             'signable_id'             => ['sometimes', 'nullable'],
+            // Present when the signer arrived from their inbox: the placement
+            // belongs to a slot in an open signing session rather than being
+            // free-form, so the session drives the signing instead.
+            'signature_request_id'    => ['sometimes', 'nullable', 'integer'],
         ]);
 
         // Refuse unknown slot keys so an attacker can't write arbitrary
@@ -138,7 +148,15 @@ class PdfTemplateSignerController extends Controller
             }
         }
 
-        // Phase B v1 supports one placement per signing call. Multi-slot
+        // Session-bound signing: the request already knows its slot, its
+        // signatory and its frozen placement, and the session knows which
+        // document to build on. Everything the free-form path has to be told,
+        // this path already has — so hand off rather than duplicating it.
+        if (! empty($data['signature_request_id'])) {
+            return $this->finalizeSessionRequest((int) $data['signature_request_id'], $data['placements']);
+        }
+
+        // Free-form signing supports one placement per call. Multi-slot
         // signing requires the signer driver to stamp multiple images in
         // one pass — current pipeline signs the unsigned PDF each time,
         // so calling it N times produces N separate signed copies rather
@@ -205,6 +223,76 @@ class PdfTemplateSignerController extends Controller
             'signed_document_path' => $signed->signed_document_path,
             'signed_at'            => optional($signed->signed_at)->toIso8601String(),
             'message'              => 'Document signed successfully.',
+        ]);
+    }
+
+    /**
+     * Sign one slot of an open signing session.
+     *
+     * The session owns the running document and the sequencing rules, so this
+     * is a thin authorisation-and-delegate step. The submitted placement is
+     * accepted only as a correction to the slot's own frozen coordinates —
+     * never as a way to sign a different slot.
+     */
+    protected function finalizeSessionRequest(int $requestId, array $placements): JsonResponse
+    {
+        $signatureRequest = SignatureRequest::query()
+            ->whereKey($requestId)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $signatureRequest) {
+            return response()->json([
+                'error' => 'That signature request does not exist, or is not assigned to you.',
+            ], 403);
+        }
+
+        // Let the signer nudge their own signature within the slot before
+        // committing, but only for the slot that is actually theirs.
+        $placement = collect($placements)->firstWhere('slot', $signatureRequest->slot_key);
+
+        if ($placement !== null) {
+            $signatureRequest->update([
+                'page'   => $placement['page'],
+                'x'      => $placement['x'],
+                'y'      => $placement['y'],
+                'width'  => $placement['width'],
+                'height' => $placement['height'],
+            ]);
+        }
+
+        try {
+            $signed = app(SigningSessionManager::class)
+                ->sign($signatureRequest->fresh(), (int) auth()->id());
+        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'error' => 'Signing failed: '.$e->getMessage(),
+                'hint'  => 'See storage/logs/laravel.log for the full stacktrace.',
+            ], 422);
+        }
+
+        $session = $signatureRequest->session->fresh(['requests']);
+
+        return response()->json([
+            'status'               => 'signed',
+            'signature_uuid'       => $signed->uuid,
+            'signed_document_path' => $signed->signed_document_path,
+            'signed_at'            => optional($signed->signed_at)->toIso8601String(),
+            'session'              => [
+                'uuid'        => $session->uuid,
+                'status'      => $session->status,
+                'outstanding' => $session->outstandingRequests()
+                    ->map(fn (SignatureRequest $r) => ['slot' => $r->slot_key, 'role' => $r->role])
+                    ->values()
+                    ->all(),
+            ],
+            'message' => $session->isComplete()
+                ? 'Document signed. All signatories have now signed.'
+                : 'Document signed. Waiting on the remaining signatories.',
         ]);
     }
 
