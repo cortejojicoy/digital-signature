@@ -44,6 +44,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Verification QR
+    |--------------------------------------------------------------------------
+    | A QR carrying the signer, the signature UUID and a verification URL is
+    | stamped to the right of each visible signature. It needs about another
+    | signature's width of clear space, so forms that place signatures side by
+    | side should turn it off rather than have it overlap the next block.
+    */
+    'qr' => [
+        'enabled' => env('SIGNATURE_QR_ENABLED', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Hashing
     |--------------------------------------------------------------------------
     */
@@ -279,6 +292,44 @@ return [
         'navigation_icon'  => env('SIGNATURE_INBOX_ICON', 'heroicon-o-inbox-arrow-down'),
         'navigation_group' => env('SIGNATURE_INBOX_GROUP'),
         'navigation_sort'  => env('SIGNATURE_INBOX_SORT'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Floating launcher
+    |--------------------------------------------------------------------------
+    | A floating button, pinned to a corner of every panel page, that opens a
+    | slide-over with the documents waiting on the signed-in user and their
+    | signature library. It exists because signing is an interruption, not a
+    | destination: a signatory arrives on some other page, and the work that
+    | needs them should come to that page rather than make them find a sidebar
+    | item under whatever navigation group the host app happened to choose.
+    |
+    | replaces_navigation: with the launcher on, the inbox page and the
+    |   Signatures resource stop registering sidebar/topbar items — the
+    |   launcher is the entry point and two of them is clutter. Both pages stay
+    |   routable, and the slide-over links to them. Set this to false to have
+    |   the launcher AND the navigation items.
+    |
+    | poll_seconds: how often the badge count refreshes while a page is open.
+    |   0 disables polling (the count is then only as fresh as the page).
+    |
+    | color: the button's background. Null uses a neutral that reads on light
+    |   and dark themes; set a brand hex to match your panel. This is a plain
+    |   hex rather than a Filament color token because the CSS custom-property
+    |   format for those changed between Filament majors, and a launcher that
+    |   renders invisible on one of the three supported versions is worse than
+    |   one that isn't brand-coloured by default.
+    */
+    'launcher' => [
+        'enabled'             => env('SIGNATURE_LAUNCHER_ENABLED', true),
+        'replaces_navigation' => env('SIGNATURE_LAUNCHER_REPLACES_NAV', true),
+        'position'            => env('SIGNATURE_LAUNCHER_POSITION', 'bottom-right'),
+        'icon'                => env('SIGNATURE_LAUNCHER_ICON', 'heroicon-o-pencil-square'),
+        'label'               => env('SIGNATURE_LAUNCHER_LABEL', 'Signatures'),
+        'color'               => env('SIGNATURE_LAUNCHER_COLOR'),
+        'poll_seconds'        => env('SIGNATURE_LAUNCHER_POLL', 60),
+        'hide_when_empty'     => env('SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY', false),
     ],
 
     /*
