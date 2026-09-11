@@ -92,6 +92,27 @@ jobs:
             exit 1
           fi
 
+  placement:
+    # The launcher's overlap avoidance runs in the browser, so the PHP matrix
+    # above cannot see it. This executes the shipped code — extracted from the
+    # Blade view at run time, so it cannot drift — against a simulated DOM.
+    # Without it, a regression in where the floating button lands would only
+    # ever surface as a host app's UI covering something.
+    runs-on: ubuntu-latest
+
+    name: Launcher placement (Node)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No install step: the test deliberately uses nothing but Node built-ins.
+      - name: Run placement checks
+        run: npm run test:js
+
 # NOTE — deliberately no PHPStan or Pint job yet.
 #
 # Both tools currently fail on code that predates this workflow: `phpstan

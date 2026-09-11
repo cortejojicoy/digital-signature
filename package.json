@@ -5,7 +5,8 @@
     "type": "module",
     "scripts": {
         "build": "node esbuild.config.js",
-        "dev": "node esbuild.config.js --watch"
+        "dev": "node esbuild.config.js --watch",
+        "test:js": "node tests/js/placement.test.mjs"
     },
     "dependencies": {
         "react": "^18.3.1",
