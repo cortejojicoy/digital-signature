@@ -16,19 +16,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Filament 3 — the legacy component hierarchy (Tables\Actions\Action,
-          # static Page::$view, Forms\Form + Infolists\Infolist).
-          - { php: '8.2', laravel: '^11.0', filament: '^3.0', testbench: '^9.0' }
-          - { php: '8.3', laravel: '^11.0', filament: '^3.0', testbench: '^9.0' }
+          # Filament 3 — the legacy component hierarchy: Tables\Actions\Action
+          # for table rows, a static Page::$view, Forms\Form + Infolists\Infolist.
+          - { php: '8.2', laravel: '^12.0', filament: '^3.0', testbench: '^10.0' }
+          - { php: '8.3', laravel: '^12.0', filament: '^3.0', testbench: '^10.0' }
 
           # Filament 4 — Schemas, unified Actions, instance Page::$view.
-          - { php: '8.2', laravel: '^11.0', filament: '^4.0', testbench: '^9.0' }
-          - { php: '8.3', laravel: '^12.0', filament: '^4.0', testbench: '^10.0' }
+          - { php: '8.2', laravel: '^12.0', filament: '^4.0', testbench: '^10.0' }
           - { php: '8.4', laravel: '^12.0', filament: '^4.0', testbench: '^10.0' }
 
           # Filament 5.
           - { php: '8.3', laravel: '^12.0', filament: '^5.0', testbench: '^10.0' }
           - { php: '8.4', laravel: '^12.0', filament: '^5.0', testbench: '^10.0' }
+
+          # Laravel 11 is deliberately absent. Every 11.x release including the
+          # final one (11.56.1) is affected by PKSA-mdq4-51ck-6kdq (CRLF
+          # injection in the default email rule, fixed in 12.60.0), and Laravel
+          # 11 is past its security-support window, so no patched 11.x will
+          # ship. Composer 2.9 blocks advisory-affected packages by default, so
+          # the whole line is uninstallable — see composer.json.
 
     name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · Filament ${{ matrix.filament }}
 
@@ -49,14 +55,42 @@ jobs:
             "filament/filament:${{ matrix.filament }}"
           composer require --dev --no-interaction --no-update \
             "orchestra/testbench:${{ matrix.testbench }}"
-          composer update --prefer-dist --no-interaction --no-progress
+          composer update --prefer-dist --no-interaction --no-progress --with-all-dependencies
 
       - name: Report resolved versions
-        run: |
-          composer show filament/filament laravel/framework | grep -E "^versions|^name" || true
+        run: composer show --direct
 
+      # Fails the build if a resolved dependency carries a known advisory,
+      # rather than letting it pass quietly. `composer update` already refuses
+      # to install advisory-affected packages by default; this catches
+      # advisories published after the lock was resolved.
+      - name: Audit dependencies
+        run: composer audit --abandoned=ignore
+
+      # `vendor/bin/pest` alone is not enough to prove the suite ran.
+      # A fatal inside PHPUnit's output buffer (TCPDF calling die(), a
+      # TypeError in a C extension call) kills the runner mid-run, discards the
+      # buffered message, and still exits 0 — every remaining test file is
+      # silently skipped. Requiring the summary line, and the expected file
+      # count, turns that back into a failure.
       - name: Run tests
-        run: vendor/bin/pest
+        run: |
+          set -o pipefail
+          vendor/bin/pest | tee pest-output.txt
+
+          if ! grep -qE '^ *Tests: ' pest-output.txt; then
+            echo "::error::Pest exited without printing a summary — the runner died mid-run and tests were silently skipped."
+            exit 1
+          fi
+
+          expected=$(find tests -name '*Test.php' -size +0 | wc -l | tr -d ' ')
+          actual=$(grep -cE '^ +(PASS|FAIL)' pest-output.txt)
+          echo "Test files expected: $expected, reported: $actual"
+
+          if [ "$actual" -lt "$expected" ]; then
+            echo "::error::Only $actual of $expected test files ran."
+            exit 1
+          fi
 
 # NOTE — deliberately no PHPStan or Pint job yet.
 #
