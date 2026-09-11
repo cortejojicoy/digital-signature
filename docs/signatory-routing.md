@@ -398,12 +398,25 @@ than no session — the document looks in-flight when nothing can happen.
 On Filament v3 a table row needs `RequestSignaturesTableAction` instead; see
 [Filament version compatibility](#filament-version-compatibility).
 
-### The inbox
+### The inbox, and the launcher that fronts it
 
-The plugin registers an **Awaiting my signature** page with a count badge.
-Each Sign click produces the signature in that user's own request. Turn it off
-per panel with `SignaturePlugin::make()->withoutInbox()`, or globally with
-`signature.inbox.enabled`.
+Two surfaces onto one queue:
+
+- A **floating launcher** — a button pinned to every panel page whose
+  slide-over lists what is waiting, with Sign and Decline on each row. This is
+  the default entry point, because a signatory is always in the middle of
+  something else when a document reaches them.
+- An **Awaiting my signature** page, for the full view.
+
+While the launcher is on it takes the navigation items with it: the inbox page
+and the Signatures resource stay routable but stop claiming sidebar slots, and
+the slide-over links to both. Keep both with
+`signature.launcher.replaces_navigation = false`; turn the launcher off per
+panel with `SignaturePlugin::make()->withoutFloatingLauncher()`, or the page
+with `->withoutInbox()` / `signature.inbox.enabled`.
+
+Either way each Sign click produces the signature in that user's own request,
+because both surfaces run the same `ActsOnSignatureRequests` code.
 
 ### Escape hatches
 

@@ -151,13 +151,49 @@ SignaturePlugin::make()->withoutResource();   // you're shipping your own resour
 SignaturePlugin::make()->withoutInbox();      // page stays routable, leaves the sidebar
 ```
 
+### What this puts in front of users
+
+By default the plugin adds **no navigation items**. It mounts a **floating
+launcher** instead — a button pinned to the corner of every panel page whose
+slide-over lists the documents waiting on the signed-in user, with Sign and
+Decline on each row, plus links to their signature library and the full inbox.
+
+That is deliberate: signing is an interruption, not a destination. A signatory
+is in the middle of something else when a document reaches them, and a sidebar
+item filed under whatever navigation group your app happens to use is a worse
+place to put the work than the page they're already on.
+
+The **Signatures** resource and the **Awaiting my signature** page are both
+still registered and routable — they just don't claim sidebar slots while the
+launcher is there. Three ways to change that:
+
+```php
+// Keep the launcher AND the sidebar items.
+// config/signature.php → launcher.replaces_navigation = false
+// or: SIGNATURE_LAUNCHER_REPLACES_NAV=false
+
+// No launcher on this panel; sidebar items come back automatically.
+SignaturePlugin::make()->withoutFloatingLauncher()
+
+// No launcher anywhere.
+// SIGNATURE_LAUNCHER_ENABLED=false
+```
+
+No combination of those flags can leave a panel with no route to signatures:
+navigation suppression is conditional on a launcher existing to replace it.
+
+Appearance is config — position (`bottom-right` default, or any corner), icon,
+label, a brand hex for the button, and how often the badge count refreshes. See
+[Configuration](configuration.md#launcher).
+
 ### Done when
 
-- Log into the panel: **Signatures** and **Awaiting my signature** are in the
-  sidebar.
-- A user can open Signatures → Create, draw or upload a signature image, and
-  save it. That stored row is the prerequisite for every signing flow that
-  follows — a user with no registered signature cannot sign anything.
+- Log into the panel: the floating button is in the corner, and its slide-over
+  opens, closes on Escape, and reports "Nothing waiting on you".
+- A user can reach Signatures → Create from the slide-over footer, draw or
+  upload a signature image, and save it. That stored row is the prerequisite
+  for every signing flow that follows — a user with no registered signature
+  cannot sign anything, and the slide-over says exactly that until they do.
 
 ---
 
@@ -647,6 +683,7 @@ provider aliases it to the v3 or v4/v5 implementation at register time.
 | Designer page | `…\Filament\Pages\PdfTemplateDesigner` |
 | Signer page | `…\Filament\Pages\PdfTemplateSigner` |
 | Inbox page | `…\Filament\Pages\SignatureInbox` |
+| Floating launcher | `…\Filament\Livewire\SignatureLauncher` (Livewire name: `kukux-digital-signature.launcher`) |
 
 Placement rules across majors:
 
@@ -702,7 +739,17 @@ SIGNATURE_ALLOW_IMPLICIT_AFFIX=false
 SIGNATURE_AUTO_AFFIX_NOTIFY=true
 SIGNATURE_GRANT_DAYS=365
 
-# UI
+# UI — floating launcher (the default entry point)
+SIGNATURE_LAUNCHER_ENABLED=true
+SIGNATURE_LAUNCHER_REPLACES_NAV=true   # false = launcher AND sidebar items
+SIGNATURE_LAUNCHER_POSITION=bottom-right
+SIGNATURE_LAUNCHER_ICON=heroicon-o-pencil-square
+SIGNATURE_LAUNCHER_LABEL=Signatures
+SIGNATURE_LAUNCHER_COLOR=               # brand hex, e.g. #4f46e5
+SIGNATURE_LAUNCHER_POLL=60              # badge refresh seconds; 0 = off
+SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY=false
+
+# UI — pages and resource
 SIGNATURE_RESOURCE_ENABLED=true
 SIGNATURE_RESOURCE_ICON=heroicon-o-pencil-square
 SIGNATURE_RESOURCE_GROUP=
@@ -741,6 +788,9 @@ that references it.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Signatures / Awaiting my signature missing from the sidebar | Expected: the floating launcher replaces them. | Use the launcher, or set `SIGNATURE_LAUNCHER_REPLACES_NAV=false` to show both. |
+| No floating button on any page | Launcher disabled, or the plugin isn't on this panel. | Check `launcher.enabled` and `withoutFloatingLauncher()`, then that `SignaturePlugin::make()` is on that panel. |
+| Floating button appears but the slide-over is empty and never loads | Livewire/Alpine assets not loading on the page. | The launcher needs the panel's own Livewire+Alpine; check the browser console on a standard panel page. |
 | `Plugin [signature] is not registered for panel [admin]` | Resource discovered from `vendor/` without the plugin. | Add `SignaturePlugin::make()` to that panel's provider. |
 | Signature pad renders as an empty box | JS not published, or published from an older version. | `php artisan filament:assets`, hard-reload. |
 | `PrimarySignatureExistsException` on registration | User already has an active reusable signature. | Revoke the existing one first — the single-primary rule is deliberate. |

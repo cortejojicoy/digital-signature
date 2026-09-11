@@ -14,6 +14,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 | Doc | Description |
 |---|---|
+| [Implementation Plan](docs/implementation-plan.md) | **Start here.** Phase-by-phase plan for integrating the package into your app |
 | [Installation](docs/installation.md) | Composer, migrations, plugin registration, admin resource |
 | [Configuration](docs/configuration.md) | All config keys and env variables |
 | [Model Setup](docs/model-setup.md) | Signable interface and HasSignatures trait |
@@ -61,8 +62,27 @@ use Kukux\DigitalSignature\SignaturePlugin;
 ```
 
 This registers:
+- **A floating launcher** — a button on every panel page whose slide-over shows what's awaiting the signed-in user, with Sign / Decline on each row
 - **Signatures** — a full admin resource for registering reusable signature images and viewing signature records
 - **Sign Document** — header actions inside the Signatures resource for signing with a registered signature
+
+### The floating launcher
+
+Signing is an interruption, not a destination. Rather than adding sidebar items
+a signatory has to go looking for, the plugin pins a button to every page of
+the panel; clicking it slides over the documents waiting on them.
+
+```php
+SignaturePlugin::make()                          // launcher on (default)
+SignaturePlugin::make()->withoutFloatingLauncher()  // off; sidebar items return
+```
+
+While the launcher is on, the inbox page and the Signatures resource stop
+claiming navigation items — both stay routable, and the slide-over links to
+them. Keep the launcher *and* the sidebar entries with
+`SIGNATURE_LAUNCHER_REPLACES_NAV=false`. Position, icon, label, brand colour
+and badge poll interval are config; see
+[Configuration](docs/configuration.md#launcher).
 
 ---
 

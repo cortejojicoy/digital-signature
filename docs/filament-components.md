@@ -38,6 +38,58 @@ SignaturePlugin::make()->withoutResource()
 
 // Disable the resource via env (useful for non-admin panels):
 // SIGNATURE_RESOURCE_ENABLED=false
+
+// Keep the floating launcher off this panel (restores the sidebar items):
+SignaturePlugin::make()->withoutFloatingLauncher()
+```
+
+---
+
+## Floating launcher — the default entry point
+
+Registering the plugin mounts a floating button on every page of the panel, via
+a `PanelsRenderHook::BODY_END` render hook. Clicking it opens a slide-over with
+the documents waiting on the signed-in user, each with Sign and Decline, plus
+links to the full inbox and their signature library.
+
+It exists because signing is an interruption, not a destination. A signatory is
+somewhere else in the app when a document reaches them, and making them leave
+that page, find a sidebar item under whatever navigation group the host app
+chose, act, and navigate back is most of the friction in a signing flow.
+
+```php
+// On by default — nothing to register.
+SignaturePlugin::make()
+
+// Off for this panel; the inbox page and Signatures resource return to the sidebar.
+SignaturePlugin::make()->withoutFloatingLauncher()
+
+// Conditionally, e.g. staff panel only.
+SignaturePlugin::make()->withFloatingLauncher($panel->getId() === 'staff')
+```
+
+Appearance and behaviour are config — position, icon, label, brand colour,
+badge poll interval — see [Configuration](configuration.md#launcher).
+
+**It takes navigation with it.** While the launcher is on, the inbox page and
+the Signatures resource stop registering navigation items; both stay routable
+and the slide-over links to them. Set
+`signature.launcher.replaces_navigation` to `false` to keep both.
+
+The slide-over shares `ActsOnSignatureRequests` with the full-page inbox, so
+the two surfaces cannot disagree about what a signatory may do: same query,
+same ownership checks, same exception handling, and the signature is still
+produced inside that user's own authenticated request with their own
+certificate.
+
+Two things it does *not* need: a build step (the styles are namespaced and
+inline, so no host Tailwind utility can go missing under it) and its own JS
+(Alpine handles open/close, Livewire handles data).
+
+Mounting it yourself — outside a panel, or in a custom layout:
+
+```blade
+<livewire:kukux-digital-signature.launcher />
 ```
 
 ---

@@ -197,6 +197,14 @@ SIGNATURE_MACHINE_LOCK=true         # reject re-upload from different device
 SIGNATURE_QUEUE=default
 SIGNATURE_QUEUE_CONNECTION=         # blank = app default
 
+# Floating launcher
+SIGNATURE_LAUNCHER_ENABLED=true
+SIGNATURE_LAUNCHER_REPLACES_NAV=true
+SIGNATURE_LAUNCHER_POSITION=bottom-right
+SIGNATURE_LAUNCHER_LABEL=Signatures
+SIGNATURE_LAUNCHER_COLOR=
+SIGNATURE_LAUNCHER_POLL=60
+
 # Optional features
 SIGNATURE_TSA_URL=                  # blank = disabled
 SIGNATURE_CRL_ENABLED=false
@@ -270,6 +278,44 @@ Both `auto_affix` and `sequence_mode` can be overridden per template with the
 | `inbox.navigation_sort` | `SIGNATURE_INBOX_SORT` | `null` |
 
 Per-panel override: `SignaturePlugin::make()->withoutInbox()`.
+
+### `launcher`
+
+The floating button, pinned to a corner of every panel page, that opens a
+slide-over with the documents waiting on the signed-in user and their signature
+library. On by default.
+
+| Key | Env | Default |
+|---|---|---|
+| `launcher.enabled` | `SIGNATURE_LAUNCHER_ENABLED` | `true` |
+| `launcher.replaces_navigation` | `SIGNATURE_LAUNCHER_REPLACES_NAV` | `true` |
+| `launcher.position` | `SIGNATURE_LAUNCHER_POSITION` | `bottom-right` |
+| `launcher.icon` | `SIGNATURE_LAUNCHER_ICON` | `heroicon-o-pencil-square` |
+| `launcher.label` | `SIGNATURE_LAUNCHER_LABEL` | `Signatures` |
+| `launcher.color` | `SIGNATURE_LAUNCHER_COLOR` | `null` (built-in neutral) |
+| `launcher.poll_seconds` | `SIGNATURE_LAUNCHER_POLL` | `60` |
+| `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
+
+`position` accepts `bottom-right`, `bottom-left`, `top-right`, `top-left`. The
+slide-over enters from whichever side the button sits on.
+
+**`replaces_navigation`** is the key worth understanding. While the launcher is
+on, the inbox page and the Signatures resource stop registering sidebar/topbar
+items — the launcher is the entry point, and two doors to one room is clutter.
+Both pages stay fully routable and the slide-over links to them. Set it to
+`false` to have the launcher *and* the navigation items.
+
+Turning the launcher off restores both navigation items automatically:
+suppression is conditional on there being a launcher to replace them with, so
+no combination of these flags can leave a panel with no way to reach
+signatures.
+
+`color` is a plain hex rather than a Filament color token, because the CSS
+custom-property format for those changed between Filament majors and a button
+that renders invisible on one of the three supported versions would be worse
+than one that isn't brand-coloured by default.
+
+Per-panel override: `SignaturePlugin::make()->withoutFloatingLauncher()`.
 
 ### `filament_version`
 
