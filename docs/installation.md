@@ -3,8 +3,17 @@
 ## Requirements
 
 - PHP 8.2+ with `ext-openssl` and `ext-gd`
-- Laravel 11 or 12
+- Laravel 12
 - Filament 3, 4, or 5
+
+> **Laravel 11 is not supported.** Every 11.x release, up to and including the
+> final 11.56.1, is affected by
+> [PKSA-mdq4-51ck-6kdq](https://packagist.org/security-advisories/) (CRLF
+> injection in the default email rule, patched in 12.60.0). Laravel 11 is past
+> its security-support window, so no fixed 11.x will ever be released. Composer
+> 2.9 blocks advisory-affected packages by default, which makes the whole line
+> uninstallable — this package dropped the constraint rather than ask you to
+> disable that protection.
 
 ---
 

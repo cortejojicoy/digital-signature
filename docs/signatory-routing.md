@@ -470,6 +470,17 @@ wouldn't reach.
 that matrix, `^3.0 || ^4.0 || ^5.0` would be an aspiration rather than a
 guarantee.
 
+Two things that job does beyond running Pest, both learned the hard way:
+
+- **It requires the summary line.** A fatal inside PHPUnit's output buffer —
+  TCPDF calling `die()`, or a `TypeError` from a GD call — kills the runner,
+  discards the buffered message, and still exits 0, silently skipping every
+  later test file. The job greps for `Tests:` and compares the number of test
+  files reported against the number on disk.
+- **It runs `composer audit`.** This is a signing package; shipping against a
+  dependency with a live advisory is not acceptable, and the audit makes that
+  a build failure rather than a footnote.
+
 ---
 
 ## Configuration reference
