@@ -34,9 +34,19 @@ class FpdiDriver implements PdfSignerDriver
         $disk   = Storage::disk(config('signature.storage_disk'));
         $inPath = $disk->path($pdfPath);
 
-        $pdf = new TcpdfFpdi();
+        // 'pt' — placements are PDF points everywhere else in this package
+        // (SlotDefinition, the designer, signature_positions), and TCPDF
+        // otherwise defaults to MILLIMETRES. Left on the default, a y of 389
+        // points was drawn as 389mm down a 297mm page: the stamp fell off the
+        // bottom and TCPDF's auto page break silently manufactured blank pages
+        // to hold it.
+        $pdf = new TcpdfFpdi('P', 'pt');
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
+
+        // A signature is placed at explicit coordinates on a page that already
+        // exists; there is never a reason for one to spill onto a new page.
+        $pdf->SetAutoPageBreak(false);
 
         $count = $pdf->setSourceFile($inPath);
 
@@ -53,10 +63,15 @@ class FpdiDriver implements PdfSignerDriver
                 $sigW = $position['width']  ?? 60;
                 $sigH = $position['height'] ?? 20;
 
+                // Placements are PDF-native: y is the BOTTOM edge measured from
+                // the BOTTOM of the page. TCPDF draws from the top-left corner,
+                // so flip it against this page's own height.
+                $topY = $sz['height'] - ($sigY + $sigH);
+
                 $pdf->Image(
                     $disk->path($imagePath),
                     $sigX,
-                    $sigY,
+                    $topY,
                     $sigW,
                     $sigH,
                     'PNG',
@@ -65,7 +80,7 @@ class FpdiDriver implements PdfSignerDriver
                 if ($qrPayload !== '') {
                     $qrSize = $sigH;
                     $qrX    = $sigX + $sigW + 2;
-                    $qrY    = $sigY;
+                    $qrY    = $topY;
 
                     $pdf->write2DBarcode(
                         $qrPayload,
@@ -90,9 +105,18 @@ class FpdiDriver implements PdfSignerDriver
         //   form-field changes and additional signatures (ISO 32000-1 §12.8.2.2).
         //   Any structural modification after signing is detectable by PDF readers.
         // ------------------------------------------------------------------
+        $extracertsFile = null;
+
         if (!empty($certData['cert']) && !empty($certData['pkey'])) {
-            $tsaUrl     = config('signature.tsa.url') ?: null;
-            $extracerts = $this->buildExtracertsPem($certData['extracerts'] ?? []);
+            $tsaUrl = config('signature.tsa.url') ?: null;
+
+            // TCPDF hands `extracerts` straight to openssl_pkcs7_sign()'s
+            // $untrusted_certificates_filename, which is a PATH, not PEM
+            // content. Passing the chain inline fails with "Error opening the
+            // file, -----BEGIN CERTIFICATE-----". Self-signed certificates have
+            // no chain, which is why this only bites once a real CA is
+            // configured.
+            $extracertsFile = $this->writeExtracertsFile($certData['extracerts'] ?? []);
 
             $sigInfo = [
                 'Name'        => config('app.name'),
@@ -105,11 +129,11 @@ class FpdiDriver implements PdfSignerDriver
             }
 
             $pdf->setSignature(
-                $certData['cert'],   // PEM certificate string
-                $certData['pkey'],   // PEM private key (decrypted from PFX)
-                '',                  // key password — empty, already decrypted
-                $extracerts,         // CA chain PEM (empty for self-signed)
-                2,                   // cert_type: 2 = certifying, DocMDP P=2
+                $certData['cert'],      // PEM certificate string
+                $certData['pkey'],      // PEM private key (decrypted from PFX)
+                '',                     // key password — empty, already decrypted
+                $extracertsFile ?? '',  // CA chain FILE (empty for self-signed)
+                2,                      // cert_type: 2 = certifying, DocMDP P=2
                 $sigInfo,
             );
         }
@@ -118,7 +142,15 @@ class FpdiDriver implements PdfSignerDriver
             . '/' . pathinfo($pdfPath, PATHINFO_FILENAME)
             . '_signed_' . time() . '.pdf';
 
-        $disk->put($outName, $pdf->Output('', 'S'));
+        try {
+            $disk->put($outName, $pdf->Output('', 'S'));
+        } finally {
+            // The chain file only has to outlive Output(), which is where
+            // TCPDF actually runs openssl_pkcs7_sign().
+            if ($extracertsFile !== null) {
+                @unlink($extracertsFile);
+            }
+        }
 
         return $outName;
     }
@@ -126,8 +158,32 @@ class FpdiDriver implements PdfSignerDriver
     // -------------------------------------------------------------------------
 
     /**
+     * Write the CA chain to a temporary PEM file and return its path, or null
+     * when there is no chain to write.
+     *
+     * A file rather than a string because that is what openssl_pkcs7_sign()
+     * takes — see the call site. The caller deletes it once Output() has run.
+     */
+    private function writeExtracertsFile(array|string $extracerts): ?string
+    {
+        $pem = $this->buildExtracertsPem($extracerts);
+
+        if (trim($pem) === '') {
+            return null;
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'sigchain');
+
+        if ($path === false || file_put_contents($path, $pem) === false) {
+            throw new \RuntimeException('Could not write the certificate chain to a temporary file.');
+        }
+
+        return $path;
+    }
+
+    /**
      * Convert extracerts from the mixed format returned by openssl_pkcs12_read()
-     * to a single concatenated PEM string that TCPDF expects.
+     * into one concatenated PEM string.
      */
     private function buildExtracertsPem(array|string $extracerts): string
     {
