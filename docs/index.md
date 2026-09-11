@@ -18,6 +18,8 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [PDF Templates](pdf-templates.md) | `PdfTemplate` contract, slot definitions, placement-designer foundations |
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
+| [Signatory Routing](signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory PDFs, Filament v3/v4/v5 compatibility |
+| [Concept: Signatory Routing](concepts/signatory-routing.md) | The design record behind the above — trade-offs, rejected approaches, resolved questions |
 
 ---
 

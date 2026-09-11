@@ -205,3 +205,79 @@ SIGNATURE_CRL_ENABLED=false
 CFSSL_HOST=http://localhost:8888
 CFSSL_PROFILE=client
 ```
+
+---
+
+## Signatory routing, sessions and consent
+
+Added by [Signatory Routing](signatory-routing.md). Full explanations of each
+mode live there; this is the key reference.
+
+### `sessions`
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `sessions.sequence_mode` | `SIGNATURE_SEQUENCE_MODE` | `sequential` | `sequential` honours `SlotDefinition::$order` (Prepared → Attested → Noted); `parallel` lets any assigned signatory act at any time |
+| `sessions.expires_after_days` | `SIGNATURE_SESSION_EXPIRY_DAYS` | `null` | Sessions stop accepting signatures after this many days; null disables expiry |
+| `sessions.notification_channels` | — | `['mail']` | Channels for `SignatureRequestedNotification` |
+
+### `multi_signature`
+
+| Key | Env | Default |
+|---|---|---|
+| `multi_signature.mode` | `SIGNATURE_MULTI_MODE` | `progressive` |
+
+- **`progressive`** — each signature is stamped onto the previous signatory's
+  output and re-signed with that signatory's own certificate. Every visible
+  signature is present and the database holds a verifiable hash chain, but only
+  the most recent PKCS#7 block survives inside the PDF (FPDI rewrites the file
+  on every pass).
+- **`incremental`** — true PAdES; requires a driver implementing
+  `SupportsIncrementalSigning`. Neither bundled driver does, so selecting this
+  mode without one throws `IncrementalSigningUnsupportedException` at sign time
+  rather than silently producing a document whose earlier signatures are gone.
+
+### `auto_affix`
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `auto_affix.mode` | `SIGNATURE_AUTO_AFFIX_MODE` | `approval` | `approval`, `delegated` or `implicit` |
+| `auto_affix.allow_implicit` | `SIGNATURE_ALLOW_IMPLICIT_AFFIX` | `false` | Second acknowledgement required before `implicit` will run |
+| `auto_affix.notify` | `SIGNATURE_AUTO_AFFIX_NOTIFY` | `true` | Notify the signatory on every auto-affix. Leave this on. |
+| `auto_affix.default_grant_days` | `SIGNATURE_GRANT_DAYS` | `365` | Default lifetime of a delegation grant |
+| `auto_affix.notification_channels` | — | `['mail']` | Channels for `SignatureAutoAffixedNotification` |
+
+- **`approval`** (default) — never signs on anyone's behalf. The signature is
+  always produced in the signatory's own authenticated request.
+- **`delegated`** — signs only where the signatory created a scoped, expiring,
+  revocable `SignatureDelegation`. A standing grant means the server can produce
+  that user's signature for the grant's lifetime; that is a deliberate trade.
+- **`implicit`** — treats being tagged on a record as consent. Unsafe: anyone
+  who can edit the record can then cause that person's certificate to sign it.
+
+Both `auto_affix` and `sequence_mode` can be overridden per template with the
+`auto_affix` and `sequence_mode` keys in the template's config array.
+
+### `inbox`
+
+| Key | Env | Default |
+|---|---|---|
+| `inbox.enabled` | `SIGNATURE_INBOX_ENABLED` | `true` |
+| `inbox.navigation` | `SIGNATURE_INBOX_NAV` | `true` |
+| `inbox.navigation_label` | `SIGNATURE_INBOX_LABEL` | `Awaiting my signature` |
+| `inbox.navigation_icon` | `SIGNATURE_INBOX_ICON` | `heroicon-o-inbox-arrow-down` |
+| `inbox.navigation_group` | `SIGNATURE_INBOX_GROUP` | `null` |
+| `inbox.navigation_sort` | `SIGNATURE_INBOX_SORT` | `null` |
+
+Per-panel override: `SignaturePlugin::make()->withoutInbox()`.
+
+### `filament_version`
+
+| Key | Env | Default |
+|---|---|---|
+| `filament_version` | `SIGNATURE_FILAMENT_VERSION` | auto-detected |
+
+Normally read from Composer's installed-versions manifest — a class probe
+cannot tell Filament 4 from 5, since both ship `Filament\Schemas\Schema`. Set
+this only to force a branch (3, 4 or 5), e.g. to exercise the v3 component
+classes on a v5 install.

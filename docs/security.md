@@ -415,7 +415,7 @@ app(CrlValidator::class)->validate($certData);
 
 ## Database columns
 
-Defined in `2024_01_01_000002_create_digital_signatures_table`:
+Defined in `2024_01_01_000003_create_digital_signatures_table`:
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|

@@ -8,7 +8,8 @@ A **PDF template** declares to the plugin that the host app produces a particula
 
 Templates are **additive**. The existing `Signable` flow ([Model Setup](model-setup.md), [Ad-hoc Signing](ad-hoc-signing.md), [On-Demand PDF Signing](on-demand-pdf-signing.md)) continues to work unchanged — templates simply give you a way to register, enumerate, and configure those signables centrally.
 
-> **Status.** Steps 1, 4, and 5 are landed: the contract + registry + persistence (step 1), the placement designer (step 4), and the end-user signer page with real finalize wiring (step 5 — Phase B). Sign-time auto-resolution of slot coordinates inside `SignatureManager` (step 2) is the remaining piece — useful if you want signing to read saved slots from the database instead of accepting them in the request body, but not required for the basic flow.
+> **Status.** The contract, registry and persistence, the placement designer, and the end-user signer page with real finalize wiring are all landed.
+> Slot coordinates are now resolved from the database automatically for session-based signing — see [Signatory Routing](signatory-routing.md), which builds on everything here to route each slot to a specific person and carry a document through several signatories.
 
 ---
 
@@ -91,6 +92,8 @@ Three accepted shapes, mix freely:
     ['key' => 'in_charge', 'label' => 'In Charge', 'required' => true],
 ],
 ```
+
+A slot may also declare `signatory`, `role` and `order` to bind it to a specific person on the record — see [Signatory Routing](signatory-routing.md).
 
 Each slot may also carry an initial placement (`page`, `x`, `y`, `width`, `height` in PDF points) — they seed the placement designer the first time a slot is opened. Once an admin saves coordinates via the designer, the persisted row wins.
 
@@ -544,18 +547,29 @@ Action::make('sign_with_my_signature')
 
 The user lands on the signer page with their signature pre-selected, the DTR record loaded, and a "Finish & Save" button that produces a real signed PDF.
 
-### Phase B limitations (single placement)
+### Multi-slot signing
 
-The current finalize requires **exactly one placement per call**. Multi-slot signing (e.g., employee + in_charge in one operation) isn't supported yet — calling `storeForDocument` + `embedAndFinalize` N times produces N separate signed PDFs because each pass signs the *unsigned* source. Native multi-stamp signing requires the signer driver to apply all images in one pass, which is a future enhancement.
+A single `finalize` call still applies **one** placement: the free-form signer
+path signs the record's own PDF, so calling it N times would produce N separate
+signed copies rather than one document with N stamps.
 
-If you submit more than one placement, the endpoint returns `422` with a clear error.
+Documents that genuinely need several signatures go through a **signing
+session** instead, which freezes the PDF once and chains each signature onto
+the previous one's output. The signer page participates in that flow by passing
+`?request=<id>` (the inbox links it for you); `finalize` then routes through
+`SigningSessionManager`, which enforces the slot ownership and sequencing rules.
 
----
+See [Signatory Routing](signatory-routing.md) for the full picture, including
+what `progressive` and `incremental` signing modes each guarantee.
 
 ## What's still ahead
 
-- **Step 2** — `SignatureManager` populating `SignaturePosition` from `digital_pdf_template_slots` automatically. Today the React island sends placement coords explicitly; this step lets the host call `SignatureManager::store()` with just a template + slot key and have coords looked up.
-- **Multi-placement signing** — stamp multiple slots in one signing event (one Signature row with N positions).
+- **Multi-stamp in a single cryptographic pass** — true PAdES incremental
+  signing, so one PDF carries N independently verifiable signer certificates.
+  The session machinery is in place; it needs a signer driver implementing
+  [`SupportsIncrementalSigning`](../src/Contracts/SupportsIncrementalSigning.php),
+  which neither bundled driver can (FPDI rewrites the document). See
+  [Signatory Routing → Signing modes](signatory-routing.md#signing-modes--read-this-before-choosing).
 
 You can use the full system today to:
 
@@ -563,6 +577,8 @@ You can use the full system today to:
 - open the designer for any registered template and place slots visually,
 - open the signer page for any registered template + owned signature,
 - sign a real document end-to-end via `?signable=ID` and `HasPdfTemplate`,
+- route each slot to a person and take a document through several signatories
+  ([Signatory Routing](signatory-routing.md)),
 - read coordinates from your own code to drive `SignatureManager::store(...)` directly.
 
 ---
@@ -573,3 +589,4 @@ You can use the full system today to:
 - [On-Demand PDF Signing](on-demand-pdf-signing.md) — when the PDF is generated, not stored
 - [Signing Workflow](signing-workflow.md) — `SignatureManager` API, events, statuses
 - [Filament Components](filament-components.md) — `SignaturePlugin`, fluent registration API
+- [Signatory Routing](signatory-routing.md) — binding slots to people, signing sessions, consent models
