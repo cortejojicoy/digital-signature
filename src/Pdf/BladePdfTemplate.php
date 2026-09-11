@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Kukux\DigitalSignature\Contracts\ConfiguresSigningSession;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Pdf\Renderers\DomPdfRenderer;
 use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
@@ -33,7 +34,7 @@ use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
  *     'renderer'      => MyRenderer::class,   // optional override
  *   ]
  */
-class BladePdfTemplate implements PdfTemplate
+class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession
 {
     /**
      * @param  list<SlotDefinition>          $slots
@@ -53,7 +54,37 @@ class BladePdfTemplate implements PdfTemplate
         protected ?Closure $dataResolver = null,
         protected ?PdfRenderer $renderer = null,
         protected ?string $signableClass = null,
+
+        /**
+         * How signatures get applied on this template's documents:
+         *   'approval'  — every signatory signs in their own session (default)
+         *   'delegated' — a standing SignatureDelegation may sign for them
+         *   'implicit'  — tagging is treated as consent (unsafe; opt-in only)
+         */
+        protected ?string $autoAffixMode = null,
+
+        /** 'sequential' (honour slot order) or 'parallel'. */
+        protected ?string $sequenceMode = null,
     ) {
+    }
+
+    /**
+     * Consent model for this template, falling back to the package default.
+     * See docs/signatory-routing.md §"Consent models".
+     */
+    public function autoAffixMode(): string
+    {
+        return $this->autoAffixMode
+            ?? config('signature.auto_affix.mode', 'approval');
+    }
+
+    /**
+     * Whether signatories must sign in slot order.
+     */
+    public function sequenceMode(): string
+    {
+        return $this->sequenceMode
+            ?? config('signature.sessions.sequence_mode', 'sequential');
     }
 
     /**
@@ -96,6 +127,8 @@ class BladePdfTemplate implements PdfTemplate
             dataResolver:  $config['data_resolver'] ?? null,
             renderer:      null,
             signableClass: $config['signable'] ?? null,
+            autoAffixMode: $config['auto_affix'] ?? null,
+            sequenceMode:  $config['sequence_mode'] ?? null,
         );
 
         if (isset($config['renderer'])) {
@@ -162,9 +195,33 @@ class BladePdfTemplate implements PdfTemplate
         return $absPath;
     }
 
+    /**
+     * Resolve the renderer, preferring an explicit `renderer` config entry
+     * over auto-detection. Resolution is deferred to first render so a
+     * missing PDF library breaks the render, not application boot.
+     */
     protected function renderer(): PdfRenderer
     {
-        return $this->renderer ??= static::detectRenderer();
+        if ($this->renderer !== null) {
+            return $this->renderer;
+        }
+
+        if ($this->rendererClass !== null) {
+            $instance = app($this->rendererClass);
+
+            if (! $instance instanceof PdfRenderer) {
+                throw new \InvalidArgumentException(sprintf(
+                    'The [renderer] configured for template [%s] must implement %s, got %s.',
+                    $this->key,
+                    PdfRenderer::class,
+                    get_debug_type($instance),
+                ));
+            }
+
+            return $this->renderer = $instance;
+        }
+
+        return $this->renderer = static::detectRenderer();
     }
 
     /**
@@ -202,6 +259,9 @@ class BladePdfTemplate implements PdfTemplate
                 $result[] = new SlotDefinition(
                     key:   $value,
                     label: Str::title(str_replace(['_', '-'], ' ', $value)),
+                    // Declaration order is the signing order for the bare
+                    // form — the only ordering signal it can carry.
+                    order: $keyOrIndex + 1,
                 );
                 continue;
             }
@@ -238,6 +298,9 @@ class BladePdfTemplate implements PdfTemplate
             defaultWidth:  isset($config['width'])  ? (float) $config['width']  : null,
             defaultHeight: isset($config['height']) ? (float) $config['height'] : null,
             required:      (bool) ($config['required'] ?? false),
+            signatory:     $config['signatory'] ?? null,
+            role:          $config['role'] ?? null,
+            order:         isset($config['order']) ? (int) $config['order'] : null,
         );
     }
 }
