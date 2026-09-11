@@ -8,6 +8,13 @@ use Kukux\DigitalSignature\Drivers\Certificates\CfsslDriver;
 use Kukux\DigitalSignature\Drivers\Certificates\OpenSslDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\FpdiDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\TcpdfDriver;
+use Kukux\DigitalSignature\Filament\Actions\ActionResolver;
+use Kukux\DigitalSignature\Filament\Actions\HeaderActionResolver;
+use Kukux\DigitalSignature\Filament\Actions\RequestSignaturesResolver;
+use Kukux\DigitalSignature\Filament\Actions\RequestSignaturesTableResolver;
+use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesignerResolver;
+use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSignerResolver;
+use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
@@ -18,21 +25,40 @@ use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
 use Kukux\DigitalSignature\Security\PngMetaEmbedder;
 use Kukux\DigitalSignature\Security\SignatureMetadataService;
+use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
+use Kukux\DigitalSignature\Services\AutoAffixService;
 use Kukux\DigitalSignature\Services\CertificateService;
 use Kukux\DigitalSignature\Pdf\PdfPageRasterizer;
 use Kukux\DigitalSignature\Services\PdfSignerService;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
+use Kukux\DigitalSignature\Services\SignatoryRouter;
 use Kukux\DigitalSignature\Services\SignatureManager;
+use Kukux\DigitalSignature\Services\SigningSessionManager;
+use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 
 class SignatureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // Alias the canonical SignatureResource to the v3/v4 implementation BEFORE
-        // anything references the canonical name (panel registration, plugin, etc.).
-        ResourceResolver::registerAlias();
-
         $this->mergeConfigFrom(__DIR__ . '/../config/signature.php', 'signature');
+
+        // Alias every version-split component to its v3 or v4/v5 implementation
+        // BEFORE anything references a canonical name (panel registration, the
+        // plugin, host-app imports). Each of these classes has a base class or a
+        // property that changed between Filament majors — see
+        // Filament\Support\ComponentResolver and docs/signatory-routing.md §8.
+        foreach ([
+            ResourceResolver::class,
+            ActionResolver::class,
+            HeaderActionResolver::class,
+            RequestSignaturesResolver::class,
+            RequestSignaturesTableResolver::class,
+            PdfTemplateDesignerResolver::class,
+            PdfTemplateSignerResolver::class,
+            SignatureInboxResolver::class,
+        ] as $resolver) {
+            $resolver::registerAlias();
+        }
 
         $this->app->singleton(CertificateService::class, function () {
             $driver = match (config('signature.cert_driver')) {
@@ -42,12 +68,18 @@ class SignatureServiceProvider extends ServiceProvider
             return new CertificateService($driver);
         });
 
-        $this->app->singleton(PdfSignerService::class, function () {
-            $driver = match (config('signature.pdf_driver')) {
+        // Bound separately from the service so callers can inspect the driver's
+        // capabilities — SigningSessionManager asks whether it can do true
+        // incremental (PAdES) signing before accepting that mode.
+        $this->app->singleton(PdfSignerDriver::class, function () {
+            return match (config('signature.pdf_driver')) {
                 'tcpdf'  => new TcpdfDriver(),
                 default  => new FpdiDriver(),
             };
-            return new PdfSignerService($driver);
+        });
+
+        $this->app->singleton(PdfSignerService::class, function ($app) {
+            return new PdfSignerService($app->make(PdfSignerDriver::class));
         });
 
         // Security services
@@ -66,6 +98,31 @@ class SignatureServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(PdfTemplateRegistry::class);
+
+        // Signatory routing. The factory is a singleton because the plugin's
+        // resolveSignatoriesUsing() override is registered onto it at panel
+        // boot and must be visible to every later lookup.
+        $this->app->singleton(SignatoryResolverFactory::class);
+
+        $this->app->singleton(SignatoryRouter::class, function ($app) {
+            return new SignatoryRouter(
+                $app->make(PdfTemplateRegistry::class),
+                $app->make(SignatoryResolverFactory::class),
+            );
+        });
+
+        $this->app->singleton(SigningSessionManager::class, function ($app) {
+            return new SigningSessionManager(
+                $app->make(PdfTemplateRegistry::class),
+                $app->make(SignatoryRouter::class),
+                $app->make(SignatureManager::class),
+                $app->make(DocumentIntegrity::class),
+            );
+        });
+
+        $this->app->singleton(AutoAffixService::class, function ($app) {
+            return new AutoAffixService($app->make(SigningSessionManager::class));
+        });
 
         $this->app->singleton(PdfPageRasterizer::class, function () {
             return new PdfPageRasterizer(

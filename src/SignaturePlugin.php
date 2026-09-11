@@ -7,8 +7,11 @@ use Filament\Panel;
 use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Closure;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner;
+use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
+use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
 
@@ -26,6 +29,10 @@ class SignaturePlugin implements Plugin
 
     /** @var array<PdfTemplate|class-string<PdfTemplate>> */
     protected array $templates = [];
+
+    protected ?Closure $signatoryResolver = null;
+
+    protected ?bool $registerInbox = null;
 
     // -------------------------------------------------------------------------
     // Factory
@@ -128,6 +135,45 @@ class SignaturePlugin implements Plugin
         return $this;
     }
 
+    /**
+     * Install a global signatory resolver, taking precedence over each slot's
+     * own `signatory` binding.
+     *
+     * Receives ($record, $slot) and may return null to defer back to the
+     * slot's declared binding — so this is useful for special-casing one role
+     * without having to reimplement the rest.
+     *
+     * Example — route everything through an org-chart service:
+     *
+     *   SignaturePlugin::make()->resolveSignatoriesUsing(
+     *       fn ($record, $slot) => app(OrgChart::class)->holderOf($slot->role(), $record),
+     *   )
+     */
+    public function resolveSignatoriesUsing(?Closure $callback): static
+    {
+        $this->signatoryResolver = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Keep the "Awaiting my signature" inbox page off this panel. The page is
+     * still routable; it just isn't registered here.
+     */
+    public function withoutInbox(): static
+    {
+        $this->registerInbox = false;
+
+        return $this;
+    }
+
+    public function withInbox(bool $condition = true): static
+    {
+        $this->registerInbox = $condition;
+
+        return $this;
+    }
+
     // -------------------------------------------------------------------------
     // Getters (used by SignatureResource to read resolved values)
     // -------------------------------------------------------------------------
@@ -171,10 +217,22 @@ class SignaturePlugin implements Plugin
             app(PdfTemplateRegistry::class)->registerMany($this->templates);
         }
 
+        if ($this->signatoryResolver !== null) {
+            app(SignatoryResolverFactory::class)->overrideUsing($this->signatoryResolver);
+        }
+
         // Register the placement designer page so /signature-templates/{key}/design
         // resolves on this panel. The page itself has shouldRegisterNavigation = false;
         // host apps link to it from their own UI (e.g. a "Design layout" header action).
-        $panel->pages([PdfTemplateDesigner::class, PdfTemplateSigner::class]);
+        $pages = [PdfTemplateDesigner::class, PdfTemplateSigner::class];
+
+        // Unlike the other two, the inbox IS a navigation destination — it's
+        // where a signatory finds the documents waiting on them.
+        if ($this->registerInbox ?? config('signature.inbox.enabled', true)) {
+            $pages[] = SignatureInbox::class;
+        }
+
+        $panel->pages($pages);
 
         FilamentAsset::register([
             Js::make('signature-plugin', __DIR__ . '/../resources/dist/digital-signature.js'),
