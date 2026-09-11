@@ -140,15 +140,38 @@ class SignatureLauncher extends Component
     // Appearance
     // -------------------------------------------------------------------------
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getSettingsProperty(): array
     {
         return [
-            'position'     => LauncherSettings::position(),
-            'icon'         => LauncherSettings::icon(),
-            'label'        => LauncherSettings::label(),
-            'color'        => LauncherSettings::color(),
-            'poll'         => LauncherSettings::pollSeconds(),
+            'position'      => LauncherSettings::position(),
+            'icon'          => LauncherSettings::icon(),
+            'label'         => LauncherSettings::label(),
+            'color'         => LauncherSettings::color(),
+            'poll'          => LauncherSettings::pollSeconds(),
             'hideWhenEmpty' => LauncherSettings::hideWhenEmpty(),
+            'offsetX'       => LauncherSettings::offsetX(),
+            'offsetY'       => LauncherSettings::offsetY(),
+            'zIndex'        => LauncherSettings::zIndex(),
+        ];
+    }
+
+    /**
+     * What the browser-side placement pass needs to keep the button clear of
+     * whatever the host app has already pinned in this corner.
+     *
+     * @return array<string, mixed>
+     */
+    public function getPlacementProperty(): array
+    {
+        return [
+            'enabled'  => LauncherSettings::avoidOverlap(),
+            'position' => LauncherSettings::position(),
+            'gap'      => LauncherSettings::gap(),
+            'avoid'    => LauncherSettings::avoidSelectors(),
+            'ignore'   => LauncherSettings::ignoreSelectors(),
         ];
     }
 

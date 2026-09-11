@@ -93,6 +93,100 @@ final class LauncherSettings
         return (bool) config('signature.launcher.hide_when_empty', false);
     }
 
+    /**
+     * Whether the button should measure its corner before settling into it.
+     *
+     * A plugin does not own the corner it is dropped into: host apps put chat
+     * widgets, cookie bars and their own FABs there, and landing on top of one
+     * makes the launcher look like a bug in the host app rather than a feature
+     * of this package.
+     */
+    public static function avoidOverlap(): bool
+    {
+        return (bool) config('signature.launcher.avoid_overlap', true);
+    }
+
+    /** Distance from the corner before any stacking. Any CSS length. */
+    public static function offsetX(): string
+    {
+        return self::cssLength(config('signature.launcher.offset.x'), '1.5rem');
+    }
+
+    public static function offsetY(): string
+    {
+        return self::cssLength(config('signature.launcher.offset.y'), '1.5rem');
+    }
+
+    /** Pixels between the button and whatever it stacks above. */
+    public static function gap(): int
+    {
+        return max(0, (int) config('signature.launcher.gap', 12));
+    }
+
+    public static function zIndex(): int
+    {
+        return (int) config('signature.launcher.z_index', 40);
+    }
+
+    /**
+     * Selectors the detector should always treat as occupying the corner —
+     * for widgets it cannot see, such as ones that render into an iframe or
+     * mount long after the page settles.
+     *
+     * @return array<int, string>
+     */
+    public static function avoidSelectors(): array
+    {
+        return self::selectors(config('signature.launcher.avoid', []));
+    }
+
+    /**
+     * Selectors the detector should never treat as occupying the corner —
+     * for full-width toast rails and similar decoration that the size
+     * heuristics don't already rule out.
+     *
+     * @return array<int, string>
+     */
+    public static function ignoreSelectors(): array
+    {
+        return self::selectors(config('signature.launcher.ignore', []));
+    }
+
+    /**
+     * @param  mixed  $value
+     * @return array<int, string>
+     */
+    private static function selectors($value): array
+    {
+        return array_values(array_filter(
+            array_map(
+                static fn ($selector): string => trim((string) $selector),
+                is_array($value) ? $value : [],
+            ),
+            static fn (string $selector): bool => $selector !== '',
+        ));
+    }
+
+    /**
+     * Offsets go straight into a style attribute, so anything that isn't a
+     * plain CSS length is refused rather than escaped — a config value is not
+     * a place to accept arbitrary declarations.
+     *
+     * @param  mixed  $value
+     */
+    private static function cssLength($value, string $fallback): string
+    {
+        $value = is_string($value) || is_numeric($value) ? trim((string) $value) : '';
+
+        if ($value === '') {
+            return $fallback;
+        }
+
+        return preg_match('/^-?\d*\.?\d+(px|rem|em|vh|vw|%)?$/', $value) === 1
+            ? $value
+            : $fallback;
+    }
+
     public static function plugin(): ?SignaturePlugin
     {
         try {
