@@ -16,6 +16,8 @@ use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
+use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
+use Kukux\DigitalSignature\Filament\Resources\SignatureResource\ViewSignatureResolver;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
@@ -35,6 +37,7 @@ use Kukux\DigitalSignature\Services\SignatoryRouter;
 use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
+use Livewire\Livewire;
 
 class SignatureServiceProvider extends ServiceProvider
 {
@@ -49,6 +52,7 @@ class SignatureServiceProvider extends ServiceProvider
         // Filament\Support\ComponentResolver and docs/signatory-routing.md §8.
         foreach ([
             ResourceResolver::class,
+            ViewSignatureResolver::class,
             ActionResolver::class,
             HeaderActionResolver::class,
             RequestSignaturesResolver::class,
@@ -146,6 +150,14 @@ class SignatureServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'signature');
+
+        // The floating launcher. Registered here rather than in the plugin so
+        // the component resolves on any panel the render hook fires for, and
+        // so a host that mounts <livewire:kukux-digital-signature.launcher />
+        // in its own layout can do so without the plugin.
+        if (class_exists(Livewire::class)) {
+            Livewire::component('kukux-digital-signature.launcher', SignatureLauncher::class);
+        }
 
         // Register templates declared in config. Runtime registration via the
         // plugin or container can add more on top of this baseline.

@@ -6,6 +6,7 @@ use Filament\Contracts\Plugin;
 use Filament\Panel;
 use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
+use Filament\View\PanelsRenderHook;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Closure;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
@@ -33,6 +34,8 @@ class SignaturePlugin implements Plugin
     protected ?Closure $signatoryResolver = null;
 
     protected ?bool $registerInbox = null;
+
+    protected ?bool $registerLauncher = null;
 
     // -------------------------------------------------------------------------
     // Factory
@@ -174,6 +177,38 @@ class SignaturePlugin implements Plugin
         return $this;
     }
 
+    /**
+     * Keep the floating launcher off this panel. The inbox page and the
+     * Signatures resource then return to the sidebar, because
+     * launcher.replaces_navigation only suppresses navigation while there is a
+     * launcher to replace it with — turning the launcher off must never leave
+     * a panel with no way to reach either.
+     */
+    public function withoutFloatingLauncher(): static
+    {
+        $this->registerLauncher = false;
+
+        return $this;
+    }
+
+    public function withFloatingLauncher(bool $condition = true): static
+    {
+        $this->registerLauncher = $condition;
+
+        return $this;
+    }
+
+    /** Has this panel's plugin instance been told either way? */
+    public function hasLauncherOverride(): bool
+    {
+        return $this->registerLauncher !== null;
+    }
+
+    public function wantsLauncher(): bool
+    {
+        return $this->registerLauncher ?? (bool) config('signature.launcher.enabled', true);
+    }
+
     // -------------------------------------------------------------------------
     // Getters (used by SignatureResource to read resolved values)
     // -------------------------------------------------------------------------
@@ -237,6 +272,16 @@ class SignaturePlugin implements Plugin
         FilamentAsset::register([
             Js::make('signature-plugin', __DIR__ . '/../resources/dist/digital-signature.js'),
         ], 'kukux/digital-signature');
+
+        // The launcher is mounted through a panel render hook rather than a
+        // navigation item: it has to be reachable from whatever page the
+        // signatory happens to be on, which is the whole point of it.
+        if ($this->wantsLauncher()) {
+            $panel->renderHook(
+                PanelsRenderHook::BODY_END,
+                fn (): string => view('signature::filament.launcher')->render(),
+            );
+        }
     }
 
     public function boot(Panel $panel): void
