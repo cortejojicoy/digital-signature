@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { StampPreview } from './StampPreview.jsx';
 
 /**
  * One draggable + resizable signature drop zone on top of the page image.
@@ -33,6 +34,11 @@ export function SlotBox({
                           //            preview the placed signature)
     aspect,               // optional width/height ratio to hold while resizing;
                           //          Shift overrides it for one drag
+    preview,              // optional composed stamp, already in CSS pixels —
+                          //          see StampPreview. When given it replaces
+                          //          the plain background image, so the box
+                          //          shows what will print rather than only
+                          //          the signature.
 }) {
     const ref = useRef(null);
     const [mode, setMode] = useState(null);   // 'drag' | 'resize' | null
@@ -159,22 +165,24 @@ export function SlotBox({
                 userSelect: 'none',
             }}
         >
-            {backgroundImageUrl && (
-                <img
-                    src={backgroundImageUrl}
-                    alt=""
-                    draggable={false}
-                    style={{
-                        position: 'absolute',
-                        inset: 0,
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'contain',
-                        pointerEvents: 'none',
-                        userSelect: 'none',
-                    }}
-                />
-            )}
+            {preview
+                ? <StampPreview {...preview} imageUrl={backgroundImageUrl} />
+                : backgroundImageUrl && (
+                    <img
+                        src={backgroundImageUrl}
+                        alt=""
+                        draggable={false}
+                        style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'contain',
+                            pointerEvents: 'none',
+                            userSelect: 'none',
+                        }}
+                    />
+                )}
 
             <div style={{
                 position: 'absolute',
