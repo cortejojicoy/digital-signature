@@ -94,6 +94,21 @@ final class LauncherSettings
     }
 
     /**
+     * How wide the slide-over is on desktop.
+     *
+     * Wide by default because the panel is no longer only a queue: it carries
+     * the signature library and the rendered PDF the signatory is being asked
+     * to sign, and a signature applied to a document nobody could read is the
+     * failure mode this width exists to prevent. The CSS caps it at the
+     * viewport and goes full-bleed on small screens, so an over-large value
+     * degrades rather than overflows.
+     */
+    public static function width(): string
+    {
+        return self::cssLength(config('signature.launcher.width'), '64rem');
+    }
+
+    /**
      * Whether the button should measure its corner before settling into it.
      *
      * A plugin does not own the corner it is dropped into: host apps put chat
