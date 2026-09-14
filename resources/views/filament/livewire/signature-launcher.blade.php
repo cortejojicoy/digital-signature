@@ -55,6 +55,10 @@
             tab: 'queue',
             // Id of the request whose document is open, or null for the list.
             viewing: null,
+            // How many slots the last commit signed, while the confirmation
+            // that they moved to the Signed tab is still showing.
+            justSigned: 0,
+            signedNotice: null,
             observer: null,
             timers: [],
 
@@ -66,8 +70,15 @@
                 // component's business, and refreshing the queue is the
                 // server's.
                 this.onViewerClose = () => { this.viewing = null }
-                this.onSigned = () => {
+                this.onSigned = (e) => {
                     this.viewing = null
+                    // The document leaves the queue the moment it is signed,
+                    // which on its own looks like it was thrown away. Say
+                    // where it went, and leave the user on the queue so they
+                    // can carry on with the next one.
+                    this.justSigned = (e.detail?.signed ?? []).length || 1
+                    clearTimeout(this.signedNotice)
+                    this.signedNotice = setTimeout(() => { this.justSigned = 0 }, 12000)
                     this.$wire.$refresh()
                 }
                 window.addEventListener('dsig:viewer-close', this.onViewerClose)
@@ -111,6 +122,7 @@
                 window.removeEventListener('dsig:signed', this.onSigned)
                 window.removeEventListener('sig:exported', this.onPadExport)
                 this.timers.forEach(clearTimeout)
+                clearTimeout(this.signedNotice)
                 this.observer?.disconnect()
             },
 
@@ -123,9 +135,14 @@
                 }
             },
 
-            /** Swap the drawer body for the document behind one request. */
+            /**
+             * Swap the drawer body for the document behind one request.
+             *
+             * Used by both the queue and the signed history. Which of the two
+             * it is does not matter here: the pane asks the server whether
+             * there is anything left to sign, and renders itself accordingly.
+             */
             view(requestId) {
-                this.tab = 'queue'
                 this.viewing = requestId
             },
 
@@ -372,6 +389,10 @@
         }
         .dark .dsig-note { border-color: rgb(255 255 255 / 0.25); }
         .dsig-note a { font-weight: 600; color: inherit; }
+        .dsig-note--ok {
+            border-style: solid; border-color: rgb(16 185 129 / 0.4);
+            background: rgb(16 185 129 / 0.08);
+        }
 
         .dsig-skeleton { height: 4.5rem; border-radius: .75rem; margin-bottom: .75rem;
             background: linear-gradient(90deg, rgb(0 0 0 / .05), rgb(0 0 0 / .1), rgb(0 0 0 / .05));
@@ -406,6 +427,20 @@
             border-radius: 9999px; background: rgb(0 0 0 / 0.08); font-size: .6875rem;
         }
         .dark .dsig-tab__count { background: rgb(255 255 255 / 0.12); }
+
+        /*
+            Day heading in the signed history. Sticky because the whole point
+            of the grouping is knowing which day you are looking at, and that
+            is exactly what scrolls away first.
+        */
+        .dsig-daygroup {
+            position: sticky; top: -1rem; z-index: 1;
+            margin: 0 -1.25rem .5rem; padding: .4rem 1.25rem;
+            font-size: .75rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .03em; opacity: .55; background: #fff;
+        }
+        .dsig-daygroup:not(:first-child) { margin-top: 1rem; }
+        .dark .dsig-daygroup { background: #18181b; }
 
         /* ── Signature library ─────────────────────────────────────────── */
         .dsig-lib { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
@@ -453,6 +488,13 @@
             font-size: .875rem; line-height: 1;
         }
         .dark .dsig-viewer__zoom button { border-color: rgb(255 255 255 / 0.2); }
+
+        .dsig-viewer__stamp {
+            font-size: .75rem; font-weight: 600; padding: .3rem .6rem;
+            border-radius: .5rem; white-space: nowrap;
+            background: rgb(16 185 129 / 0.12); color: rgb(15 118 110);
+        }
+        .dark .dsig-viewer__stamp { color: rgb(45 212 191); }
 
         .dsig-viewer__msg { font-size: .8125rem; margin: .6rem 0 0; opacity: .8; }
         .dsig-viewer__msg--warn  { color: #b45309; }
@@ -618,6 +660,18 @@
                 type="button"
                 role="tab"
                 class="dsig-tab"
+                x-bind:class="tab === 'signed' ? 'dsig-tab--on' : ''"
+                x-bind:aria-selected="(tab === 'signed').toString()"
+                x-on:click="tab = 'signed'"
+                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+            >
+                Signed
+            </button>
+
+            <button
+                type="button"
+                role="tab"
+                class="dsig-tab"
                 x-bind:class="tab === 'library' ? 'dsig-tab--on' : ''"
                 x-bind:aria-selected="(tab === 'library').toString()"
                 x-on:click="tab = 'library'"
@@ -649,6 +703,13 @@
             </div>
 
             <div x-show="! viewing && tab === 'queue'">
+                <div class="dsig-note dsig-note--ok" x-show="justSigned" x-cloak>
+                    <span x-text="justSigned === 1
+                        ? 'Signed. The document has moved to your Signed tab.'
+                        : justSigned + ' slots signed. The document has moved to your Signed tab.'"></span>
+                    <a href="#" x-on:click.prevent="tab = 'signed'; justSigned = 0">View it →</a>
+                </div>
+
                 @if (! $this->loaded)
                     <div class="dsig-skeleton"></div>
                     <div class="dsig-skeleton"></div>
@@ -728,6 +789,68 @@
                             <x-filament::icon icon="heroicon-o-check-circle" />
                             <p>Nothing waiting on you</p>
                             <p>Documents needing your signature will appear here.</p>
+                        </div>
+                    @endforelse
+                @endif
+            </div>
+
+            {{--
+                Signed history. A document does not stop being the signatory's
+                business the moment they sign it: their certificate is on it,
+                and "which of these did I sign, and when?" is a question they
+                should be able to answer without asking whoever sent it.
+
+                Grouped by day because signing happens in bursts and the date
+                is what people actually remember. Read-only throughout — these
+                open in the same document pane with its signing surface absent.
+            --}}
+            <div x-show="! viewing && tab === 'signed'" x-cloak>
+                @if (! $this->loaded)
+                    <div class="dsig-skeleton"></div>
+                    <div class="dsig-skeleton"></div>
+                @else
+                    @php $history = $this->signedHistory; @endphp
+
+                    @forelse ($history as $group)
+                        <p class="dsig-daygroup">{{ $group['label'] }}</p>
+
+                        @foreach ($group['requests'] as $request)
+                            @php
+                                $session  = $request->session;
+                                $document = $session?->signable;
+                                $title    = $document && method_exists($document, 'getSignableTitle')
+                                    ? $document->getSignableTitle()
+                                    : ($session?->template_key ?? 'Document');
+                            @endphp
+
+                            <div class="dsig-card" wire:key="dsig-signed-{{ $request->id }}">
+                                <p class="dsig-card__title">{{ $title }}</p>
+                                <p class="dsig-card__meta">
+                                    Signed as <strong>{{ $request->role }}</strong>
+                                    @if ($request->responded_at)
+                                        · {{ $request->responded_at->format('g:i a') }}
+                                    @endif
+                                    @if ($session && ! $session->isComplete())
+                                        · awaiting others
+                                    @endif
+                                </p>
+
+                                <div class="dsig-card__actions">
+                                    <button
+                                        type="button"
+                                        class="dsig-btn dsig-btn--ghost"
+                                        x-on:click="view({{ $request->id }})"
+                                    >
+                                        View document
+                                    </button>
+                                </div>
+                            </div>
+                        @endforeach
+                    @empty
+                        <div class="dsig-empty">
+                            <x-filament::icon icon="heroicon-o-document-check" />
+                            <p>Nothing signed yet</p>
+                            <p>Documents you sign will be kept here.</p>
                         </div>
                     @endforelse
                 @endif
