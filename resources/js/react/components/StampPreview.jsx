@@ -12,50 +12,44 @@
  * if it did, it would be a second opinion about a layout that has to have
  * exactly one.
  */
-export function StampPreview({
-    imageUrl,
-    imageWidth,
-    imageHeight,
-    qrSize = 0,
-    caption,
-}) {
+export function StampPreview({ imageUrl, image, qr, caption }) {
     const align = caption?.align === 'L' ? 'flex-start'
         : caption?.align === 'R' ? 'flex-end'
         : 'center';
 
     return (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', userSelect: 'none' }}>
-            {imageUrl && (
+            {imageUrl && image && (
                 <img
                     src={imageUrl}
                     alt=""
                     draggable={false}
                     style={{
                         position: 'absolute',
-                        left: 0,
-                        top: 0,
-                        width:  `${imageWidth}px`,
-                        height: `${imageHeight}px`,
+                        left:   `${image.x}px`,
+                        top:    `${image.y}px`,
+                        width:  `${image.width}px`,
+                        height: `${image.height}px`,
                         objectFit: 'contain',
                     }}
                 />
             )}
 
-            {qrSize > 0 && (
+            {qr && (
                 <div
                     style={{
                         position: 'absolute',
-                        right: 0,
-                        top: 0,
-                        width:  `${qrSize}px`,
-                        height: `${qrSize}px`,
+                        left: `${qr.x}px`,
+                        top:  `${qr.y}px`,
+                        width:  `${qr.size}px`,
+                        height: `${qr.size}px`,
                         // A placeholder, not a rendered code. Its job is to
                         // reserve exactly the space the real one will take;
                         // drawing a scannable code here would invite someone
                         // to scan a signature that does not exist yet.
                         background:
                             'repeating-conic-gradient(rgba(15,23,42,.55) 0% 25%, transparent 0% 50%)'
-                            + ` 0 0 / ${Math.max(3, qrSize / 6)}px ${Math.max(3, qrSize / 6)}px`,
+                            + ` 0 0 / ${Math.max(3, qr.size / 6)}px ${Math.max(3, qr.size / 6)}px`,
                         outline: '1px solid rgba(15,23,42,.45)',
                         outlineOffset: '-1px',
                         borderRadius: '1px',
@@ -69,13 +63,12 @@ export function StampPreview({
                 <div
                     style={{
                         position: 'absolute',
-                        left: 0,
-                        right: 0,
-                        top: `${imageHeight}px`,
+                        left: `${caption.x}px`,
+                        top:  `${caption.y}px`,
+                        width: `${caption.w}px`,
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: align,
-                        justifyContent: 'flex-start',
                         overflow: 'hidden',
                     }}
                 >
