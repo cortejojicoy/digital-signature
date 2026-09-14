@@ -78,6 +78,23 @@ class SignatureRequest extends Model
             ->whereHas('session', fn (Builder $q) => $q->where('status', SigningSession::STATUS_OPEN));
     }
 
+    /**
+     * What this user has already signed, newest first.
+     *
+     * The counterpart to outstandingFor(): a signature request does not stop
+     * mattering the moment it is signed — it is the signatory's own record of
+     * what they put their certificate on, and the document behind it stays
+     * readable to them.
+     */
+    public function scopeSignedFor(Builder $query, int $userId): Builder
+    {
+        return $query
+            ->where('user_id', $userId)
+            ->where('state', RouteState::Signed->value)
+            ->orderByDesc('responded_at')
+            ->orderByDesc('id');
+    }
+
     public function isSigned(): bool
     {
         return $this->state === RouteState::Signed;
