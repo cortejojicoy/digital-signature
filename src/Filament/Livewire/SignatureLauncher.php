@@ -6,10 +6,12 @@ use Filament\Facades\Filament;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Kukux\DigitalSignature\Filament\Concerns\ActsOnSignatureRequests;
+use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Support\LauncherSettings;
+use Kukux\DigitalSignature\Support\ViewerAssets;
 use Livewire\Component;
 use Throwable;
 
@@ -37,13 +39,39 @@ use Throwable;
 class SignatureLauncher extends Component
 {
     use ActsOnSignatureRequests;
+    use RegistersSignatures;
 
     /** Set on first open; until then the slide-over renders its skeleton. */
     public bool $loaded = false;
 
+    /** Draw-pad output for the library tab's "add a signature" form. */
+    public ?string $newSignature = null;
+
+    public ?string $newCertificatePassword = null;
+
     public function loadRequests(): void
     {
         $this->loaded = true;
+    }
+
+    /**
+     * Register a signature without leaving the page.
+     *
+     * The rules live in RegistersSignatures, shared with the Signatures
+     * resource — see that trait for why they are not duplicated here.
+     */
+    public function createSignature(): void
+    {
+        $signature = $this->registerSignature($this->newSignature, $this->newCertificatePassword);
+
+        // The password is a signing credential and the drawing is a partial
+        // one. Neither should survive in component state, and a failed attempt
+        // should not clear what the user drew and make them draw it again.
+        $this->newCertificatePassword = null;
+
+        if ($signature !== null) {
+            $this->newSignature = null;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -97,8 +125,27 @@ class SignatureLauncher extends Component
             ->whereNull('signable_id')
             ->where('status', 'active')
             ->latest('id')
-            ->limit(4)
+            ->limit(12)
             ->get();
+    }
+
+    /**
+     * URL templates and asset URLs the drawer's document pane needs.
+     *
+     * Templates rather than per-request URLs: the pane is opened by Alpine
+     * without a round trip, so the ids are only known in the browser. `__ID__`
+     * follows the same convention as the designer's `__PAGE__`.
+     *
+     * @return array<string, string>
+     */
+    public function getViewerProperty(): array
+    {
+        return [
+            'metaUrlTemplate' => route('signature.request.meta', ['signatureRequest' => '__ID__']),
+            'signUrlTemplate' => route('signature.request.sign', ['signatureRequest' => '__ID__']),
+            'bundleSrc'       => ViewerAssets::bundleUrl(),
+            'workerSrc'       => ViewerAssets::workerUrl(),
+        ];
     }
 
     // -------------------------------------------------------------------------
@@ -152,6 +199,7 @@ class SignatureLauncher extends Component
             'color'         => LauncherSettings::color(),
             'poll'          => LauncherSettings::pollSeconds(),
             'hideWhenEmpty' => LauncherSettings::hideWhenEmpty(),
+            'width'         => LauncherSettings::width(),
             'offsetX'       => LauncherSettings::offsetX(),
             'offsetY'       => LauncherSettings::offsetY(),
             'zIndex'        => LauncherSettings::zIndex(),
