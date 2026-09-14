@@ -208,10 +208,11 @@ class SignatureDocumentController extends Controller
         foreach ($jobs as $job) {
             try {
                 $last = $this->sessions->signAt(
-                    request:      $job['request'],
-                    actorUserId:  (int) $this->userId(),
-                    placement:    $job['placement'],
-                    useSignature: $job['signature'],
+                    request:         $job['request'],
+                    actorUserId:     (int) $this->userId(),
+                    placement:       $job['placement'],
+                    useSignature:    $job['signature'],
+                    extraPlacements: $job['extra'],
                 );
             } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
                 return $this->partialFailure($request, $signed, $e->getMessage(), $job['request']);
@@ -232,6 +233,8 @@ class SignatureDocumentController extends Controller
                 'slot'           => $job['request']->slot_key,
                 'role'           => $job['request']->role,
                 'signature_uuid' => $last->uuid,
+                // How many times this one signature appears on the document.
+                'stamps'         => 1 + count($job['extra']),
             ];
         }
 
@@ -272,6 +275,8 @@ class SignatureDocumentController extends Controller
         }
 
         $jobs = [];
+        // request id → index in $jobs, so a repeated slot can find the entry
+        // it belongs to and add itself as a further stamp.
         $seen = [];
 
         foreach ($entries as $entry) {
@@ -287,28 +292,43 @@ class SignatureDocumentController extends Controller
                 'That signature request belongs to a different document.',
             );
 
-            // A slot can only be signed once, so a payload naming it twice is
-            // a client bug; silently applying the first and failing on the
-            // second would be a confusing way to report it.
-            abort_if(
-                in_array((int) $request->id, $seen, true),
-                422,
-                'The same slot was placed more than once.',
-            );
+            $geometry = array_key_exists('page', $entry)
+                ? [
+                    'page'   => $entry['page'],
+                    'x'      => $entry['x']      ?? 0,
+                    'y'      => $entry['y']      ?? 0,
+                    'width'  => $entry['width']  ?? 0,
+                    'height' => $entry['height'] ?? 0,
+                ]
+                : null;
 
-            $seen[] = (int) $request->id;
+            // A slot named more than once is not a mistake. A form routinely
+            // asks the same person for the same signature in several places —
+            // the signature block, then again under a certificate — and that
+            // is one act of signing with several appearances. The first
+            // placement is the slot's own; the rest become extra stamps of the
+            // same signature, sharing its PKCS#7 block and its link in the
+            // chain.
+            $existing = $seen[(int) $request->id] ?? null;
+
+            if ($existing !== null) {
+                abort_if(
+                    $geometry === null,
+                    422,
+                    'A repeated placement for the same slot needs its own coordinates.',
+                );
+
+                $jobs[$existing]['extra'][] = $geometry;
+
+                continue;
+            }
+
+            $seen[(int) $request->id] = count($jobs);
 
             $jobs[] = [
                 'request'   => $request,
-                'placement' => array_key_exists('page', $entry)
-                    ? [
-                        'page'   => $entry['page'],
-                        'x'      => $entry['x']      ?? 0,
-                        'y'      => $entry['y']      ?? 0,
-                        'width'  => $entry['width']  ?? 0,
-                        'height' => $entry['height'] ?? 0,
-                    ]
-                    : null,
+                'placement' => $geometry,
+                'extra'     => [],
                 'signature' => $this->resolveSignature(
                     $entry['signature_id'] ?? null,
                     (int) $request->user_id,
