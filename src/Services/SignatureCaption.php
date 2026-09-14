@@ -69,6 +69,9 @@ class SignatureCaption
                 'minFont'      => (float) config('signature.caption.min_font_pt', 4),
                 'lineHeight'   => (float) config('signature.caption.line_height', 1.06),
                 'align'        => (string) config('signature.caption.align', 'C'),
+                'position'     => (string) config('signature.caption.position', 'bottom'),
+                'widthRatio'   => (float) config('signature.caption.width_ratio', 0.42),
+                'minBoxWidth'  => (float) config('signature.caption.min_box_width', 110),
             ],
             'qr' => [
                 'enabled' => (bool) config('signature.qr.enabled', true)

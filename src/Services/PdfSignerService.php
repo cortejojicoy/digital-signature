@@ -27,7 +27,7 @@ class PdfSignerService
         }
 
         $all = $stamps
-            ->map(fn ($p): array => $p->only(['page', 'x', 'y', 'width', 'height']))
+            ->map(fn ($p): array => $p->only(['page', 'x', 'y', 'width', 'height', 'caption_position']))
             ->values();
 
         $position = $all->first() ?? [];

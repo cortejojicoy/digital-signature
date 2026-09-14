@@ -189,6 +189,7 @@ class SigningSessionManager
         ?Signature $useSignature = null,
         ?string $password = null,
         array $extraPositions = [],
+        ?string $captionSide = null,
     ): Signature {
         $session = $request->session;
 
@@ -200,7 +201,14 @@ class SigningSessionManager
             );
         }
 
-        return $this->applySignature($request, $useSignature, $password, delegated: false, extraPositions: $extraPositions);
+        return $this->applySignature(
+            $request,
+            $useSignature,
+            $password,
+            delegated: false,
+            extraPositions: $extraPositions,
+            captionSide: $captionSide,
+        );
     }
 
     /**
@@ -254,7 +262,12 @@ class SigningSessionManager
             $actorUserId,
             $useSignature,
             $password,
-            array_map(fn (array $extra): array => $this->normalisePlacement($extra), $extraPlacements),
+            array_map(
+                fn (array $extra): array => $this->normalisePlacement($extra)
+                    + array_filter(['caption_position' => $this->captionSide($extra)]),
+                $extraPlacements,
+            ),
+            $this->captionSide($placement),
         );
     }
 
@@ -280,6 +293,20 @@ class SigningSessionManager
     }
 
     /**
+     * Which side of the stamp the caption goes on, if the signatory chose one.
+     *
+     * Kept apart from normalisePlacement() because the request row stores
+     * geometry and nothing else — this travels with the signature instead, as
+     * a property of that appearance rather than of the slot.
+     */
+    protected function captionSide(?array $placement): ?string
+    {
+        $side = $placement['caption_position'] ?? null;
+
+        return in_array($side, ['bottom', 'top', 'left', 'right'], true) ? $side : null;
+    }
+
+    /**
      * Shared signing body for both the in-person and delegated paths.
      *
      * Kept internal so the ownership rules stay at the entry points: sign()
@@ -295,6 +322,7 @@ class SigningSessionManager
         ?string $password,
         bool $delegated,
         array $extraPositions = [],
+        ?string $captionSide = null,
     ): Signature {
         $session = $request->session;
 
@@ -333,6 +361,10 @@ class SigningSessionManager
         }
 
         $position = $request->position();
+
+        if ($position !== null && $captionSide !== null) {
+            $position['caption_position'] = $captionSide;
+        }
 
         if ($position === null) {
             throw new SignatoryNotReadyException(sprintf(
