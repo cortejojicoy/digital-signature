@@ -55,8 +55,12 @@ function PdfViewerIsland({ el }) {
     const [notice, setNotice] = useState(null);
     const [zoom, setZoom]     = useState(1);
 
-    // requestId → { page, x, y, width, height, signatureId }, in PDF points.
-    const [placements, setPlacements] = useState({});
+    // A flat list of stamps, in PDF points. Several may belong to one slot: a
+    // form that asks the same person to sign in three places is one act of
+    // signing with three appearances, and the server turns the repeats into
+    // extra stamps of the same signature.
+    // { id, requestId, page, x, y, width, height, signatureId }
+    const [placements, setPlacements] = useState([]);
     const [activeRequestId, setActiveRequestId] = useState(null);
     const [activeSigId, setActiveSigId] = useState(null);
     const [aspects, setAspects] = useState({});   // signatureId → natural w/h
@@ -219,14 +223,19 @@ function PdfViewerIsland({ el }) {
         // are in the PDF itself, which is what the pages below are rendering.
         if (meta.readOnly) return;
 
-        const seeded = {};
+        const seeded = [];
         for (const request of requests) {
             if (!request.placement) continue;
             if (!pages.some((p) => p.number === request.placement.page)) continue;
-            seeded[request.id] = { ...request.placement, signatureId: activeSigId };
+            seeded.push({
+                id: nextStampId(),
+                requestId: request.id,
+                ...request.placement,
+                signatureId: activeSigId,
+            });
         }
 
-        if (Object.keys(seeded).length > 0) setPlacements(seeded);
+        if (seeded.length > 0) setPlacements(seeded);
     }, [meta, pages, requests, activeSigId]);
 
     /**
@@ -239,7 +248,9 @@ function PdfViewerIsland({ el }) {
     const advancePast = useCallback((justPlacedId) => {
         setPlacements((current) => {
             const next = requests.find((r) =>
-                r.id !== justPlacedId && !r.blocked && current[r.id] === undefined);
+                r.id !== justPlacedId
+                && !r.blocked
+                && !current.some((p) => p.requestId === r.id));
 
             if (next) setActiveRequestId(next.id);
 
@@ -307,19 +318,21 @@ function PdfViewerIsland({ el }) {
             height,
         };
 
-        setPlacements((current) => ({
-            ...current,
-            [activeRequest.id]: {
-                page: hit.number,
-                ...cssRectToPdfPoints(rect, page, nominal),
-                signatureId: dragging.sig.id,
-            },
-        }));
+        // Append. Dropping a second time adds a second appearance rather than
+        // moving the first — a form asks for the same signature in several
+        // places, and a surface that can only ever hold one is the bug this
+        // replaced.
+        setPlacements((current) => [...current, {
+            id: nextStampId(),
+            requestId: activeRequest.id,
+            page: hit.number,
+            ...cssRectToPdfPoints(rect, page, nominal),
+            signatureId: dragging.sig.id,
+        }]);
 
-        // Move on to the next slot still waiting for a signature. Without
-        // this the drop target never changes, so a second drag silently
-        // re-places the first slot and the surface looks like it only accepts
-        // one signature per document.
+        // Move on to the next slot that has nothing at all on it yet, so a
+        // signatory holding several slots fills them in turn without having
+        // to pick each one by hand.
         advancePast(activeRequest.id);
         setNotice(null);
     }, [dragging, activeRequest, pages, zoom, aspects, advancePast]);
@@ -337,10 +350,12 @@ function PdfViewerIsland({ el }) {
         const page   = pages.find((p) => p.number === (frozen?.page ?? 1)) ?? pages[0];
 
         if (frozen && page.number === frozen.page) {
-            setPlacements((current) => ({
-                ...current,
-                [activeRequest.id]: { ...frozen, signatureId: activeSigId },
-            }));
+            setPlacements((current) => [...current, {
+                id: nextStampId(),
+                requestId: activeRequest.id,
+                ...frozen,
+                signatureId: activeSigId,
+            }]);
             advancePast(activeRequest.id);
             return;
         }
@@ -350,53 +365,43 @@ function PdfViewerIsland({ el }) {
         const width   = Math.min(nominal.width * 0.3, 220);
         const height  = aspect ? width / aspect : width / 3.2;
 
-        setPlacements((current) => ({
-            ...current,
-            [activeRequest.id]: {
-                page: page.number,
-                ...cssRectToPdfPoints({
-                    x: (nominal.width - width) / 2,
-                    y: (nominal.height - height) / 2,
-                    width,
-                    height,
-                }, page, nominal),
-                signatureId: activeSigId,
-            },
-        }));
+        setPlacements((current) => [...current, {
+            id: nextStampId(),
+            requestId: activeRequest.id,
+            page: page.number,
+            ...cssRectToPdfPoints({
+                x: (nominal.width - width) / 2,
+                y: (nominal.height - height) / 2,
+                width,
+                height,
+            }, page, nominal),
+            signatureId: activeSigId,
+        }]);
         advancePast(activeRequest.id);
     }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast]);
 
-    const removePlacement = useCallback((requestId) => {
-        setPlacements((current) => {
-            const next = { ...current };
-            delete next[requestId];
-            return next;
-        });
+    const removePlacement = useCallback((stampId, requestId) => {
+        setPlacements((current) => current.filter((p) => p.id !== stampId));
         setActiveRequestId(requestId);
     }, []);
 
     // ── Commit ───────────────────────────────────────────────────────────────
 
-    const placedIds = Object.keys(placements);
-
     const commit = useCallback(async () => {
-        if (placedIds.length === 0) {
+        if (placements.length === 0) {
             setNotice('Place your signature on the document first.');
             return;
         }
 
-        const payload = placedIds.map((requestId) => {
-            const p = placements[requestId];
-            return {
-                request_id:   Number(requestId),
-                page:         p.page,
-                x:            round2(p.x),
-                y:            round2(p.y),
-                width:        round2(p.width),
-                height:       round2(p.height),
-                signature_id: p.signatureId ?? null,
-            };
-        });
+        const payload = placements.map((p) => ({
+            request_id:   p.requestId,
+            page:         p.page,
+            x:            round2(p.x),
+            y:            round2(p.y),
+            width:        round2(p.width),
+            height:       round2(p.height),
+            signature_id: p.signatureId ?? null,
+        }));
 
         setBusy(true);
         setError(null);
@@ -441,7 +446,7 @@ function PdfViewerIsland({ el }) {
         } finally {
             setBusy(false);
         }
-    }, [placedIds, placements, config]);
+    }, [placements, config]);
 
     const close = useCallback(() => {
         window.dispatchEvent(new CustomEvent('dsig:viewer-close', {
@@ -473,9 +478,13 @@ function PdfViewerIsland({ el }) {
     }
 
     const noSigs = signatures.length === 0;
-    const blockedPlaced = placedIds.some(
-        (id) => requests.find((r) => r.id === Number(id))?.blocked,
+    const blockedPlaced = placements.some(
+        (p) => requests.find((r) => r.id === p.requestId)?.blocked,
     );
+
+    // Slots with at least one stamp, for the "2 of 3" counter — a slot signed
+    // in three places is still one slot accounted for.
+    const slotsPlaced = new Set(placements.map((p) => p.requestId)).size;
 
     return (
         <div className="dsig-viewer">
@@ -503,11 +512,11 @@ function PdfViewerIsland({ el }) {
                         type="button"
                         className="dsig-btn"
                         onClick={commit}
-                        disabled={busy || noSigs || placedIds.length === 0 || blockedPlaced}
+                        disabled={busy || noSigs || placements.length === 0 || blockedPlaced}
                     >
                         {busy
                             ? 'Signing…'
-                            : placedIds.length > 1 ? `Sign ${placedIds.length} places` : 'Sign here'}
+                            : placements.length > 1 ? `Sign ${placements.length} places` : 'Sign here'}
                     </button>
                 )}
             </div>
@@ -530,7 +539,8 @@ function PdfViewerIsland({ el }) {
                                 className={
                                     'dsig-slotchip'
                                     + (activeRequestId === request.id ? ' dsig-slotchip--on' : '')
-                                    + (placements[request.id] ? ' dsig-slotchip--placed' : '')
+                                    + (placements.some((p) => p.requestId === request.id)
+                                        ? ' dsig-slotchip--placed' : '')
                                 }
                                 onClick={() => setActiveRequestId(request.id)}
                                 disabled={request.blocked}
@@ -538,7 +548,10 @@ function PdfViewerIsland({ el }) {
                                     ? 'An earlier signatory must sign before this slot'
                                     : undefined}
                             >
-                                {placements[request.id] ? '✓ ' : ''}{request.role || request.slot}
+                                {stampCount(placements, request.id) > 1
+                                    ? `✓×${stampCount(placements, request.id)} `
+                                    : stampCount(placements, request.id) === 1 ? '✓ ' : ''}
+                                {request.role || request.slot}
                             </button>
                         ))}
                     </div>
@@ -575,34 +588,31 @@ function PdfViewerIsland({ el }) {
                                 style={{ display: 'block' }}
                             />
 
-                            {placedIds
-                                .filter((id) => placements[id].page === page.number)
-                                .map((id) => {
-                                    const placement = placements[id];
-                                    const request = requests.find((r) => r.id === Number(id));
+                            {placements
+                                .filter((p) => p.page === page.number)
+                                .map((placement) => {
+                                    const request = requests.find((r) => r.id === placement.requestId);
                                     const sig = signatures.find((s) => s.id === placement.signatureId)
                                         ?? activeSig;
 
                                     return (
                                         <SlotBox
-                                            key={id}
-                                            slotKey={request?.slot ?? String(id)}
+                                            key={placement.id}
+                                            slotKey={request?.slot ?? String(placement.requestId)}
                                             label={request?.role ?? 'Your signature'}
                                             rect={pdfPointsToCssRect(placement, page, nominal)}
-                                            selected={activeRequestId === Number(id)}
+                                            selected={activeRequestId === placement.requestId}
                                             canvasWidth={nominal.width}
                                             canvasHeight={nominal.height}
                                             backgroundImageUrl={sig?.previewUrl}
                                             aspect={aspects[placement.signatureId]}
-                                            onSelect={() => setActiveRequestId(Number(id))}
-                                            onChange={(rect) => setPlacements((current) => ({
-                                                ...current,
-                                                [id]: {
-                                                    ...current[id],
-                                                    ...cssRectToPdfPoints(rect, page, nominal),
-                                                },
-                                            }))}
-                                            onRemove={() => removePlacement(Number(id))}
+                                            onSelect={() => setActiveRequestId(placement.requestId)}
+                                            onChange={(rect) => setPlacements((current) => current.map(
+                                                (p) => p.id === placement.id
+                                                    ? { ...p, ...cssRectToPdfPoints(rect, page, nominal) }
+                                                    : p,
+                                            ))}
+                                            onRemove={() => removePlacement(placement.id, placement.requestId)}
                                         />
                                     );
                                 })}
@@ -625,7 +635,7 @@ function PdfViewerIsland({ el }) {
                 */}
                 <span className="dsig-viewer__trayhint">
                     {requests.length > 1
-                        ? `${placedIds.length} of ${requests.length} slots placed. `
+                        ? `${slotsPlaced} of ${requests.length} slots placed. `
                         : ''}
                     Drag a signature onto the page
                     {activeRequest && requests.length > 1
@@ -638,7 +648,7 @@ function PdfViewerIsland({ el }) {
                         place it with the keyboard
                     </button>
                     . Drag the corner to resize; hold Shift to distort.
-                    {requests.length === 1 && ' Dragging again moves the one you placed.'}
+                    {' Drag again to sign in another place on the same document.'}
                 </span>
 
                 <div className="dsig-viewer__chips">
@@ -677,6 +687,22 @@ function PdfViewerIsland({ el }) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Identity for one stamp on the page.
+ *
+ * A slot can carry several, so the request id cannot be the key — two stamps
+ * of the same signature would collide and React would reuse one box for both.
+ */
+let stampSequence = 0;
+function nextStampId() {
+    stampSequence += 1;
+    return `stamp-${stampSequence}`;
+}
+
+function stampCount(placements, requestId) {
+    return placements.filter((p) => p.requestId === requestId).length;
+}
 
 /**
  * The page's box in nominal CSS pixels.
