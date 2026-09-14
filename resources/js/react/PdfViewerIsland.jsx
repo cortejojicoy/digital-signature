@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
 import { cssRectToPdfPoints, pdfPointsToCssRect } from '../utils/pdfCoords.js';
+import { layoutStamp, defaultStampBox } from '../utils/stampLayout.js';
+import { StampPreview } from './components/StampPreview.jsx';
 
 /**
  * The document pane inside the signatory's drawer.
@@ -239,6 +241,34 @@ function PdfViewerIsland({ el }) {
     }, [meta, pages, requests, activeSigId]);
 
     /**
+     * The composed stamp for one placement, in CSS pixels.
+     *
+     * Laid out in PDF points — the space the writer works in — and scaled up
+     * by the zoom at the end, so what the signatory drags is the division of
+     * the box that will actually print.
+     */
+    const previewFor = useCallback((placement, signature) => {
+        const layout = layoutStamp(
+            { width: placement.width, height: placement.height },
+            signature?.caption ?? [],
+            meta?.stamp,
+        );
+
+        return {
+            imageWidth:  layout.image.width  * zoom,
+            imageHeight: layout.image.height * zoom,
+            qrSize:      layout.qr * zoom,
+            caption: {
+                lines:        layout.caption.lines,
+                sizePx:       layout.caption.size * zoom,
+                lineHeightPx: layout.caption.size * zoom
+                    * (meta?.stamp?.caption?.lineHeight ?? 1.06),
+                align:        layout.caption.align,
+            },
+        };
+    }, [meta, zoom]);
+
+    /**
      * Select the next slot that still has nothing on it.
      *
      * Falls back to leaving the current one selected when every slot is
@@ -302,12 +332,15 @@ function PdfViewerIsland({ el }) {
 
         // Default to the slot's own size where the administrator set one, so a
         // dropped signature matches the layout the document was designed for.
+        // Otherwise size it so the ink lands at its natural shape once the
+        // caption and QR have taken their share.
         const frozen = activeRequest.placement;
-        const aspect = aspects[dragging.sig.id];
-        const width  = frozen && frozen.page === hit.number
-            ? frozen.width * zoom
-            : Math.min(nominal.width * 0.3, 220);
-        const height = aspect ? width / aspect : width / 3.2;
+        const box = frozen && frozen.page === hit.number
+            ? { width: frozen.width, height: frozen.height }
+            : defaultStampBox(aspects[dragging.sig.id], page.widthPt, meta?.stamp);
+
+        const width  = box.width  * zoom;
+        const height = box.height * zoom;
 
         // Centred on the pointer: the signature was under the cursor while
         // dragging, so that is where the user believes they dropped it.
@@ -335,7 +368,7 @@ function PdfViewerIsland({ el }) {
         // to pick each one by hand.
         advancePast(activeRequest.id);
         setNotice(null);
-    }, [dragging, activeRequest, pages, zoom, aspects, advancePast]);
+    }, [dragging, activeRequest, pages, zoom, aspects, advancePast, meta]);
 
     /**
      * The keyboard/click equivalent of the drag. Drag is a convenience, not
@@ -361,9 +394,9 @@ function PdfViewerIsland({ el }) {
         }
 
         const nominal = nominalBox(page, zoom);
-        const aspect  = aspects[activeSigId];
-        const width   = Math.min(nominal.width * 0.3, 220);
-        const height  = aspect ? width / aspect : width / 3.2;
+        const box     = defaultStampBox(aspects[activeSigId], page.widthPt, meta?.stamp);
+        const width   = box.width  * zoom;
+        const height  = box.height * zoom;
 
         setPlacements((current) => [...current, {
             id: nextStampId(),
@@ -378,7 +411,7 @@ function PdfViewerIsland({ el }) {
             signatureId: activeSigId,
         }]);
         advancePast(activeRequest.id);
-    }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast]);
+    }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast, meta]);
 
     const removePlacement = useCallback((stampId, requestId) => {
         setPlacements((current) => current.filter((p) => p.id !== stampId));
@@ -605,6 +638,7 @@ function PdfViewerIsland({ el }) {
                                             canvasWidth={nominal.width}
                                             canvasHeight={nominal.height}
                                             backgroundImageUrl={sig?.previewUrl}
+                                            preview={previewFor(placement, sig)}
                                             aspect={aspects[placement.signatureId]}
                                             onSelect={() => setActiveRequestId(placement.requestId)}
                                             onChange={(rect) => setPlacements((current) => current.map(
@@ -673,20 +707,62 @@ function PdfViewerIsland({ el }) {
             </div>
             )}
 
-            {/* The thing under the cursor mid-drag */}
+            {/*
+                What follows the cursor mid-drag — composed, not just the ink,
+                so the shape being carried is the shape that will land.
+            */}
             {dragging && (
-                <img
-                    src={dragging.sig.previewUrl}
-                    alt=""
+                <div
                     className="dsig-viewer__ghost"
-                    style={{ left: `${dragging.x}px`, top: `${dragging.y}px` }}
-                />
+                    style={{
+                        left:   `${dragging.x}px`,
+                        top:    `${dragging.y}px`,
+                        width:  `${GHOST_WIDTH}px`,
+                        height: `${GHOST_WIDTH / (aspects[dragging.sig.id] ?? 3.2) + GHOST_CAPTION}px`,
+                    }}
+                >
+                    <StampPreview
+                        imageUrl={dragging.sig.previewUrl}
+                        {...ghostPreview(dragging.sig, aspects[dragging.sig.id], meta?.stamp)}
+                    />
+                </div>
             )}
         </div>
     );
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// The ghost is not a placement yet, so it has no box to be laid out against.
+// These give it a plausible one at a readable size.
+const GHOST_WIDTH = 150;
+const GHOST_CAPTION = 26;
+
+/**
+ * Lay the dragged signature out as if it had already been dropped, so the
+ * thing under the cursor is the thing that lands rather than a bare image
+ * that then rearranges itself on release.
+ */
+function ghostPreview(signature, aspect, rules) {
+    const heightPt = GHOST_WIDTH / (aspect ?? 3.2) + GHOST_CAPTION;
+    const layout = layoutStamp(
+        { width: GHOST_WIDTH, height: heightPt },
+        signature.caption ?? [],
+        rules,
+    );
+
+    return {
+        imageWidth:  layout.image.width,
+        imageHeight: layout.image.height,
+        qrSize:      layout.qr,
+        caption: {
+            lines:        layout.caption.lines,
+            sizePx:       layout.caption.size,
+            lineHeightPx: layout.caption.size * (rules?.caption?.lineHeight ?? 1.06),
+            align:        layout.caption.align,
+        },
+    };
+}
 
 /**
  * Identity for one stamp on the page.
