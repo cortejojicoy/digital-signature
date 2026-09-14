@@ -47,46 +47,14 @@ class PdfSignerService
     /**
      * The provenance a person can actually read.
      *
-     * Everything binding this signature to its signer is already in the
-     * document — HMAC chunks in the PNG, a PKCS#7 block, the QR — and every
-     * bit of it is invisible on a printed page. These two or three lines are
-     * what somebody holding that page can check against: a name, a moment, and
-     * a reference to quote.
-     *
-     * Which lines appear is config, because what a form has room for is a
-     * property of the form. The driver drops lines that do not fit rather than
-     * overflowing the signatory's placement.
+     * Built by SignatureCaption, shared with the placement UI so the box a
+     * signatory aligns against the form holds the text that actually prints.
      *
      * @return array<int, string>
      */
     private function buildCaption(Signature $signature): array
     {
-        if (! config('signature.caption.enabled', true)) {
-            return [];
-        }
-
-        $signer = $signature->user;
-
-        // now(), not signed_at: the column is written once the signed PDF
-        // exists, which is after this runs. The QR payload has always dated
-        // itself the same way, and the two must not disagree on the same page.
-        $moment = now();
-
-        $available = [
-            'signer'    => $signer?->name,
-            'email'     => $signer?->email,
-            'signed_at' => 'Signed '.$moment->format(
-                (string) config('signature.caption.date_format', 'j M Y H:i'),
-            ),
-            'reference' => 'Ref '.substr((string) $signature->uuid, 0, 8),
-        ];
-
-        $wanted = (array) config('signature.caption.fields', ['signer', 'signed_at', 'reference']);
-
-        return array_values(array_filter(
-            array_map(fn (string $field): string => (string) ($available[$field] ?? ''), $wanted),
-            fn (string $line): bool => trim($line) !== '',
-        ));
+        return app(SignatureCaption::class)->linesFor($signature);
     }
 
     /**
