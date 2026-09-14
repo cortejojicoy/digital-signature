@@ -151,8 +151,12 @@ async function build() {
     await writeFile(join(DIST, 'assets', 'site.js'), CLIENT, 'utf8');
     await writeFile(join(DIST, 'search.json'), JSON.stringify(index), 'utf8');
 
-    // GitHub Pages runs Jekyll over the artifact unless told not to, which
-    // strips files and directories beginning with an underscore.
+    // Belt and braces against Jekyll, which strips paths beginning with an
+    // underscore. Pages does not run Jekyll when the source is GitHub Actions,
+    // so this matters only if the site is ever served from a branch instead.
+    //
+    // Note for whoever bumps the workflow: actions/upload-pages-artifact@v4
+    // excludes dotfiles, so this would silently stop being published.
     await writeFile(join(DIST, '.nojekyll'), '', 'utf8');
     await writeFile(join(DIST, '404.html'), notFound(), 'utf8');
 
