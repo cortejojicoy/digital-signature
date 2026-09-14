@@ -63,6 +63,7 @@ class TcpdfDriver implements PdfSignerDriver
                 $stamp['height'] ?? 20,
                 $caption,
                 $qrPayload,
+                $stamp['caption_position'] ?? null,
             );
         }
 

@@ -91,6 +91,7 @@ class FpdiDriver implements PdfSignerDriver
                     $sigH,
                     $caption,
                     $qrPayload,
+                    $stamp['caption_position'] ?? null,
                 );
             }
         }
