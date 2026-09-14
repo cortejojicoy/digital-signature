@@ -29,9 +29,9 @@
 
 <div
     class="dsig-launcher dsig-launcher--{{ $settings['position'] }}"
-    style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}"
+    style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}; --dsig-w: {{ $settings['width'] }}"
     data-dsig-loaded="{{ $this->loaded ? '1' : '0' }}"
-    x-data="dsigLauncher(@js($this->placement))"
+    x-data="dsigLauncher(@js($this->placement), @js($this->viewer))"
     x-on:keydown.escape.window="open = false"
     @if ($settings['poll'] > 0) wire:poll.{{ $settings['poll'] }}s.visible @endif
 >
@@ -42,16 +42,44 @@
     would simply never run.
 --}}
 <script>
-    window.dsigLauncher = window.dsigLauncher ?? function (config) {
+    window.dsigLauncher = window.dsigLauncher ?? function (config, viewer) {
         return {
             open: false,
             loaded: false,
             config,
+            viewer,
+            // 'queue' | 'library'. Two tabs rather than two drawers: placing a
+            // signature means reading the document and choosing the signature
+            // at the same time, and a second overlay to hold the second half
+            // of that would be in the way of the first.
+            tab: 'queue',
+            // Id of the request whose document is open, or null for the list.
+            viewing: null,
             observer: null,
             timers: [],
 
             init() {
                 this.loaded = this.$el.dataset.dsigLoaded === '1'
+
+                // The document pane is React and talks back in DOM events
+                // rather than reaching into Livewire: closing is this
+                // component's business, and refreshing the queue is the
+                // server's.
+                this.onViewerClose = () => { this.viewing = null }
+                this.onSigned = () => {
+                    this.viewing = null
+                    this.$wire.$refresh()
+                }
+                window.addEventListener('dsig:viewer-close', this.onViewerClose)
+                window.addEventListener('dsig:signed', this.onSigned)
+
+                // The library tab's pad is the same React island the Filament
+                // field uses, so it announces its export the same way.
+                this.onPadExport = (e) => {
+                    if (e.detail?.fieldId !== 'dsig-launcher-pad') return
+                    this.$wire.set('newSignature', e.detail.png)
+                }
+                window.addEventListener('sig:exported', this.onPadExport)
 
                 if (! this.config.enabled) return
 
@@ -79,6 +107,9 @@
             destroy() {
                 window.removeEventListener('resize', this.onResize)
                 document.removeEventListener('livewire:navigated', this.onResize)
+                window.removeEventListener('dsig:viewer-close', this.onViewerClose)
+                window.removeEventListener('dsig:signed', this.onSigned)
+                window.removeEventListener('sig:exported', this.onPadExport)
                 this.timers.forEach(clearTimeout)
                 this.observer?.disconnect()
             },
@@ -90,6 +121,16 @@
                     this.loaded = true
                     this.$wire.loadRequests()
                 }
+            },
+
+            /** Swap the drawer body for the document behind one request. */
+            view(requestId) {
+                this.tab = 'queue'
+                this.viewing = requestId
+            },
+
+            url(template, requestId) {
+                return template.replace('__ID__', requestId)
             },
 
             schedule() {
@@ -242,7 +283,7 @@
         .dsig-panel {
             position: fixed; top: 0; bottom: 0; z-index: calc(var(--dsig-z, 40) + 1);
             display: flex; flex-direction: column;
-            width: min(26rem, 100vw);
+            width: min(var(--dsig-w, 26rem), 100vw);
             background: #fff; color: #09090b;
             box-shadow: -12px 0 32px -12px rgb(0 0 0 / 0.25);
         }
@@ -267,7 +308,26 @@
         .dark .dsig-panel__close:hover { background: rgb(255 255 255 / 0.08); }
         .dsig-panel__close svg { width: 1.25rem; height: 1.25rem; }
 
-        .dsig-panel__body { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; }
+        /*
+            A flex column so the document pane can claim the full height and
+            run its own scroller — a PDF that scrolled the whole drawer would
+            take the toolbar and the signature tray off screen exactly when
+            they are needed.
+        */
+        .dsig-panel__body {
+            flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.25rem;
+            display: flex; flex-direction: column;
+        }
+        .dsig-panel__body > * { min-height: 0; }
+        .dsig-panel__doc { flex: 1; min-height: 0; }
+
+        /*
+            Alpine's cloak rule, shipped here rather than borrowed. Filament
+            defines one, but a host theme that trims its CSS would leave every
+            x-cloak element visible for a frame — and this file's whole premise
+            is not depending on the host's stylesheet.
+        */
+        .dsig-launcher [x-cloak] { display: none !important; }
         .dsig-panel__foot {
             border-top: 1px solid rgb(0 0 0 / 0.08);
             padding: .75rem 1.25rem;
@@ -329,6 +389,123 @@
             .dsig-t-enter, .dsig-t-leave, .dsig-fab { transition: none; }
             .dsig-skeleton { animation: none; }
         }
+
+        /* ── Tabs ──────────────────────────────────────────────────────── */
+        .dsig-tabs { display: flex; gap: .25rem; padding: .5rem 1.25rem 0; }
+        .dsig-tab {
+            border: 0; background: transparent; cursor: pointer; color: inherit;
+            font-size: .8125rem; font-weight: 600; padding: .4rem .7rem;
+            border-radius: .5rem .5rem 0 0; opacity: .55;
+            border-bottom: 2px solid transparent;
+        }
+        .dsig-tab:hover { opacity: .85; }
+        .dsig-tab--on { opacity: 1; border-bottom-color: var(--dsig-accent, #18181b); }
+        .dark .dsig-tab--on { border-bottom-color: var(--dsig-accent, #f4f4f5); }
+        .dsig-tab__count {
+            display: inline-block; margin-left: .35rem; padding: 0 .35rem;
+            border-radius: 9999px; background: rgb(0 0 0 / 0.08); font-size: .6875rem;
+        }
+        .dark .dsig-tab__count { background: rgb(255 255 255 / 0.12); }
+
+        /* ── Signature library ─────────────────────────────────────────── */
+        .dsig-lib { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+        .dsig-lib__item {
+            display: flex; align-items: center; justify-content: center;
+            width: 8rem; height: 4.5rem; padding: .35rem;
+            border: 1px solid rgb(0 0 0 / 0.1); border-radius: .625rem; background: #fff;
+        }
+        .dark .dsig-lib__item { border-color: rgb(255 255 255 / 0.12); background: rgb(255 255 255 / 0.04); }
+        .dsig-lib__item img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        .dsig-form { display: flex; flex-direction: column; gap: .75rem; }
+        .dsig-form label { font-size: .8125rem; font-weight: 600; }
+        .dsig-input {
+            width: 100%; box-sizing: border-box;
+            border: 1px solid rgb(0 0 0 / 0.15); border-radius: .5rem;
+            padding: .45rem .6rem; font-size: .8125rem; background: #fff; color: inherit;
+        }
+        .dark .dsig-input { border-color: rgb(255 255 255 / 0.18); background: rgb(255 255 255 / 0.05); }
+        .dsig-pad {
+            border: 1px solid rgb(0 0 0 / 0.1); border-radius: .625rem; overflow: hidden;
+        }
+        .dark .dsig-pad { border-color: rgb(255 255 255 / 0.12); }
+
+        /*
+            ── Document pane ──────────────────────────────────────────────
+            Namespaced and inline like everything else in this file: the React
+            island that renders into it is a package component and cannot
+            assume the host compiled any particular Tailwind utility.
+        */
+        .dsig-viewer { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+        .dsig-viewer__bar {
+            display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+            padding-bottom: .6rem; border-bottom: 1px solid rgb(0 0 0 / 0.08);
+        }
+        .dark .dsig-viewer__bar { border-color: rgb(255 255 255 / 0.1); }
+        .dsig-viewer__title {
+            font-size: .875rem; font-weight: 600; flex: 1; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dsig-viewer__zoom { display: flex; align-items: center; gap: .35rem; font-size: .75rem; }
+        .dsig-viewer__zoom button {
+            width: 1.5rem; height: 1.5rem; border-radius: .375rem; cursor: pointer;
+            border: 1px solid rgb(0 0 0 / 0.15); background: transparent; color: inherit;
+            font-size: .875rem; line-height: 1;
+        }
+        .dark .dsig-viewer__zoom button { border-color: rgb(255 255 255 / 0.2); }
+
+        .dsig-viewer__msg { font-size: .8125rem; margin: .6rem 0 0; opacity: .8; }
+        .dsig-viewer__msg--warn  { color: #b45309; }
+        .dark .dsig-viewer__msg--warn { color: #fbbf24; }
+        .dsig-viewer__msg--error { color: #dc2626; }
+        .dark .dsig-viewer__msg--error { color: #f87171; }
+
+        .dsig-viewer__pages {
+            flex: 1; min-height: 0; overflow: auto; padding: .75rem 0;
+            display: flex; flex-direction: column; align-items: center; gap: 1rem;
+            background: rgb(0 0 0 / 0.04);
+        }
+        .dark .dsig-viewer__pages { background: rgb(0 0 0 / 0.25); }
+        .dsig-viewer__page {
+            position: relative; line-height: 0;
+            box-shadow: 0 2px 10px -2px rgb(0 0 0 / 0.3); background: #fff;
+        }
+        .dsig-viewer__pageno {
+            position: absolute; right: .35rem; bottom: .35rem;
+            font-size: .625rem; line-height: 1; padding: .15rem .3rem;
+            border-radius: .25rem; background: rgb(0 0 0 / 0.45); color: #fff;
+        }
+
+        .dsig-viewer__panel { padding: 2rem 1rem; text-align: center; font-size: .875rem; opacity: .7; }
+        .dsig-viewer__panel--error { color: #dc2626; opacity: 1; }
+        .dsig-viewer__panel--ok    { color: inherit; opacity: 1; }
+
+        .dsig-viewer__tray { padding-top: .75rem; border-top: 1px solid rgb(0 0 0 / 0.08); }
+        .dark .dsig-viewer__tray { border-color: rgb(255 255 255 / 0.1); }
+        .dsig-viewer__trayhint { display: block; font-size: .75rem; opacity: .65; margin-bottom: .5rem; }
+        .dsig-viewer__chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+        .dsig-chip {
+            width: 6rem; height: 3.5rem; padding: .25rem; cursor: grab;
+            display: flex; align-items: center; justify-content: center;
+            border: 2px solid rgb(0 0 0 / 0.1); border-radius: .5rem; background: #fff;
+            touch-action: none;
+        }
+        .dsig-chip:active { cursor: grabbing; }
+        .dsig-chip--on { border-color: rgb(20 184 166); }
+        .dsig-chip img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+        .dark .dsig-chip { background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.12); }
+
+        .dsig-viewer__ghost {
+            position: fixed; pointer-events: none; z-index: 2147483647;
+            width: 7rem; transform: translate(-50%, -50%); opacity: .85;
+            filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.3));
+        }
+
+        .dsig-linkbtn {
+            border: 0; background: transparent; padding: 0; cursor: pointer;
+            color: inherit; font: inherit; text-decoration: underline;
+        }
+        .dsig-linkbtn:disabled { opacity: .5; cursor: not-allowed; text-decoration: none; }
 
         @media (max-width: 640px) {
             .dsig-panel { width: 100vw; }
@@ -396,99 +573,230 @@
             </button>
         </div>
 
-        <div class="dsig-panel__body">
-            @if (! $this->loaded)
-                <div class="dsig-skeleton"></div>
-                <div class="dsig-skeleton"></div>
-                <div class="dsig-skeleton"></div>
-            @else
-                @php
-                    $requests   = $this->requests;
-                    $signatures = $this->signatures;
-                @endphp
-
-                @if ($signatures->isEmpty())
-                    <div class="dsig-note">
-                        You have no registered signature yet, so documents can reach you but
-                        you can't sign them.
-                        @if ($this->registerUrl)
-                            <a href="{{ $this->registerUrl }}">Register one now →</a>
-                        @endif
-                    </div>
+        {{--
+            Tabs, not a second drawer. Placing a signature means reading the
+            document and picking the signature at the same time, so the library
+            has to be reachable from the same overlay rather than behind it.
+            Hidden while a document is open: the pane has its own tray.
+        --}}
+        <div class="dsig-tabs" role="tablist" x-show="! viewing">
+            <button
+                type="button"
+                role="tab"
+                class="dsig-tab"
+                x-bind:class="tab === 'queue' ? 'dsig-tab--on' : ''"
+                x-bind:aria-selected="(tab === 'queue').toString()"
+                x-on:click="tab = 'queue'"
+                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+            >
+                Awaiting
+                @if ($count > 0)
+                    <span class="dsig-tab__count">{{ $count > 99 ? '99+' : $count }}</span>
                 @endif
+            </button>
 
-                @forelse ($requests as $request)
+            <button
+                type="button"
+                role="tab"
+                class="dsig-tab"
+                x-bind:class="tab === 'library' ? 'dsig-tab--on' : ''"
+                x-bind:aria-selected="(tab === 'library').toString()"
+                x-on:click="tab = 'library'"
+                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+            >
+                My signatures
+            </button>
+        </div>
+
+        <div class="dsig-panel__body">
+            {{--
+                The document pane. wire:ignore because the React island inside
+                owns this subtree: a Livewire re-render that morphed it would
+                tear down a half-placed signature and the rendered PDF with it.
+            --}}
+            <div wire:ignore x-show="viewing" class="dsig-panel__doc">
+                <template x-if="viewing">
+                    <div
+                        data-dsig-pdf-viewer
+                        style="height: 100%"
+                        x-bind:data-request-id="viewing"
+                        x-bind:data-meta-url="url(viewer.metaUrlTemplate, viewing)"
+                        x-bind:data-sign-url="url(viewer.signUrlTemplate, viewing)"
+                        x-bind:data-bundle-src="viewer.bundleSrc"
+                        x-bind:data-worker-src="viewer.workerSrc"
+                        data-csrf-token="{{ csrf_token() }}"
+                    ></div>
+                </template>
+            </div>
+
+            <div x-show="! viewing && tab === 'queue'">
+                @if (! $this->loaded)
+                    <div class="dsig-skeleton"></div>
+                    <div class="dsig-skeleton"></div>
+                    <div class="dsig-skeleton"></div>
+                @else
                     @php
-                        $session  = $request->session;
-                        $document = $session?->signable;
-                        $title    = $document && method_exists($document, 'getSignableTitle')
-                            ? $document->getSignableTitle()
-                            : ($session?->template_key ?? 'Document');
-                        $blocked  = $session?->isSequential()
-                            && $session->requests
-                                ->where('required', true)
-                                ->where('sequence', '<', $request->sequence)
-                                ->contains(fn ($r) => ! $r->isSigned());
+                        $requests   = $this->requests;
+                        $signatures = $this->signatures;
                     @endphp
 
-                    <div class="dsig-card" wire:key="dsig-request-{{ $request->id }}">
-                        <p class="dsig-card__title">{{ $title }}</p>
-                        <p class="dsig-card__meta">
-                            You are listed as <strong>{{ $request->role }}</strong>
-                            @if ($session?->isSequential())
-                                · step {{ $request->sequence }}
-                            @endif
-                            @if ($request->requested_at)
-                                · requested {{ $request->requested_at->diffForHumans() }}
-                            @endif
-                        </p>
-
-                        @if ($blocked)
-                            <p class="dsig-card__warn">An earlier signatory must sign before you can.</p>
-                        @endif
-
-                        <div class="dsig-card__actions">
-                            <button
-                                type="button"
-                                class="dsig-btn"
-                                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
-                                wire:click="signRequest({{ $request->id }})"
-                                wire:loading.attr="disabled"
-                                wire:target="signRequest({{ $request->id }})"
-                                @disabled($blocked || $signatures->isEmpty())
-                            >
-                                <span wire:loading.remove wire:target="signRequest({{ $request->id }})">Sign</span>
-                                <span wire:loading wire:target="signRequest({{ $request->id }})">Signing…</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                class="dsig-btn dsig-btn--ghost"
-                                wire:click="declineRequest({{ $request->id }})"
-                                wire:confirm="Decline to sign this document?"
-                            >
-                                Decline
-                            </button>
+                    @if ($signatures->isEmpty())
+                        <div class="dsig-note">
+                            You have no registered signature yet, so documents can reach you but
+                            you can't sign them.
+                            <a href="#" x-on:click.prevent="tab = 'library'">Add one now →</a>
                         </div>
-                    </div>
-                @empty
-                    <div class="dsig-empty">
-                        <x-filament::icon icon="heroicon-o-check-circle" />
-                        <p>Nothing waiting on you</p>
-                        <p>Documents needing your signature will appear here.</p>
-                    </div>
-                @endforelse
-            @endif
+                    @endif
+
+                    @forelse ($requests as $request)
+                        @php
+                            $session  = $request->session;
+                            $document = $session?->signable;
+                            $title    = $document && method_exists($document, 'getSignableTitle')
+                                ? $document->getSignableTitle()
+                                : ($session?->template_key ?? 'Document');
+                            $blocked  = $session?->isSequential()
+                                && $session->requests
+                                    ->where('required', true)
+                                    ->where('sequence', '<', $request->sequence)
+                                    ->contains(fn ($r) => ! $r->isSigned());
+                        @endphp
+
+                        <div class="dsig-card" wire:key="dsig-request-{{ $request->id }}">
+                            <p class="dsig-card__title">{{ $title }}</p>
+                            <p class="dsig-card__meta">
+                                You are listed as <strong>{{ $request->role }}</strong>
+                                @if ($session?->isSequential())
+                                    · step {{ $request->sequence }}
+                                @endif
+                                @if ($request->requested_at)
+                                    · requested {{ $request->requested_at->diffForHumans() }}
+                                @endif
+                            </p>
+
+                            @if ($blocked)
+                                <p class="dsig-card__warn">An earlier signatory must sign before you can.</p>
+                            @endif
+
+                            <div class="dsig-card__actions">
+                                {{--
+                                    Opening the document is the only route to a
+                                    signature now. The button it replaced signed
+                                    a PDF the signatory had never seen.
+                                --}}
+                                <button
+                                    type="button"
+                                    class="dsig-btn"
+                                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                    x-on:click="view({{ $request->id }})"
+                                    @disabled($blocked || $signatures->isEmpty())
+                                >
+                                    View &amp; sign
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="dsig-btn dsig-btn--ghost"
+                                    wire:click="declineRequest({{ $request->id }})"
+                                    wire:confirm="Decline to sign this document?"
+                                >
+                                    Decline
+                                </button>
+                            </div>
+                        </div>
+                    @empty
+                        <div class="dsig-empty">
+                            <x-filament::icon icon="heroicon-o-check-circle" />
+                            <p>Nothing waiting on you</p>
+                            <p>Documents needing your signature will appear here.</p>
+                        </div>
+                    @endforelse
+                @endif
+            </div>
+
+            <div x-show="! viewing && tab === 'library'" x-cloak>
+                @if (! $this->loaded)
+                    <div class="dsig-skeleton"></div>
+                @else
+                    @php $signatures = $this->signatures; @endphp
+
+                    @if ($signatures->isNotEmpty())
+                        <div class="dsig-lib">
+                            @foreach ($signatures as $signature)
+                                <div class="dsig-lib__item" wire:key="dsig-sig-{{ $signature->id }}">
+                                    <img src="{{ $signature->getTemporaryImageUrl() }}" alt="Stored signature" />
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+
+                    @if ($this->canRegisterSignature())
+                        <div class="dsig-form">
+                            <label for="dsig-launcher-cert">Add a signature</label>
+
+                            {{--
+                                The same React pad the Filament field mounts —
+                                same island, same export event — so the drawer
+                                cannot drift from the resource page's capture.
+                                wire:ignore for the same reason as the viewer.
+                            --}}
+                            <div class="dsig-pad" wire:ignore>
+                                <div
+                                    data-signature-canvas
+                                    data-field-id="dsig-launcher-pad"
+                                    data-canvas-width="520"
+                                    data-canvas-height="170"
+                                    data-confirm-label="Use this signature"
+                                    style="height: 218px;"
+                                ></div>
+                            </div>
+
+                            <p class="dsig-card__meta" x-show="$wire.newSignature" x-cloak>
+                                Signature captured.
+                            </p>
+
+                            <label for="dsig-launcher-cert">Certificate password</label>
+                            <input
+                                id="dsig-launcher-cert"
+                                type="password"
+                                class="dsig-input"
+                                autocomplete="new-password"
+                                placeholder="Protects your signing certificate"
+                                wire:model="newCertificatePassword"
+                            />
+
+                            <div>
+                                <button
+                                    type="button"
+                                    class="dsig-btn"
+                                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                    wire:click="createSignature"
+                                    wire:loading.attr="disabled"
+                                    wire:target="createSignature"
+                                >
+                                    <span wire:loading.remove wire:target="createSignature">Save signature</span>
+                                    <span wire:loading wire:target="createSignature">Saving…</span>
+                                </button>
+                            </div>
+                        </div>
+                    @else
+                        <div class="dsig-note">
+                            You already have an active signature. Revoke it from the Signatures
+                            page before registering another.
+                        </div>
+                    @endif
+                @endif
+            </div>
         </div>
 
         @if ($this->inboxUrl || $this->libraryUrl)
-            <div class="dsig-panel__foot">
+            <div class="dsig-panel__foot" x-show="! viewing">
                 @if ($this->inboxUrl)
                     <a href="{{ $this->inboxUrl }}">Open full inbox</a>
                 @endif
 
                 @if ($this->libraryUrl)
-                    <a href="{{ $this->libraryUrl }}">My signatures</a>
+                    <a href="{{ $this->libraryUrl }}">Manage signatures</a>
                 @endif
             </div>
         @endif
