@@ -6,7 +6,7 @@
     "scripts": {
         "build": "node esbuild.config.js",
         "dev": "node esbuild.config.js --watch",
-        "test:js": "node tests/js/placement.test.mjs && node tests/js/pdfCoords.test.mjs"
+        "test:js": "node tests/js/placement.test.mjs && node tests/js/pdfCoords.test.mjs && node tests/js/stampLayout.test.mjs"
     },
     "dependencies": {
         "pdfjs-dist": "^6.3.289",
