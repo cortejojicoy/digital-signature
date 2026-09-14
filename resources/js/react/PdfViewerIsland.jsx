@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
 import { cssRectToPdfPoints, pdfPointsToCssRect } from '../utils/pdfCoords.js';
-import { layoutStamp, defaultStampBox, CAPTION_POSITIONS } from '../utils/stampLayout.js';
+import { layoutStamp, defaultStampBox } from '../utils/stampLayout.js';
 import { StampPreview } from './components/StampPreview.jsx';
 
 /**
@@ -256,10 +256,11 @@ function PdfViewerIsland({ el }) {
             signature?.caption ?? [],
             meta?.stamp,
             placement.captionPosition,
+            aspects[placement.signatureId],
         );
 
         return scalePreview(layout, zoom, meta?.stamp);
-    }, [meta, zoom]);
+    }, [meta, zoom, aspects]);
 
     /**
      * Select the next slot that still has nothing on it.
@@ -410,12 +411,6 @@ function PdfViewerIsland({ el }) {
         advancePast(activeRequest.id);
     }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast, meta]);
 
-    const moveCaption = useCallback((stampId, side) => {
-        setPlacements((current) => current.map(
-            (p) => (p.id === stampId ? { ...p, captionPosition: side } : p),
-        ));
-    }, []);
-
     const removePlacement = useCallback((stampId, requestId) => {
         setPlacements((current) => current.filter((p) => p.id !== stampId));
         setActiveRequestId(requestId);
@@ -516,12 +511,6 @@ function PdfViewerIsland({ el }) {
 
     const noSigs = signatures.length === 0;
 
-    // The stamp the side control acts on: the one last selected, else the most
-    // recent for the active slot, so the control is useful straight after a
-    // drop without needing a click first.
-    const selectedPlacement = placements.find((p) => p.id === selectedStampId)
-        ?? [...placements].reverse().find((p) => p.requestId === activeRequestId)
-        ?? null;
     const blockedPlaced = placements.some(
         (p) => requests.find((r) => r.id === p.requestId)?.blocked,
     );
@@ -701,30 +690,6 @@ function PdfViewerIsland({ el }) {
                     {' Drag again to sign in another place on the same document.'}
                 </span>
 
-                {/*
-                    Which side of the stamp the caption sits on. A form
-                    dictates this: a signature line with the printed name
-                    already underneath has no room below and plenty beside it,
-                    and one line on a page can differ from the next.
-                */}
-                {selectedPlacement && (
-                    <div className="dsig-viewer__caption-side">
-                        <span>Details:</span>
-                        {CAPTION_POSITIONS.map((side) => (
-                            <button
-                                key={side}
-                                type="button"
-                                className={'dsig-sidechip'
-                                    + (selectedPlacement.captionPosition === side ? ' dsig-sidechip--on' : '')}
-                                onClick={() => moveCaption(selectedPlacement.id, side)}
-                                title={`Put the details on the ${side}`}
-                            >
-                                {SIDE_GLYPH[side]}
-                            </button>
-                        ))}
-                    </div>
-                )}
-
                 <div className="dsig-viewer__chips">
                     {signatures.map((sig) => (
                         <button
@@ -775,8 +740,6 @@ function PdfViewerIsland({ el }) {
 
 // The ghost is not a placement yet, so it has no box to be laid out against.
 // These give it a plausible one at a readable size.
-const SIDE_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' };
-
 const GHOST_WIDTH = 150;
 const GHOST_CAPTION = 26;
 
@@ -789,7 +752,13 @@ function ghostPreview(signature, aspect, rules) {
     const heightPt = GHOST_WIDTH / (aspect ?? 3.2) + GHOST_CAPTION;
 
     return scalePreview(
-        layoutStamp({ width: GHOST_WIDTH, height: heightPt }, signature.caption ?? [], rules),
+        layoutStamp(
+            { width: GHOST_WIDTH, height: heightPt },
+            signature.caption ?? [],
+            rules,
+            undefined,
+            aspect,
+        ),
         1,
         rules,
     );
