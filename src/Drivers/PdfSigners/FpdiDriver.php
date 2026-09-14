@@ -2,7 +2,7 @@
 
 namespace Kukux\DigitalSignature\Drivers\PdfSigners;
 
-use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
+use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureStamp;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Illuminate\Support\Facades\Storage;
 use setasign\Fpdi\TcpdfFpdi;
@@ -24,7 +24,7 @@ use setasign\Fpdi\TcpdfFpdi;
  */
 class FpdiDriver implements PdfSignerDriver
 {
-    use DrawsSignatureCaption;
+    use DrawsSignatureStamp;
 
     public function sign(
         string $pdfPath,
@@ -53,9 +53,7 @@ class FpdiDriver implements PdfSignerDriver
         // exists; there is never a reason for one to spill onto a new page.
         $pdf->SetAutoPageBreak(false);
 
-        // One signature, however many appearances. The first is the primary —
-        // it is the one the QR sits beside, because a document with a barcode
-        // against every stamp is noise rather than provenance.
+        // One signature, however many appearances.
         $stamps = array_merge([$position], array_values($extraPositions));
 
         $count = $pdf->setSourceFile($inPath);
@@ -66,7 +64,7 @@ class FpdiDriver implements PdfSignerDriver
             $pdf->AddPage($sz['orientation'], [$sz['width'], $sz['height']]);
             $pdf->useTemplate($tpl);
 
-            foreach ($stamps as $index => $stamp) {
+            foreach ($stamps as $stamp) {
                 if ($i !== ($stamp['page'] ?? 1)) {
                     continue;
                 }
@@ -81,42 +79,19 @@ class FpdiDriver implements PdfSignerDriver
                 // so flip it against this page's own height.
                 $topY = $sz['height'] - ($sigY + $sigH);
 
-                // The caption comes out of the bottom of the placement, never
-                // out of the page around it: that rectangle is where the
-                // signatory said their signature goes, and anything below it
-                // belongs to the form.
-                $captionLayout = $this->layoutCaption($pdf, $caption, $sigW, $sigH);
-                $imageH        = $sigH - $captionLayout['height'];
-
-                $pdf->Image(
+                // Caption and QR on every appearance, not just the first: a
+                // stamp further down the document that says neither who made
+                // it nor how to check it is an unattributed mark.
+                $this->drawStamp(
+                    $pdf,
                     $disk->path($imagePath),
                     $sigX,
                     $topY,
                     $sigW,
-                    $imageH,
-                    'PNG',
+                    $sigH,
+                    $caption,
+                    $qrPayload,
                 );
-
-                // Under every stamp, not just the first: each appearance has
-                // to say for itself who signed and when, or the ones further
-                // down the document are unattributed marks.
-                $this->drawCaption($pdf, $captionLayout, $sigX, $topY + $imageH, $sigW);
-
-                if ($index === 0 && $qrPayload !== '') {
-                    $qrSize = $sigH;
-                    $qrX    = $sigX + $sigW + 2;
-                    $qrY    = $topY;
-
-                    $pdf->write2DBarcode(
-                        $qrPayload,
-                        'QRCODE,H',
-                        $qrX,
-                        $qrY,
-                        $qrSize,
-                        $qrSize,
-                        ['border' => false, 'padding' => 0],
-                    );
-                }
             }
         }
 

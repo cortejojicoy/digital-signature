@@ -2,14 +2,14 @@
 
 namespace Kukux\DigitalSignature\Drivers\PdfSigners;
 
-use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
+use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureStamp;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Illuminate\Support\Facades\Storage;
 use TCPDF;
 
 class TcpdfDriver implements PdfSignerDriver
 {
-    use DrawsSignatureCaption;
+    use DrawsSignatureStamp;
 
     public function sign(
         string $pdfPath,
@@ -49,40 +49,21 @@ class TcpdfDriver implements PdfSignerDriver
             );
         }
 
-        // One signature, however many appearances — same rule as the FPDI
-        // driver, including the QR belonging only to the first.
+        // One signature, however many appearances — same layout rules as the
+        // FPDI driver, from the same trait.
         $stamps = array_merge([$position], array_values($extraPositions));
 
-        foreach ($stamps as $index => $stamp) {
-            $sigX = $stamp['x']      ?? 20;
-            $sigY = $stamp['y']      ?? 250;
-            $sigW = $stamp['width']  ?? 60;
-            $sigH = $stamp['height'] ?? 20;
-
-            // The caption is carved out of the placement, so the stamp never
-            // occupies more of the page than the signatory positioned.
-            $captionLayout = $this->layoutCaption($pdf, $caption, $sigW, $sigH);
-            $imageH        = $sigH - $captionLayout['height'];
-
-            $pdf->Image($disk->path($imagePath), $sigX, $sigY, $sigW, $imageH);
-
-            $this->drawCaption($pdf, $captionLayout, $sigX, $sigY + $imageH, $sigW);
-
-            if ($index === 0 && $qrPayload !== '') {
-                $qrSize = $sigH;
-                $qrX    = $sigX + $sigW + 2;
-                $qrY    = $sigY;
-
-                $pdf->write2DBarcode(
-                    $qrPayload,
-                    'QRCODE,H',
-                    $qrX,
-                    $qrY,
-                    $qrSize,
-                    $qrSize,
-                    ['border' => false, 'padding' => 0],
-                );
-            }
+        foreach ($stamps as $stamp) {
+            $this->drawStamp(
+                $pdf,
+                $disk->path($imagePath),
+                $stamp['x']      ?? 20,
+                $stamp['y']      ?? 250,
+                $stamp['width']  ?? 60,
+                $stamp['height'] ?? 20,
+                $caption,
+                $qrPayload,
+            );
         }
 
         $outName = config('signature.signed_docs_path')
