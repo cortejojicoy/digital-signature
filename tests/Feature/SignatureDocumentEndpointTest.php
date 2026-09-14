@@ -103,6 +103,31 @@ describe('signature request document endpoints', function () {
             ->assertJsonPath('signatures.0.id', $this->juanSig->id);
     });
 
+    it('sends the caption and layout rules the placement preview needs', function () {
+        // The box a signatory drags holds ink, a QR and a caption. Without
+        // these the preview would draw only the signature, and they would be
+        // aligning something other than what prints.
+        $this->actingAs(TestUser::find(11))
+            ->getJson("/signature/requests/{$this->prepared->id}/meta")
+            ->assertOk()
+            ->assertJsonPath('stamp.caption.enabled', true)
+            ->assertJsonPath('stamp.caption.heightRatio', 0.38)
+            ->assertJsonPath('stamp.qr.enabled', true)
+            // Per signature, because the reference line is the signature's own.
+            ->assertJsonPath('signatures.0.caption.2', 'Ref '.substr($this->juanSig->uuid, 0, 8));
+    });
+
+    it('stops advertising a QR when verification is switched off', function () {
+        // The code would lead to a page that returns 404, so the preview must
+        // not reserve space for one.
+        config()->set('signature.verify.enabled', false);
+
+        $this->actingAs(TestUser::find(11))
+            ->getJson("/signature/requests/{$this->prepared->id}/meta")
+            ->assertOk()
+            ->assertJsonPath('stamp.qr.enabled', false);
+    });
+
     it('tells a later signatory that someone else has to go first', function () {
         $this->actingAs(TestUser::find(12))
             ->getJson("/signature/requests/{$this->attested->id}/meta")
