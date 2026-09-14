@@ -15,6 +15,7 @@ use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
+use Kukux\DigitalSignature\Support\ViewerAssets;
 
 class SignaturePlugin implements Plugin
 {
@@ -271,6 +272,17 @@ class SignaturePlugin implements Plugin
 
         FilamentAsset::register([
             Js::make('signature-plugin', __DIR__ . '/../resources/dist/digital-signature.js'),
+
+            // Published, but never auto-injected. The viewer bundle carries
+            // pdf.js and is fetched by the lazy island the first time somebody
+            // opens a document; the worker is only ever loaded by pdf.js
+            // itself. Registering them here is what gives them stable,
+            // versioned URLs under `filament:assets` — and what keeps the
+            // worker local instead of on a CDN an offline panel cannot reach.
+            Js::make(ViewerAssets::BUNDLE_ID, __DIR__ . '/../resources/dist/digital-signature-pdf-viewer.js')
+                ->loadedOnRequest(),
+            Js::make(ViewerAssets::WORKER_ID, __DIR__ . '/../resources/dist/digital-signature-pdf.worker.js')
+                ->loadedOnRequest(),
         ], 'kukux/digital-signature');
 
         // The launcher is mounted through a panel render hook rather than a

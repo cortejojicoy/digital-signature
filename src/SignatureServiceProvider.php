@@ -22,6 +22,7 @@ use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
+use Kukux\DigitalSignature\Http\Controllers\SignatureDocumentController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
@@ -178,6 +179,29 @@ class SignatureServiceProvider extends ServiceProvider
         Route::get('/signature/assets/{digitalSignature:uuid}', [SignatureAssetController::class, 'show'])
             ->middleware(['web', 'signed'])
             ->name('signature.asset');
+
+        // The document behind one signature request: read it, then sign it
+        // where you put your signature.
+        //
+        // Same `web`-only middleware as the designer/signer endpoints below,
+        // and for the same reason — see that comment. Authorization is the
+        // controller's `ownedRequest()`, which matches on the signatory's own
+        // user id, so an id from someone else's queue is a 403 rather than a
+        // document leak.
+        Route::prefix('signature/requests')
+            ->middleware(['web'])
+            ->name('signature.request.')
+            ->group(function () {
+                Route::get('{signatureRequest}/meta', [SignatureDocumentController::class, 'meta'])
+                    ->whereNumber('signatureRequest')
+                    ->name('meta');
+                Route::get('{signatureRequest}/document', [SignatureDocumentController::class, 'document'])
+                    ->whereNumber('signatureRequest')
+                    ->name('document');
+                Route::post('{signatureRequest}/sign', [SignatureDocumentController::class, 'sign'])
+                    ->whereNumber('signatureRequest')
+                    ->name('sign');
+            });
 
         // Placement-designer + signer endpoints.
         //
