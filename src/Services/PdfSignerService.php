@@ -17,9 +17,20 @@ class PdfSignerService
      */
     public function sign(Signature $signature, array $certData, ?string $sourcePdfPath = null): string
     {
-        $position = $signature->position
-            ? $signature->position->only(['page', 'x', 'y', 'width', 'height'])
-            : [];
+        // Every place this signature is drawn, not just the first. Falls back
+        // to the singular relation so a Signature loaded the old way — or one
+        // built by a host's own code — still stamps.
+        $stamps = $signature->exists ? $signature->positions()->get() : collect();
+
+        if ($stamps->isEmpty() && $signature->position) {
+            $stamps = collect([$signature->position]);
+        }
+
+        $all = $stamps
+            ->map(fn ($p): array => $p->only(['page', 'x', 'y', 'width', 'height']))
+            ->values();
+
+        $position = $all->first() ?? [];
 
         return $this->driver->sign(
             pdfPath:   $sourcePdfPath ?? $signature->signable->getSignablePdfPath(),
@@ -29,6 +40,7 @@ class PdfSignerService
             reason:    'Signed via '.config('app.name'),
             qrPayload: $this->buildQrPayload($signature),
             caption:   $this->buildCaption($signature),
+            extraPositions: $all->slice(1)->values()->all(),
         );
     }
 

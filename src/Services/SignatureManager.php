@@ -182,6 +182,11 @@ class SignatureManager
      *
      * @throws ForgedSignatureException
      */
+    /**
+     * @param  array<int, array<string, mixed>>|null  $extraPositions  Further
+     *   places to draw this same signature. One act of signing, one PKCS#7
+     *   block; only the number of visible stamps changes.
+     */
     public function storeForDocument(
         Signature $source,
         int $signerUserId,
@@ -189,6 +194,7 @@ class SignatureManager
         ?array $position = null,
         ?string $sourcePdfPath = null,
         ?array $chain = null,
+        ?array $extraPositions = null,
     ): Signature {
         if ((int) $source->user_id !== $signerUserId) {
             throw new ForgedSignatureException(
@@ -226,6 +232,15 @@ class SignatureManager
 
         if ($position) {
             SignaturePosition::create(array_merge(['signature_id' => $sig->id], $position));
+        }
+
+        // Further appearances of this same signature. One row above, one
+        // PKCS#7 block, one link in the chain — these only say where else it
+        // is drawn.
+        foreach ($extraPositions ?? [] as $extra) {
+            if ($extra) {
+                SignaturePosition::create(array_merge(['signature_id' => $sig->id], $extra));
+            }
         }
 
         return $sig;

@@ -188,6 +188,7 @@ class SigningSessionManager
         int $actorUserId,
         ?Signature $useSignature = null,
         ?string $password = null,
+        array $extraPositions = [],
     ): Signature {
         $session = $request->session;
 
@@ -199,7 +200,7 @@ class SigningSessionManager
             );
         }
 
-        return $this->applySignature($request, $useSignature, $password, delegated: false);
+        return $this->applySignature($request, $useSignature, $password, delegated: false, extraPositions: $extraPositions);
     }
 
     /**
@@ -219,6 +220,12 @@ class SigningSessionManager
      * @param  array{page?:mixed,x?:mixed,y?:mixed,width?:mixed,height?:mixed}|null  $placement
      *         PDF points, y measured from the bottom of the page. Null keeps
      *         the placement frozen at request time.
+     * @param  array<int, array<string, mixed>>  $extraPlacements  Further places
+     *         to draw this same signature. A form that asks one person to sign
+     *         in three places is one act of signing with three appearances, so
+     *         these add stamps and nothing else: still one signature row, one
+     *         PKCS#7 block, one link in the chain. They are not persisted on
+     *         the request, which owns the slot's own frozen coordinates.
      */
     public function signAt(
         SignatureRequest $request,
@@ -226,6 +233,7 @@ class SigningSessionManager
         ?array $placement = null,
         ?Signature $useSignature = null,
         ?string $password = null,
+        array $extraPlacements = [],
     ): Signature {
         if ($placement !== null) {
             // Guard before writing rather than after: sign() re-reads the row,
@@ -241,7 +249,13 @@ class SigningSessionManager
             $request = $request->fresh();
         }
 
-        return $this->sign($request, $actorUserId, $useSignature, $password);
+        return $this->sign(
+            $request,
+            $actorUserId,
+            $useSignature,
+            $password,
+            array_map(fn (array $extra): array => $this->normalisePlacement($extra), $extraPlacements),
+        );
     }
 
     /**
@@ -280,6 +294,7 @@ class SigningSessionManager
         ?Signature $useSignature,
         ?string $password,
         bool $delegated,
+        array $extraPositions = [],
     ): Signature {
         $session = $request->session;
 
@@ -361,12 +376,13 @@ class SigningSessionManager
                 chain:         $chain,
             )
             : $this->signatures->storeForDocument(
-                source:        $signature,
-                signerUserId:  (int) $request->user_id,
-                signable:      $record,
-                position:      $position,
-                sourcePdfPath: $sourcePath,
-                chain:         $chain,
+                source:         $signature,
+                signerUserId:   (int) $request->user_id,
+                signable:       $record,
+                position:       $position,
+                sourcePdfPath:  $sourcePath,
+                chain:          $chain,
+                extraPositions: $extraPositions,
             );
 
         $this->signatures->embedAndFinalize($documentSignature, $signingPassword, $sourcePath);
