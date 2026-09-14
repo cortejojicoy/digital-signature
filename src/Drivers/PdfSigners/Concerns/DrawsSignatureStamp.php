@@ -53,6 +53,7 @@ trait DrawsSignatureStamp
             $captionLines,
             $qrPayload !== '',
             $captionPosition ?? (string) config('signature.caption.position', 'bottom'),
+            $this->imageAspect($imageFsPath),
         );
 
         $pdf->Image(
@@ -82,16 +83,25 @@ trait DrawsSignatureStamp
     /**
      * Divide the placement between the caption band, the QR and the ink.
      *
-     * The caption takes one whole side of the box — which side is the
-     * signatory's choice, because a form dictates it: a signature line with
-     * the printed name underneath has no room below and plenty beside it,
-     * while one at the foot of a page has the opposite problem. Everything
-     * else fits into what is left.
+     * Two rules do the work here:
+     *
+     *  1. **The ink keeps its own proportions.** A signature stretched to fill
+     *     whatever rectangle was drawn is a stamp that no longer matches the
+     *     specimen on file. It is fitted inside the space available, exactly as
+     *     the placement preview shows it.
+     *
+     *  2. **The caption hugs the ink, not the box.** Pinning it to the bottom
+     *     edge meant that enlarging the placement pushed the provenance further
+     *     and further from the signature it describes, until it read as a note
+     *     belonging to whatever the form had underneath. The two are drawn as
+     *     one group and centred together, so the gap between them stays the
+     *     same whatever size the box is.
      *
      * All coordinates are relative to the box's own top-left corner, so the
      * caller adds its origin once and no arithmetic is repeated per element.
      *
      * @param  array<int, string>  $lines
+     * @param  float|null  $imageAspect  Natural width/height of the signature.
      * @return array{image: array{x:float,y:float,w:float,h:float}, qr: array{x:float,y:float,size:float}|null, caption: array<string, mixed>}
      */
     protected function stampFrame(
@@ -101,6 +111,7 @@ trait DrawsSignatureStamp
         array $lines,
         bool $wantQr,
         string $position = 'bottom',
+        ?float $imageAspect = null,
     ): array {
         $position = in_array($position, ['bottom', 'top', 'left', 'right'], true) ? $position : 'bottom';
         $vertical = $position === 'left' || $position === 'right';
@@ -109,46 +120,100 @@ trait DrawsSignatureStamp
             ? $this->layoutCaptionColumn($pdf, $lines, $width, $height)
             : $this->layoutCaption($pdf, $lines, $width, $height);
 
-        // What the caption did not claim.
-        $band    = $vertical ? $caption['width'] ?? 0.0 : $caption['height'];
-        $content = match ($position) {
-            'bottom' => ['x' => 0.0,   'y' => 0.0,   'w' => $width,        'h' => $height - $band],
-            'top'    => ['x' => 0.0,   'y' => $band, 'w' => $width,        'h' => $height - $band],
-            'left'   => ['x' => $band, 'y' => 0.0,   'w' => $width - $band, 'h' => $height],
-            'right'  => ['x' => 0.0,   'y' => 0.0,   'w' => $width - $band, 'h' => $height],
+        $band = $vertical ? ($caption['width'] ?? 0.0) : $caption['height'];
+
+        // The slab left once the caption has taken its side.
+        $contentX = $position === 'left' ? $band : 0.0;
+        $contentW = $vertical ? $width - $band : $width;
+        $contentH = $vertical ? $height : $height - $band;
+
+        $qrSize = $this->qrSize($contentW, $contentH, $wantQr);
+        $gap    = $qrSize > 0 ? $this->qrGap() : 0.0;
+
+        $inkAreaW = $contentW - ($qrSize > 0 ? $qrSize + $gap : 0.0);
+        $ink      = $this->fitWithin($imageAspect, $inkAreaW, $contentH);
+
+        // Ink and caption travel together. Centring the pair — rather than the
+        // ink alone — is what keeps the provenance tucked under the signature
+        // at every box size.
+        $groupHeight = $vertical ? $ink['h'] : $ink['h'] + $caption['height'];
+        $groupTop    = max(0.0, ($height - $groupHeight) / 2);
+
+        $inkY = match (true) {
+            $vertical            => max(0.0, ($height - $ink['h']) / 2),
+            $position === 'top'  => $groupTop + $caption['height'],
+            default              => $groupTop,
         };
+
+        $inkX = $contentX + max(0.0, ($inkAreaW - $ink['w']) / 2);
 
         $captionBox = match ($position) {
-            'bottom' => ['x' => 0.0, 'y' => $height - $band, 'w' => $width],
-            'top'    => ['x' => 0.0, 'y' => 0.0,             'w' => $width],
-            'left'   => ['x' => 0.0, 'y' => 0.0,             'w' => $band],
-            'right'  => ['x' => $width - $band, 'y' => 0.0,  'w' => $band],
+            'bottom' => ['x' => $contentX, 'y' => $inkY + $ink['h'], 'w' => $inkAreaW],
+            'top'    => ['x' => $contentX, 'y' => $groupTop,         'w' => $inkAreaW],
+            'left'   => ['x' => 0.0,       'y' => 0.0,               'w' => $band],
+            'right'  => ['x' => $width - $band, 'y' => 0.0,          'w' => $band],
         };
 
-        // Vertically centre a column caption against the ink it belongs to.
+        // A column caption centres against the ink it sits beside.
         if ($vertical && $caption['lines'] !== []) {
             $captionBox['y'] = max(0.0, ($height - $caption['height']) / 2);
         }
 
-        $qrSize = $this->qrSize($content['w'], $content['h'], $wantQr);
-        $gap    = $qrSize > 0 ? $this->qrGap() : 0.0;
-
         return [
-            'image' => [
-                'x' => $content['x'],
-                'y' => $content['y'],
-                'w' => $content['w'] - ($qrSize > 0 ? $qrSize + $gap : 0),
-                'h' => $content['h'],
-            ],
+            'image' => ['x' => $inkX, 'y' => $inkY, 'w' => $ink['w'], 'h' => $ink['h']],
             'qr' => $qrSize > 0
                 ? [
-                    'x'    => $content['x'] + $content['w'] - $qrSize,
-                    'y'    => $content['y'],
+                    'x'    => $contentX + $contentW - $qrSize,
+                    // Level with the ink, so the two read as one mark rather
+                    // than a barcode floating above a signature.
+                    'y'    => $inkY + max(0.0, ($ink['h'] - $qrSize) / 2),
                     'size' => $qrSize,
                 ]
                 : null,
             'caption' => $caption + $captionBox,
         ];
+    }
+
+    /**
+     * The largest rectangle of the given proportions that fits the space.
+     *
+     * With no aspect to honour — an unreadable file, a caller that did not
+     * supply one — the space is used as-is, which is what this did before
+     * proportions were respected at all.
+     *
+     * @return array{w: float, h: float}
+     */
+    protected function fitWithin(?float $aspect, float $maxWidth, float $maxHeight): array
+    {
+        if ($aspect === null || $aspect <= 0.0) {
+            return ['w' => $maxWidth, 'h' => $maxHeight];
+        }
+
+        $width = min($maxWidth, $maxHeight * $aspect);
+
+        return ['w' => $width, 'h' => $width / $aspect];
+    }
+
+    /**
+     * Proportions of the signature image, or null when they cannot be read.
+     *
+     * Cached per path: one signature is commonly stamped in several places on
+     * the same document, and re-reading the file's header for each appearance
+     * is work with a known answer.
+     */
+    protected function imageAspect(string $path): ?float
+    {
+        static $cache = [];
+
+        if (array_key_exists($path, $cache)) {
+            return $cache[$path];
+        }
+
+        $size = @getimagesize($path);
+
+        return $cache[$path] = ($size && ! empty($size[1]))
+            ? (float) $size[0] / (float) $size[1]
+            : null;
     }
 
     /**
