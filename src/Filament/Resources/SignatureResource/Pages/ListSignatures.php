@@ -4,33 +4,31 @@ namespace Kukux\DigitalSignature\Filament\Resources\SignatureResource\Pages;
 
 use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
-use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
+use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
-use Kukux\DigitalSignature\Models\Signature;
-use Kukux\DigitalSignature\Services\SignatureManager;
 
 class ListSignatures extends ListRecords
 {
+    use RegistersSignatures;
+
     protected static string $resource = SignatureResource::class;
 
     protected function getHeaderActions(): array
     {
         return [
             // ── Add Signature ────────────────────────────────────────────────────
+            //
+            // The body of this action lives in RegistersSignatures, shared with
+            // the launcher drawer's library tab. Both surfaces create a signing
+            // credential, so the single-primary rule and the race it can lose
+            // are decided in one place rather than two.
             Action::make('createSignature')
                 ->label('Add Signature')
                 ->icon('heroicon-o-plus')
                 ->color('primary')
-                ->visible(function (): bool {
-                    $userId = auth()->id();
-
-                    return $userId
-                        ? ! Signature::primaryActiveFor((int) $userId)->exists()
-                        : false;
-                })
+                ->visible(fn (): bool => $this->canRegisterSignature())
                 ->modalHeading('Add Signature')
                 ->modalDescription('Draw your signature or upload an image.')
                 ->modalWidth('xl')
@@ -49,38 +47,10 @@ class ListSignatures extends ListRecords
                         ->hintIcon('heroicon-m-lock-closed')
                         ->placeholder('Enter your certificate password'),
                 ])
-                ->action(function (array $data): void {
-                    $userId = auth()->id()
-                        ?? throw new \RuntimeException('No authenticated user found.');
-
-                    $source = str_contains($data['signature'] ?? '', 'data:image') ? 'upload' : 'draw';
-
-                    try {
-                        app(SignatureManager::class)->store(
-                            userId: $userId,
-                            input: $data['signature'],
-                            source: $source,
-                            certificatePassword: $data['certificate_password'] ?? null,
-                        );
-                    } catch (PrimarySignatureExistsException $e) {
-                        // Handles the race between the visibility check and submit
-                        // (e.g. user created a signature in another tab before
-                        // submitting this modal).
-                        Notification::make()
-                            ->title('Signature already exists')
-                            ->body($e->getMessage())
-                            ->danger()
-                            ->send();
-
-                        return;
-                    }
-
-                    Notification::make()
-                        ->title('Signature added')
-                        ->body('Your signature has been saved successfully.')
-                        ->success()
-                        ->send();
-                }),
+                ->action(fn (array $data) => $this->registerSignature(
+                    $data['signature'] ?? null,
+                    $data['certificate_password'] ?? null,
+                )),
         ];
     }
 }
