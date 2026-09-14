@@ -33,6 +33,12 @@ import { cssRectToPdfPoints, pdfPointsToCssRect } from '../utils/pdfCoords.js';
  *  4. **Geometry comes from the PDF.** pdf.js reports page sizes in points, so
  *     no server-side rasterizing (and therefore no Imagick + Ghostscript) is
  *     needed just to read a document.
+ *
+ * The same pane doubles as the reader for documents already signed. A slot in
+ * a terminal state comes back with `readOnly`, and everything that places or
+ * commits a signature is simply not rendered: a signatory is entitled to see
+ * what they put their certificate on, long after there is anything left to do
+ * about it.
  */
 function PdfViewerIsland({ el }) {
     const config = useMemo(() => ({
@@ -65,6 +71,7 @@ function PdfViewerIsland({ el }) {
     // box straight back from the frozen placement, making "remove" look broken.
     const seededRef  = useRef(false);
 
+    const readOnly = meta?.readOnly === true;
     const requests = meta?.requests ?? [];
     const signatures = meta?.signatures ?? [];
     const activeSig = signatures.find((s) => s.id === activeSigId) ?? null;
@@ -207,6 +214,10 @@ function PdfViewerIsland({ el }) {
     useEffect(() => {
         if (seededRef.current || !meta || pages.length === 0) return;
         seededRef.current = true;
+
+        // Nothing to place on a document that is already signed. Its stamps
+        // are in the PDF itself, which is what the pages below are rendering.
+        if (meta.readOnly) return;
 
         const seeded = {};
         for (const request of requests) {
@@ -456,16 +467,23 @@ function PdfViewerIsland({ el }) {
                             aria-label="Zoom in">+</button>
                 </span>
 
-                <button
-                    type="button"
-                    className="dsig-btn"
-                    onClick={commit}
-                    disabled={busy || noSigs || placedIds.length === 0 || blockedPlaced}
-                >
-                    {busy
-                        ? 'Signing…'
-                        : placedIds.length > 1 ? `Sign ${placedIds.length} places` : 'Sign here'}
-                </button>
+                {readOnly ? (
+                    <span className="dsig-viewer__stamp">
+                        {meta.stateLabel ?? 'Signed'}
+                        {meta.settledAt ? ` · ${formatMoment(meta.settledAt)}` : ''}
+                    </span>
+                ) : (
+                    <button
+                        type="button"
+                        className="dsig-btn"
+                        onClick={commit}
+                        disabled={busy || noSigs || placedIds.length === 0 || blockedPlaced}
+                    >
+                        {busy
+                            ? 'Signing…'
+                            : placedIds.length > 1 ? `Sign ${placedIds.length} places` : 'Sign here'}
+                    </button>
+                )}
             </div>
 
             {/*
@@ -473,7 +491,7 @@ function PdfViewerIsland({ el }) {
                 slot on the document — with a single slot it would be a control
                 with one option.
             */}
-            {requests.length > 1 && (
+            {!readOnly && requests.length > 1 && (
                 <div className="dsig-viewer__slots">
                     <span className="dsig-viewer__trayhint">
                         You are {requests.length} signatories on this document. Place each:
@@ -506,7 +524,7 @@ function PdfViewerIsland({ el }) {
                     One of the slots you placed is waiting on an earlier signatory.
                 </p>
             )}
-            {noSigs && (
+            {!readOnly && noSigs && (
                 <p className="dsig-viewer__msg dsig-viewer__msg--warn">
                     You have no registered signature yet, so there is nothing to place.
                 </p>
@@ -569,7 +587,9 @@ function PdfViewerIsland({ el }) {
                 })}
             </div>
 
-            {/* Signature tray — the drag source */}
+            {/* Signature tray — the drag source. Absent once there is nothing
+                left to sign, so the reader is a reader. */}
+            {!readOnly && (
             <div className="dsig-viewer__tray">
                 <span className="dsig-viewer__trayhint">
                     Drag a signature onto the page
@@ -605,6 +625,7 @@ function PdfViewerIsland({ el }) {
                     ))}
                 </div>
             </div>
+            )}
 
             {/* The thing under the cursor mid-drag */}
             {dragging && (
@@ -664,6 +685,17 @@ async function describeFailure(res) {
 
 function Panel({ children, tone }) {
     return <div className={'dsig-viewer__panel' + (tone ? ` dsig-viewer__panel--${tone}` : '')}>{children}</div>;
+}
+
+/** A signing timestamp, in the reader's own locale and time zone. */
+function formatMoment(iso) {
+    const moment = new Date(iso);
+    if (Number.isNaN(moment.getTime())) return '';
+
+    return moment.toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    });
 }
 
 function clamp(n, min, max) {
