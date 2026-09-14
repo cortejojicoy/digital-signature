@@ -189,6 +189,7 @@ class SignatureDocumentController extends Controller
             'placements.*.width'         => ['required_with:placements', 'numeric', 'min:1'],
             'placements.*.height'        => ['required_with:placements', 'numeric', 'min:1'],
             'placements.*.signature_id'  => ['sometimes', 'nullable', 'integer'],
+            'placements.*.caption_position' => ['sometimes', 'nullable', 'in:bottom,top,left,right'],
 
             // Single-slot shorthand, which is also the keyboard path and the
             // shape the old one-click Sign button produced.
@@ -198,6 +199,7 @@ class SignatureDocumentController extends Controller
             'width'        => ['sometimes', 'required', 'numeric', 'min:1'],
             'height'       => ['sometimes', 'required', 'numeric', 'min:1'],
             'signature_id' => ['sometimes', 'nullable', 'integer'],
+            'caption_position' => ['sometimes', 'nullable', 'in:bottom,top,left,right'],
         ]);
 
         $jobs = $this->resolveSigningJobs($request, $data);
@@ -304,6 +306,10 @@ class SignatureDocumentController extends Controller
                     'y'      => $entry['y']      ?? 0,
                     'width'  => $entry['width']  ?? 0,
                     'height' => $entry['height'] ?? 0,
+                    // Travels with this appearance rather than the slot: one
+                    // signatory can want the caption below on one signature
+                    // line and beside it on another.
+                    'caption_position' => $entry['caption_position'] ?? null,
                 ]
                 : null;
 
