@@ -330,6 +330,13 @@ return [
     |   another widget mounts late. Turn it off only if the probing itself
     |   causes trouble; prefer `offset` to place the button by hand.
     |
+    | width: how wide the slide-over is on desktop. It holds the signatory's
+    |   queue, their signature library and — once a document is opened — the PDF
+    |   itself, so the default is wide enough to actually read a page rather
+    |   than the narrow notification rail this started as. Any CSS length; the
+    |   panel never exceeds the viewport, and below 640px it goes full-bleed
+    |   regardless.
+    |
     | offset: distance from the corner before any stacking. Any CSS length.
     |
     | gap: pixels left between the button and whatever it stacks above.
@@ -353,6 +360,7 @@ return [
         'color'               => env('SIGNATURE_LAUNCHER_COLOR'),
         'poll_seconds'        => env('SIGNATURE_LAUNCHER_POLL', 60),
         'hide_when_empty'     => env('SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY', false),
+        'width'               => env('SIGNATURE_LAUNCHER_WIDTH', '64rem'),
 
         'avoid_overlap'       => env('SIGNATURE_LAUNCHER_AVOID_OVERLAP', true),
         'offset'              => [
