@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
 import { cssRectToPdfPoints, pdfPointsToCssRect } from '../utils/pdfCoords.js';
-import { layoutStamp, defaultStampBox } from '../utils/stampLayout.js';
+import { layoutStamp, defaultStampBox, CAPTION_POSITIONS } from '../utils/stampLayout.js';
 import { StampPreview } from './components/StampPreview.jsx';
 
 /**
@@ -64,6 +64,9 @@ function PdfViewerIsland({ el }) {
     // { id, requestId, page, x, y, width, height, signatureId }
     const [placements, setPlacements] = useState([]);
     const [activeRequestId, setActiveRequestId] = useState(null);
+    // The stamp whose caption side the tray control moves. A slot can carry
+    // several, so the request id alone would not say which.
+    const [selectedStampId, setSelectedStampId] = useState(null);
     const [activeSigId, setActiveSigId] = useState(null);
     const [aspects, setAspects] = useState({});   // signatureId → natural w/h
 
@@ -252,20 +255,10 @@ function PdfViewerIsland({ el }) {
             { width: placement.width, height: placement.height },
             signature?.caption ?? [],
             meta?.stamp,
+            placement.captionPosition,
         );
 
-        return {
-            imageWidth:  layout.image.width  * zoom,
-            imageHeight: layout.image.height * zoom,
-            qrSize:      layout.qr * zoom,
-            caption: {
-                lines:        layout.caption.lines,
-                sizePx:       layout.caption.size * zoom,
-                lineHeightPx: layout.caption.size * zoom
-                    * (meta?.stamp?.caption?.lineHeight ?? 1.06),
-                align:        layout.caption.align,
-            },
-        };
+        return scalePreview(layout, zoom, meta?.stamp);
     }, [meta, zoom]);
 
     /**
@@ -338,6 +331,9 @@ function PdfViewerIsland({ el }) {
         const box = frozen && frozen.page === hit.number
             ? { width: frozen.width, height: frozen.height }
             : defaultStampBox(aspects[dragging.sig.id], page.widthPt, meta?.stamp);
+        // A dropped stamp starts on the configured side; the control in the
+        // tray moves it per placement afterwards.
+        const side = meta?.stamp?.caption?.position ?? 'bottom';
 
         const width  = box.width  * zoom;
         const height = box.height * zoom;
@@ -361,6 +357,7 @@ function PdfViewerIsland({ el }) {
             page: hit.number,
             ...cssRectToPdfPoints(rect, page, nominal),
             signatureId: dragging.sig.id,
+            captionPosition: side,
         }]);
 
         // Move on to the next slot that has nothing at all on it yet, so a
@@ -413,6 +410,12 @@ function PdfViewerIsland({ el }) {
         advancePast(activeRequest.id);
     }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast, meta]);
 
+    const moveCaption = useCallback((stampId, side) => {
+        setPlacements((current) => current.map(
+            (p) => (p.id === stampId ? { ...p, captionPosition: side } : p),
+        ));
+    }, []);
+
     const removePlacement = useCallback((stampId, requestId) => {
         setPlacements((current) => current.filter((p) => p.id !== stampId));
         setActiveRequestId(requestId);
@@ -434,6 +437,7 @@ function PdfViewerIsland({ el }) {
             width:        round2(p.width),
             height:       round2(p.height),
             signature_id: p.signatureId ?? null,
+            caption_position: p.captionPosition ?? null,
         }));
 
         setBusy(true);
@@ -511,6 +515,13 @@ function PdfViewerIsland({ el }) {
     }
 
     const noSigs = signatures.length === 0;
+
+    // The stamp the side control acts on: the one last selected, else the most
+    // recent for the active slot, so the control is useful straight after a
+    // drop without needing a click first.
+    const selectedPlacement = placements.find((p) => p.id === selectedStampId)
+        ?? [...placements].reverse().find((p) => p.requestId === activeRequestId)
+        ?? null;
     const blockedPlaced = placements.some(
         (p) => requests.find((r) => r.id === p.requestId)?.blocked,
     );
@@ -634,13 +645,18 @@ function PdfViewerIsland({ el }) {
                                             slotKey={request?.slot ?? String(placement.requestId)}
                                             label={request?.role ?? 'Your signature'}
                                             rect={pdfPointsToCssRect(placement, page, nominal)}
-                                            selected={activeRequestId === placement.requestId}
+                                            selected={selectedStampId === placement.id
+                                                || (selectedStampId === null
+                                                    && activeRequestId === placement.requestId)}
                                             canvasWidth={nominal.width}
                                             canvasHeight={nominal.height}
                                             backgroundImageUrl={sig?.previewUrl}
                                             preview={previewFor(placement, sig)}
                                             aspect={aspects[placement.signatureId]}
-                                            onSelect={() => setActiveRequestId(placement.requestId)}
+                                            onSelect={() => {
+                                                setActiveRequestId(placement.requestId);
+                                                setSelectedStampId(placement.id);
+                                            }}
                                             onChange={(rect) => setPlacements((current) => current.map(
                                                 (p) => p.id === placement.id
                                                     ? { ...p, ...cssRectToPdfPoints(rect, page, nominal) }
@@ -684,6 +700,30 @@ function PdfViewerIsland({ el }) {
                     . Drag the corner to resize; hold Shift to distort.
                     {' Drag again to sign in another place on the same document.'}
                 </span>
+
+                {/*
+                    Which side of the stamp the caption sits on. A form
+                    dictates this: a signature line with the printed name
+                    already underneath has no room below and plenty beside it,
+                    and one line on a page can differ from the next.
+                */}
+                {selectedPlacement && (
+                    <div className="dsig-viewer__caption-side">
+                        <span>Details:</span>
+                        {CAPTION_POSITIONS.map((side) => (
+                            <button
+                                key={side}
+                                type="button"
+                                className={'dsig-sidechip'
+                                    + (selectedPlacement.captionPosition === side ? ' dsig-sidechip--on' : '')}
+                                onClick={() => moveCaption(selectedPlacement.id, side)}
+                                title={`Put the details on the ${side}`}
+                            >
+                                {SIDE_GLYPH[side]}
+                            </button>
+                        ))}
+                    </div>
+                )}
 
                 <div className="dsig-viewer__chips">
                     {signatures.map((sig) => (
@@ -735,6 +775,8 @@ function PdfViewerIsland({ el }) {
 
 // The ghost is not a placement yet, so it has no box to be laid out against.
 // These give it a plausible one at a readable size.
+const SIDE_GLYPH = { top: '↑', bottom: '↓', left: '←', right: '→' };
+
 const GHOST_WIDTH = 150;
 const GHOST_CAPTION = 26;
 
@@ -745,20 +787,38 @@ const GHOST_CAPTION = 26;
  */
 function ghostPreview(signature, aspect, rules) {
     const heightPt = GHOST_WIDTH / (aspect ?? 3.2) + GHOST_CAPTION;
-    const layout = layoutStamp(
-        { width: GHOST_WIDTH, height: heightPt },
-        signature.caption ?? [],
+
+    return scalePreview(
+        layoutStamp({ width: GHOST_WIDTH, height: heightPt }, signature.caption ?? [], rules),
+        1,
         rules,
     );
+}
 
+/**
+ * A point-space layout, scaled into the CSS pixels the preview draws in.
+ *
+ * One converter for the box and the drag ghost, so the thing under the cursor
+ * and the thing that lands cannot be laid out by two different rules.
+ */
+function scalePreview(layout, zoom, rules) {
     return {
-        imageWidth:  layout.image.width,
-        imageHeight: layout.image.height,
-        qrSize:      layout.qr,
+        image: {
+            x:      layout.image.x      * zoom,
+            y:      layout.image.y      * zoom,
+            width:  layout.image.width  * zoom,
+            height: layout.image.height * zoom,
+        },
+        qr: layout.qr
+            ? { x: layout.qr.x * zoom, y: layout.qr.y * zoom, size: layout.qr.size * zoom }
+            : null,
         caption: {
             lines:        layout.caption.lines,
-            sizePx:       layout.caption.size,
-            lineHeightPx: layout.caption.size * (rules?.caption?.lineHeight ?? 1.06),
+            x:            layout.caption.x * zoom,
+            y:            layout.caption.y * zoom,
+            w:            (layout.caption.w ?? 0) * zoom,
+            sizePx:       layout.caption.size * zoom,
+            lineHeightPx: layout.caption.size * zoom * (rules?.caption?.lineHeight ?? 1.06),
             align:        layout.caption.align,
         },
     };
