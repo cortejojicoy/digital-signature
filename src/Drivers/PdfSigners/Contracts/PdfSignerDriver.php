@@ -13,6 +13,12 @@ interface PdfSignerDriver
      *   quote. Carved out of the placement rectangle rather than added to it,
      *   because that rectangle was sized to fit a line on a form. Defaults to
      *   empty so a host's own driver implementation keeps working unchanged.
+     *
+     * @param  array<int, array{page?:int,x?:float,y?:float,width?:float,height?:float}>  $extraPositions
+     *   Further places to draw the SAME signature. A form that asks one person
+     *   to sign in three places is one act of signing with three appearances:
+     *   one Signature row, one PKCS#7 block over the whole document, and a
+     *   stamp at each of these. Empty for the ordinary single-stamp case.
      */
     public function sign(
         string $pdfPath,
@@ -22,5 +28,6 @@ interface PdfSignerDriver
         string $reason,
         string $qrPayload = '',
         array  $caption = [],
+        array  $extraPositions = [],
     ): string;
 }
