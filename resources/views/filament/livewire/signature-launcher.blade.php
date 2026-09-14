@@ -556,10 +556,16 @@
         .dark .dsig-slotchip--placed { color: rgb(45 212 191); }
         .dsig-slotchip:disabled { opacity: .45; cursor: not-allowed; }
 
+        /*
+            Carries the whole composed stamp now, not just the ink, so it is
+            a positioned container rather than an image.
+        */
         .dsig-viewer__ghost {
             position: fixed; pointer-events: none; z-index: 2147483647;
-            width: 7rem; transform: translate(-50%, -50%); opacity: .85;
-            filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.3));
+            transform: translate(-50%, -50%); opacity: .9;
+            filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.35));
+            background: rgb(255 255 255 / 0.75);
+            outline: 1px dashed rgb(20 184 166);
         }
 
         .dsig-linkbtn {
