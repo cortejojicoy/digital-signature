@@ -57,6 +57,49 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Signature caption
+    |--------------------------------------------------------------------------
+    | A small block of readable provenance drawn under the signature image:
+    | who signed, when, and a reference to quote.
+    |
+    | Everything that binds a signature to its signer is already in the file —
+    | HMAC-signed chunks inside the PNG, a PKCS#7 block, the QR next to it —
+    | and none of it survives being printed and handed across a desk. These
+    | lines are the part a person can read without a verifier.
+    |
+    | The caption is carved OUT of the placement rectangle; the signature image
+    | shrinks to make room. It never grows the stamp, because that rectangle is
+    | where a signatory said their signature goes and whatever is underneath
+    | belongs to the form.
+    |
+    | fields: which lines, in order. Available: signer, email, signed_at,
+    |   reference. Lines that do not fit the box are dropped from the bottom.
+    |
+    | height_ratio: the most of the box the caption may take. The rest is the
+    |   signature image.
+    |
+    | min_box_height: below this the caption stands down entirely. A signature
+    |   squeezed into nothing is worse than one with no caption under it.
+    |
+    | max_font_pt / min_font_pt: the driver picks the largest size in this
+    |   range that fits, then truncates with an ellipsis if even the smallest
+    |   is too wide.
+    */
+    'caption' => [
+        'enabled'        => env('SIGNATURE_CAPTION_ENABLED', true),
+        'fields'         => ['signer', 'signed_at', 'reference'],
+        'height_ratio'   => env('SIGNATURE_CAPTION_HEIGHT_RATIO', 0.38),
+        'min_box_height' => env('SIGNATURE_CAPTION_MIN_BOX_HEIGHT', 28),
+        'max_font_pt'    => env('SIGNATURE_CAPTION_MAX_FONT', 6),
+        'min_font_pt'    => env('SIGNATURE_CAPTION_MIN_FONT', 4),
+        'date_format'    => env('SIGNATURE_CAPTION_DATE_FORMAT', 'j M Y H:i'),
+
+        /** @var array{0:int,1:int,2:int} RGB for the caption text. */
+        'color' => [90, 90, 90],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Hashing
     |--------------------------------------------------------------------------
     */
