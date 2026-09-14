@@ -427,6 +427,33 @@ so they cannot disagree about where the text goes. `PdfSignerDriver::sign()`
 gained a `$caption` parameter with an empty default, so a host's own driver
 keeps working untouched.
 
+### One signature, several appearances
+
+A form routinely asks the same person for the same signature more than once —
+the signature block, again under a certificate, again on an acceptance clause.
+The template declares one slot for that person, so the surface allowed one
+stamp, and there was no way to sign the other two places.
+
+That is one act of signing with several appearances, not several signatures.
+So: **one `Signature` row, one PKCS#7 block covering the whole document, one
+link in the chain, and N `signature_positions` rows** saying where it is drawn.
+The cryptography does not count stamps.
+
+- `signature_positions` already had no unique constraint on `signature_id`, so
+  no migration was needed — only the `hasOne` relation and the drivers assumed
+  one. `Signature::positions()` is the honest shape; `position()` stays for
+  every existing caller.
+- Both drivers loop over the placements. The QR is drawn beside the **first**
+  only, because a barcode against every stamp is noise rather than provenance;
+  the caption is drawn under **every** one, because an unattributed mark
+  further down the document is exactly what the caption exists to prevent.
+- The endpoint no longer rejects a repeated slot. The first placement is the
+  slot's own frozen coordinates; the rest become extra stamps. The response
+  reports `stamps` per slot.
+- In the drawer, dropping again **adds** an appearance instead of moving the
+  last one. The slot chip shows `✓×3`, and the counter still reads "1 of 2
+  slots placed" — a slot signed three times is one slot accounted for.
+
 ### Fixed: only one signature could be dragged
 
 The drop always targeted `activeRequestId`, and nothing ever advanced it — so a
