@@ -33,7 +33,7 @@ export const CAPTION_POSITIONS = ['bottom', 'top', 'left', 'right'];
  *                            configured default for this one placement.
  * @returns {{image: {x,y,width,height}, qr: {x,y,size}|null, caption: object}}
  */
-export function layoutStamp(box, lines = [], rules = DEFAULT_RULES, position) {
+export function layoutStamp(box, lines = [], rules = DEFAULT_RULES, position, aspect) {
     const captionRules = { ...DEFAULT_RULES.caption, ...(rules?.caption ?? {}) };
     const qrRules      = { ...DEFAULT_RULES.qr,      ...(rules?.qr      ?? {}) };
 
@@ -49,36 +49,65 @@ export function layoutStamp(box, lines = [], rules = DEFAULT_RULES, position) {
 
     const band = vertical ? caption.width : caption.height;
 
-    // What the caption did not claim.
-    const content = side === 'bottom' ? { x: 0,    y: 0,    w: box.width,        h: box.height - band }
-        : side === 'top'              ? { x: 0,    y: band, w: box.width,        h: box.height - band }
-        : side === 'left'             ? { x: band, y: 0,    w: box.width - band, h: box.height }
-        : /* right */                   { x: 0,    y: 0,    w: box.width - band, h: box.height };
+    // The slab left once the caption has taken its side.
+    const contentX = side === 'left' ? band : 0;
+    const contentW = vertical ? box.width - band : box.width;
+    const contentH = vertical ? box.height : box.height - band;
 
-    const captionBox = side === 'bottom' ? { x: 0, y: box.height - band, w: box.width }
-        : side === 'top'                 ? { x: 0, y: 0,                 w: box.width }
-        : side === 'left'                ? { x: 0, y: 0,                 w: band }
-        : /* right */                      { x: box.width - band, y: 0,  w: band };
+    const qr  = qrSize({ width: contentW, height: contentH }, qrRules);
+    const gap = qr > 0 ? qrRules.gap : 0;
 
-    // Centre a column caption against the ink it belongs to.
+    const inkAreaW = contentW - (qr > 0 ? qr + gap : 0);
+    const ink = fitWithin(aspect, inkAreaW, contentH);
+
+    // Ink and caption travel together. Centring the pair — rather than the ink
+    // alone — is what keeps the provenance tucked under the signature at every
+    // box size, instead of drifting to the bottom edge as the box grows.
+    const groupHeight = vertical ? ink.h : ink.h + caption.height;
+    const groupTop = Math.max(0, (box.height - groupHeight) / 2);
+
+    const inkY = vertical ? Math.max(0, (box.height - ink.h) / 2)
+        : side === 'top' ? groupTop + caption.height
+        : groupTop;
+
+    const inkX = contentX + Math.max(0, (inkAreaW - ink.w) / 2);
+
+    const captionBox = side === 'bottom' ? { x: contentX, y: inkY + ink.h, w: inkAreaW }
+        : side === 'top'                 ? { x: contentX, y: groupTop,     w: inkAreaW }
+        : side === 'left'                ? { x: 0,        y: 0,            w: band }
+        : /* right */                      { x: box.width - band, y: 0,    w: band };
+
+    // A column caption centres against the ink it sits beside.
     if (vertical && caption.lines.length > 0) {
         captionBox.y = Math.max(0, (box.height - caption.height) / 2);
     }
 
-    const qr  = qrSize({ width: content.w, height: content.h }, qrRules);
-    const gap = qr > 0 ? qrRules.gap : 0;
-
     return {
         position: side,
-        image: {
-            x: content.x,
-            y: content.y,
-            width:  content.w - (qr > 0 ? qr + gap : 0),
-            height: content.h,
-        },
-        qr: qr > 0 ? { x: content.x + content.w - qr, y: content.y, size: qr } : null,
+        image: { x: inkX, y: inkY, width: ink.w, height: ink.h },
+        qr: qr > 0
+            ? {
+                x: contentX + contentW - qr,
+                // Level with the ink, so the two read as one mark.
+                y: inkY + Math.max(0, (ink.h - qr) / 2),
+                size: qr,
+            }
+            : null,
         caption: { ...caption, ...captionBox },
     };
+}
+
+/**
+ * The largest rectangle of the given proportions that fits the space.
+ *
+ * With no aspect to honour, the space is used as-is.
+ */
+function fitWithin(aspect, maxWidth, maxHeight) {
+    if (!aspect || aspect <= 0) return { w: maxWidth, h: maxHeight };
+
+    const w = Math.min(maxWidth, maxHeight * aspect);
+
+    return { w, h: w / aspect };
 }
 
 /**
