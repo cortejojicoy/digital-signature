@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    This package had no PHPUnit configuration at all, which is what let Pest's
+    cache plugin corrupt the command line.
+
+    When that plugin finds no `cacheDirectory` in an XML config, it appends a
+    cache-directory flag followed by `(string) realpath(<pest>/.temp)`. That
+    `.temp` folder is stripped from the dist zip, so realpath() returns false
+    and the cast yields an EMPTY argv element. PHPUnit reads the empty token as
+    "no value given" and consumes the following flag as the value instead,
+    shifting every argument after it by one. In CI that ended with the
+    configuration flag swallowing the cache-directory flag:
+
+        INFO  Could not read XML from file "[cache-directory flag]".
+
+    and locally it created a junk folder named after the cache-result flag.
+
+    Declaring `cacheDirectory` below means the plugin appends nothing, so there
+    is no empty argument to shift anything along. The mechanism lives in
+    vendor/pestphp/pest/src/Plugins/Cache.php, around line 47.
+
+    Note for editors: XML forbids a double hyphen inside a comment, so the
+    flags above are described rather than written out.
+-->
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+    bootstrap="vendor/autoload.php"
+    cacheDirectory=".phpunit.cache"
+    colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+</phpunit>
