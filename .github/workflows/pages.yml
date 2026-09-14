@@ -11,7 +11,13 @@ name: pages
 # this is a cheap way to catch a cross-reference that rotted when a heading was
 # reworded, which is invisible in a diff and obvious to a reader.
 #
-# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+# ONE-TIME SETUP, and the first thing to check when a run fails:
+#   repository Settings → Pages → Source: "GitHub Actions"
+#
+# Without it the build succeeds, the artifact uploads, and the deploy step ends
+# in `HttpError: Not Found` — a 404 from the deployment API, because there is
+# no Pages site to deploy to. Nothing in this file can detect that; the setting
+# has to be made in the repository.
 
 on:
   push:
@@ -44,11 +50,14 @@ jobs:
     name: Build the docs site
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      # v5 of both actions declares the node24 runtime. v4 declares node20,
+      # which GitHub is retiring from the runners — see
+      # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
 
       # No install step. The builder uses nothing but Node built-ins, which is
       # what keeps this job to a couple of seconds and stops the site from
@@ -61,6 +70,10 @@ jobs:
           SITE_BASE: /${{ github.event.repository.name }}/
           SITE_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
 
+      # Deliberately still v3. v4 excludes dotfiles from the artifact, and the
+      # build writes a .nojekyll; v4 is a composite action, so it is not one of
+      # the ones producing the node20 notice anyway. Nothing to gain, something
+      # to lose.
       - name: Upload artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
@@ -83,5 +96,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      # Still node20, and there is no newer major. GitHub owns this action and
+      # will migrate it before the runners drop node20 in September 2026, so
+      # the deprecation notice it prints is theirs to clear, not ours.
       - id: deployment
         uses: actions/deploy-pages@v4
