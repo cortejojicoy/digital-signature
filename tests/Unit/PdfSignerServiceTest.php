@@ -47,4 +47,77 @@ describe('PdfSignerService', function () {
         expect($outPath)->toBeString()->toContain('signed-docs/');
         Storage::disk('testing')->assertExists($outPath);
     });
+
+    it('hands the driver readable provenance to draw under the signature', function () {
+        $user = makeFakeUser();
+
+        $sig = Signature::create([
+            'uuid'       => 'a1b2c3d4-0000-0000-0000-000000000000',
+            'user_id'    => $user->id,
+            'image_path' => 'signatures/test_sig.png',
+            'image_hash' => str_repeat('b', 64),
+            'source'     => 'draw',
+            'status'     => 'pending',
+        ]);
+        $sig->setRelation('user', $user);
+
+        $signable = Mockery::mock(\Kukux\DigitalSignature\Contracts\Signable::class);
+        $signable->shouldReceive('getSignablePdfPath')->andReturn('docs/test.pdf');
+        $sig->setRelation('signable', $signable);
+
+        $driver = Mockery::mock(\Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver::class);
+        $driver->shouldReceive('sign')
+            ->once()
+            ->andReturnUsing(function (...$args) {
+                // Named arguments arrive keyed, so read the one we care about
+                // rather than relying on positional order.
+                $this->caption = $args[6] ?? [];
+
+                return 'signed-docs/out.pdf';
+            });
+
+        (new PdfSignerService($driver))->sign($sig, []);
+
+        expect($this->caption)->toHaveCount(3)
+            ->and($this->caption[0])->toBe('Test User')
+            ->and($this->caption[1])->toStartWith('Signed ')
+            // The reference is what somebody reading the printout quotes back.
+            ->and($this->caption[2])->toBe('Ref a1b2c3d4');
+    });
+
+    it('sends no caption when captions are switched off', function () {
+        config()->set('signature.caption.enabled', false);
+
+        $user = makeFakeUser();
+
+        $sig = Signature::create([
+            'uuid'       => 'a1b2c3d4-0000-0000-0000-000000000000',
+            'user_id'    => $user->id,
+            'image_path' => 'signatures/test_sig.png',
+            'image_hash' => str_repeat('c', 64),
+            'source'     => 'draw',
+            'status'     => 'pending',
+        ]);
+        $sig->setRelation('user', $user);
+
+        $signable = Mockery::mock(\Kukux\DigitalSignature\Contracts\Signable::class);
+        $signable->shouldReceive('getSignablePdfPath')->andReturn('docs/test.pdf');
+        $sig->setRelation('signable', $signable);
+
+        $driver = Mockery::mock(\Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver::class);
+        $driver->shouldReceive('sign')
+            ->once()
+            ->andReturnUsing(function (...$args) {
+                $this->args = $args;
+
+                return 'signed-docs/out.pdf';
+            });
+
+        (new PdfSignerService($driver))->sign($sig, []);
+
+        // Assert the argument arrived and was empty, not merely that reading
+        // position 6 produced nothing — those are different failures.
+        expect($this->args)->toHaveCount(7)
+            ->and($this->args[6])->toBe([]);
+    });
 });

@@ -403,6 +403,39 @@ from the signatory's side it looked thrown away.
   a link to the Signed tab. The user stays on the queue so they can carry on
   with the next document rather than being navigated away mid-flow.
 
+### Added after the first pass: a readable caption on the stamp
+
+Everything binding a signature to its signer was invisible — HMAC-signed tEXt
+and XMP chunks inside the PNG, a PKCS#7 block in the PDF, a QR alongside. None
+of it survives being printed and handed across a desk.
+
+The stamp now carries two or three lines of small type: signer, when, and a
+short reference to quote. `signature.caption` controls which fields appear, the
+font range, and whether it appears at all.
+
+The rule that shapes the implementation: **the caption never grows the stamp.**
+That rectangle is where a signatory dropped their signature, sized to the line
+it belongs on, and anything below it belongs to the form. So the caption is
+carved out of the bottom of the placement and the image shrinks into what is
+left — and below `min_box_height` the caption stands down entirely, because a
+signature squeezed into nothing is worse than one with no caption. Lines that
+do not fit are dropped from the bottom; a line too wide is truncated with an
+ellipsis rather than allowed to spill.
+
+Layout lives in one trait, `DrawsSignatureCaption`, shared by both PDF drivers
+so they cannot disagree about where the text goes. `PdfSignerDriver::sign()`
+gained a `$caption` parameter with an empty default, so a host's own driver
+keeps working untouched.
+
+### Fixed: only one signature could be dragged
+
+The drop always targeted `activeRequestId`, and nothing ever advanced it — so a
+second drag silently re-placed the first slot instead of the next one, and the
+surface looked like it accepted one signature per document however many slots
+you held. A drop now moves the selection to the next unplaced slot. Where you
+genuinely hold one slot, the tray says so rather than leaving the second drag
+looking broken.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
@@ -420,6 +453,9 @@ redirecting it into the drawer; neither is in this plan's scope.
 - `tests/Feature/SignatureLauncherTest.php` — drawer width from config, the
   tabs, drawer-side signature registration, that no blind `Sign` survives, and
   that signed history is grouped by day and never crosses between signatories.
+- `tests/Unit/Drivers/SignatureCaptionTest.php` — caption layout against a real
+  TCPDF: fitting, dropping, truncating, standing down on a short box.
+- `tests/Unit/PdfSignerServiceTest.php` — that the provenance reaches the driver.
 - `tests/js/pdfCoords.test.mjs` — the CSS-px ⇄ PDF-point conversion on A4,
   landscape, at render scales either side of 1:1, and the zoom invariance that
   the CSS-pixel bug violated.
