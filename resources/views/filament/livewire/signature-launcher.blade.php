@@ -560,6 +560,22 @@
             Carries the whole composed stamp now, not just the ink, so it is
             a positioned container rather than an image.
         */
+        .dsig-viewer__caption-side {
+            display: flex; align-items: center; gap: .3rem;
+            margin-bottom: .5rem; font-size: .75rem; opacity: .8;
+        }
+        .dsig-sidechip {
+            width: 1.5rem; height: 1.5rem; cursor: pointer; line-height: 1;
+            border: 1px solid rgb(0 0 0 / 0.18); border-radius: .375rem;
+            background: transparent; color: inherit; font-size: .8125rem;
+        }
+        .dark .dsig-sidechip { border-color: rgb(255 255 255 / 0.22); }
+        .dsig-sidechip--on {
+            border-color: rgb(20 184 166); color: rgb(15 118 110);
+            box-shadow: 0 0 0 1px rgb(20 184 166);
+        }
+        .dark .dsig-sidechip--on { color: rgb(45 212 191); }
+
         .dsig-viewer__ghost {
             position: fixed; pointer-events: none; z-index: 2147483647;
             transform: translate(-50%, -50%); opacity: .9;
