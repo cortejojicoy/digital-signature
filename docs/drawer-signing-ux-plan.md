@@ -488,6 +488,34 @@ Layout for image, QR and caption now lives in one `drawStamp()` in
 `DrawsSignatureStamp`, called once by each driver. Both had been doing this
 arithmetic separately.
 
+### The placement preview now shows the whole stamp
+
+The box being dragged held only the signature image, while the writer divides
+that same box three ways — ink, a QR square on the right, a caption band along
+the bottom. A signatory was lining a box up against a form and then getting
+something else printed into it: the caption landing on the form's own name
+line, the QR squeezing the ink narrower than they had allowed for.
+
+- `meta` now carries the caption lines (per signature — the reference line is
+  the signature's own) and the layout rules. `SignatureCaption` builds those
+  lines for both the preview and the PDF, so the two cannot disagree about
+  the text.
+- `resources/js/utils/stampLayout.js` is the browser half of
+  `DrawsSignatureStamp`, working in PDF points so the arithmetic is directly
+  comparable. Band heights, the QR's third-of-the-width cap, and both
+  stand-down thresholds are identical.
+- **Where fidelity ends, deliberately:** TCPDF knows exactly how wide Helvetica
+  renders and the browser only approximates it, so a line may truncate in one
+  and not the other. That moves an ellipsis, never the ink.
+- The drag ghost is composed too, so the shape under the cursor is the shape
+  that lands rather than a bare image that rearranges itself on release.
+- A dropped box is now sized so the **ink** ends at its natural aspect once the
+  caption and QR have taken their share. Sizing to the image alone left the
+  signature squashed into whatever remained.
+- The QR preview is a placeholder pattern, not a rendered code. It reserves
+  exactly the right space; drawing a scannable one would invite someone to scan
+  a signature that does not exist yet.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
@@ -510,6 +538,8 @@ redirecting it into the drawer; neither is in this plan's scope.
 - `tests/Feature/SignatureVerificationTest.php` — what the public page says,
   and what it refuses to say.
 - `tests/Unit/PdfSignerServiceTest.php` — that the provenance reaches the driver.
+- `tests/js/stampLayout.test.mjs` — how the box divides, and when the caption
+  and QR stand down.
 - `tests/js/pdfCoords.test.mjs` — the CSS-px ⇄ PDF-point conversion on A4,
   landscape, at render scales either side of 1:1, and the zoom invariance that
   the CSS-pixel bug violated.
