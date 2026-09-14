@@ -35,10 +35,10 @@ console.log('stampLayout');
 test('splits the box between ink, QR and caption', () => {
     const l = layoutStamp({ width: 220, height: 70 }, LINES);
 
-    assert.ok(l.qr > 0, 'expected a QR');
+    assert.ok(l.qr !== null, 'expected a QR');
     assert.ok(l.caption.lines.length > 0, 'expected caption lines');
     // The three shares must account for the box and never exceed it.
-    assert.ok(l.image.width + l.qr <= 220, 'image + QR overflows the width');
+    assert.ok(l.image.width + l.qr.size <= 220, 'image + QR overflows the width');
     assert.ok(l.image.height + l.caption.height <= 70 + 0.01, 'image + caption overflows the height');
 });
 
@@ -52,14 +52,14 @@ test('stands the caption down on a box too short to share', () => {
 test('stands the QR down rather than printing one too small to scan', () => {
     const l = layoutStamp({ width: 60, height: 16 }, LINES);
 
-    assert.equal(l.qr, 0);
+    assert.equal(l.qr, null);
     near(l.image.width, 60, 0.01, 'image width');
 });
 
 test('never lets the QR take more than a third of the width', () => {
     const l = layoutStamp({ width: 90, height: 90 }, LINES);
 
-    assert.ok(l.qr <= 30 + 0.01, `QR took ${l.qr} of 90`);
+    assert.ok(l.qr.size <= 30 + 0.01, `QR took ${l.qr.size} of 90`);
 });
 
 test('drops caption lines that do not fit instead of overflowing', () => {
@@ -78,7 +78,7 @@ test('honours rules sent by the server over its own defaults', () => {
     });
 
     assert.deepEqual(l.caption.lines, []);
-    assert.equal(l.qr, 0);
+    assert.equal(l.qr, null);
     // With neither extra, the ink gets the whole box.
     near(l.image.width, 220, 0.01, 'image width');
     near(l.image.height, 70, 0.01, 'image height');
@@ -98,14 +98,78 @@ test('gives a dropped box room for the QR beside the ink', () => {
     const box = defaultStampBox(4, 600);
     const l = layoutStamp(box, LINES);
 
-    assert.ok(l.qr > 0, 'a default box should be able to carry a QR');
-    assert.ok(l.image.width > l.qr, 'the signature should still be the larger mark');
+    assert.ok(l.qr !== null, 'a default box should be able to carry a QR');
+    assert.ok(l.image.width > l.qr.size, 'the signature should still be the larger mark');
 });
 
 test('never proposes a box wider than the page allows', () => {
     const box = defaultStampBox(4, 100);
 
     assert.ok(box.width <= 100, `box was ${box.width} on a 100pt page`);
+});
+
+test('puts the caption on whichever side it is told', () => {
+    const box = { width: 220, height: 70 };
+
+    const bottom = layoutStamp(box, LINES, undefined, 'bottom');
+    const top    = layoutStamp(box, LINES, undefined, 'top');
+    const left   = layoutStamp(box, LINES, undefined, 'left');
+    const right  = layoutStamp(box, LINES, undefined, 'right');
+
+    // Horizontal sides take height and leave the full width to the content.
+    assert.equal(bottom.caption.y > top.caption.y, true, 'bottom should sit lower than top');
+    assert.equal(top.image.y > 0, true, 'a top caption should push the ink down');
+    assert.equal(bottom.image.y, 0, 'a bottom caption should leave the ink at the top');
+
+    // Vertical sides take width instead.
+    assert.equal(left.image.x > 0, true, 'a left caption should push the ink right');
+    assert.equal(right.image.x, 0, 'a right caption should leave the ink at the left');
+    assert.ok(left.image.height > bottom.image.height,
+        'a side caption should give the ink its full height back');
+});
+
+test('keeps every element inside the box on all four sides', () => {
+    const box = { width: 220, height: 70 };
+
+    for (const side of ['bottom', 'top', 'left', 'right']) {
+        const l = layoutStamp(box, LINES, undefined, side);
+
+        assert.ok(l.image.x >= -0.01 && l.image.y >= -0.01, `${side}: ink outside the box`);
+        assert.ok(l.image.x + l.image.width  <= box.width  + 0.01, `${side}: ink overflows width`);
+        assert.ok(l.image.y + l.image.height <= box.height + 0.01, `${side}: ink overflows height`);
+
+        if (l.qr) {
+            assert.ok(l.qr.x + l.qr.size <= box.width  + 0.01, `${side}: QR overflows width`);
+            assert.ok(l.qr.y + l.qr.size <= box.height + 0.01, `${side}: QR overflows height`);
+        }
+
+        assert.ok(l.caption.x + l.caption.w <= box.width + 0.01, `${side}: caption overflows width`);
+        assert.ok(l.caption.y + l.caption.height <= box.height + 0.01, `${side}: caption overflows height`);
+    }
+});
+
+test('stands a side caption down on a box too narrow for a column', () => {
+    // Beside the ink the limit is horizontal — a sliver of signature is worse
+    // than an uncaptioned one.
+    const l = layoutStamp({ width: 80, height: 70 }, LINES, undefined, 'left');
+
+    assert.deepEqual(l.caption.lines, []);
+    near(l.image.x, 0, 0.01, 'ink should reclaim the whole width');
+});
+
+test('falls back to the configured side for an unknown one', () => {
+    const l = layoutStamp({ width: 220, height: 70 }, LINES,
+        { caption: { position: 'top' } }, 'sideways');
+
+    assert.equal(l.position, 'top');
+});
+
+test('gives a side caption its width back when sizing a dropped box', () => {
+    const beside = defaultStampBox(4, 600, { caption: { position: 'left' } });
+    const below  = defaultStampBox(4, 600, { caption: { position: 'bottom' } });
+
+    assert.ok(beside.width > below.width,
+        'a caption beside the ink needs a wider box, not a taller one');
 });
 
 if (failures > 0) {

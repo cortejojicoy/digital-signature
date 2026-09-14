@@ -16,6 +16,7 @@ function stampSubject(): object
         use DrawsSignatureStamp {
             layoutCaption as public;
             qrSize as public;
+            stampFrame as public;
         }
     };
 }
@@ -101,6 +102,88 @@ describe('signature caption layout', function () {
         $layout = captionLayout(['Juan Dela Cruz', '', '   '], 160, 60);
 
         expect($layout['lines'])->toBe(['Juan Dela Cruz']);
+    });
+});
+
+function stampFrame(array $lines, float $w, float $h, string $position): array
+{
+    $pdf = new TCPDF('P', 'pt');
+    $pdf->AddPage();
+
+    return stampSubject()->stampFrame($pdf, $w, $h, $lines, true, $position);
+}
+
+/**
+ * Which side of the stamp the caption takes.
+ *
+ * A form dictates this — a signature line with the printed name already
+ * underneath has no room below and plenty beside it — so all four have to
+ * produce a layout that stays inside the box the signatory placed.
+ */
+describe('caption position', function () {
+
+    $lines = ['Paolo Rommel P. Sanchez', 'Signed 14 Sep 2026 03:49', 'Ref aef7f9a1'];
+
+    it('keeps every element inside the placement on all four sides', function () use ($lines) {
+        foreach (['bottom', 'top', 'left', 'right'] as $side) {
+            $frame = stampFrame($lines, 220, 70, $side);
+
+            expect($frame['image']['x'])->toBeGreaterThanOrEqual(0.0)
+                ->and($frame['image']['y'])->toBeGreaterThanOrEqual(0.0)
+                ->and($frame['image']['x'] + $frame['image']['w'])->toBeLessThanOrEqual(220.01)
+                ->and($frame['image']['y'] + $frame['image']['h'])->toBeLessThanOrEqual(70.01)
+                ->and($frame['caption']['x'] + $frame['caption']['w'])->toBeLessThanOrEqual(220.01);
+
+            if ($frame['qr'] !== null) {
+                expect($frame['qr']['x'] + $frame['qr']['size'])->toBeLessThanOrEqual(220.01)
+                    ->and($frame['qr']['y'] + $frame['qr']['size'])->toBeLessThanOrEqual(70.01);
+            }
+        }
+    });
+
+    it('takes height below and beside gives the ink its height back', function () use ($lines) {
+        $below  = stampFrame($lines, 220, 70, 'bottom');
+        $beside = stampFrame($lines, 220, 70, 'left');
+
+        expect($below['image']['h'])->toBeLessThan(70.0)
+            ->and($beside['image']['h'])->toBe(70.0)
+            ->and($beside['image']['x'])->toBeGreaterThan(0.0);
+    });
+
+    it('pushes the ink down for a caption on top', function () use ($lines) {
+        $frame = stampFrame($lines, 220, 70, 'top');
+
+        expect($frame['caption']['y'])->toBe(0.0)
+            ->and($frame['image']['y'])->toBeGreaterThan(0.0);
+    });
+
+    it('falls back to the bottom for a side it does not know', function () use ($lines) {
+        $odd    = stampFrame($lines, 220, 70, 'sideways');
+        $bottom = stampFrame($lines, 220, 70, 'bottom');
+
+        expect($odd['caption']['y'])->toBe($bottom['caption']['y']);
+    });
+
+    it('stands a side caption down on a box too narrow for a column', function () use ($lines) {
+        // Beside the ink the limit is horizontal; a sliver of signature is
+        // worse than an uncaptioned one.
+        $frame = stampFrame($lines, 80, 70, 'left');
+
+        expect($frame['caption']['lines'])->toBe([])
+            ->and($frame['image']['x'])->toBe(0.0);
+    });
+
+    it('measures the QR against the content, not the whole box', function () use ($lines) {
+        // With a caption down one side, sizing the QR against the original
+        // width would push it over the text.
+        $frame = stampFrame($lines, 220, 70, 'left');
+
+        if ($frame['qr'] !== null) {
+            expect($frame['qr']['x'] + $frame['qr']['size'])
+                ->toBeLessThanOrEqual($frame['caption']['x'] + 220.01);
+        }
+
+        expect($frame['image']['w'])->toBeGreaterThan(0.0);
     });
 });
 

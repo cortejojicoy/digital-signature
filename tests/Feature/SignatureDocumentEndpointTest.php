@@ -416,6 +416,41 @@ describe('signature request document endpoints', function () {
                 ->whereNotNull('signing_session_id')->count())->toBe(1);
     });
 
+    it('remembers which side of each stamp the details go on', function () {
+        // Per appearance, not per application: one signatory can want the
+        // details below on one signature line and beside them on another.
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90,
+                     'width' => 160, 'height' => 50, 'caption_position' => 'right'],
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 300,
+                     'width' => 160, 'height' => 50, 'caption_position' => 'top'],
+                ],
+            ])
+            ->assertOk();
+
+        $positions = Signature::where('slot_key', 'prepared_by')
+            ->whereNotNull('signing_session_id')
+            ->firstOrFail()
+            ->positions;
+
+        expect($positions->pluck('caption_position')->all())->toBe(['right', 'top']);
+    });
+
+    it('refuses a caption side it does not recognise', function () {
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90,
+                     'width' => 160, 'height' => 50, 'caption_position' => 'diagonal'],
+                ],
+            ])
+            ->assertStatus(422);
+
+        expect($this->prepared->fresh()->state)->not->toBe(RouteState::Signed);
+    });
+
     it('needs coordinates for a repeated placement', function () {
         // The first placement may be omitted to mean "use the frozen slot";
         // a second one has no such default to fall back on.
