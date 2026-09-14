@@ -7,4 +7,8 @@ node_modules
 # The CI test step tees Pest's output here to check for a summary line.
 pest-output.txt
 
+# Built documentation site. Rebuilt from docs/ by .github/workflows/pages.yml
+# on every push, so there is nothing to gain from committing it.
+site/dist
+
 .DS_Store

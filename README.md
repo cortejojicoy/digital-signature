@@ -12,6 +12,10 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 ## Documentation
 
+📖 **[Read the documentation](https://cortejojicoy.github.io/digital-signature/)** — the same
+pages as below, with navigation and search.
+
+
 | Doc | Description |
 |---|---|
 | [Implementation Plan](docs/implementation-plan.md) | **Start here.** Phase-by-phase plan for integrating the package into your app |
