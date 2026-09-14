@@ -105,12 +105,12 @@ describe('signature caption layout', function () {
     });
 });
 
-function stampFrame(array $lines, float $w, float $h, string $position): array
+function stampFrame(array $lines, float $w, float $h, string $position, ?float $aspect = null): array
 {
     $pdf = new TCPDF('P', 'pt');
     $pdf->AddPage();
 
-    return stampSubject()->stampFrame($pdf, $w, $h, $lines, true, $position);
+    return stampSubject()->stampFrame($pdf, $w, $h, $lines, true, $position, $aspect);
 }
 
 /**
@@ -184,6 +184,78 @@ describe('caption position', function () {
         }
 
         expect($frame['image']['w'])->toBeGreaterThan(0.0);
+    });
+});
+
+/**
+ * Where the ink sits, and where the caption sits relative to it.
+ *
+ * The caption used to be pinned to the box's bottom edge, so enlarging a
+ * placement pushed the provenance further from the signature it describes
+ * until it read as a note about whatever the form had underneath.
+ */
+describe('ink and caption grouping', function () {
+
+    $lines = ['Moldez, Abril Aguinaldo', 'Signed 14 Sep 2026 03:42', 'Ref a7312061'];
+
+    it('keeps the caption tucked under the ink at every box size', function () use ($lines) {
+        foreach ([40, 70, 120, 240] as $height) {
+            $frame = stampFrame($lines, 300, (float) $height, 'bottom', 4.0);
+            $inkBottom = $frame['image']['y'] + $frame['image']['h'];
+
+            expect(abs($frame['caption']['y'] - $inkBottom))
+                ->toBeLessThan(0.01, "caption drifted at height {$height}");
+        }
+    });
+
+    it('keeps the signature at its own proportions', function () use ($lines) {
+        // A stretched signature is a stamp that no longer matches the
+        // specimen on file.
+        foreach ([1.0, 2.5, 6.0] as $aspect) {
+            $frame = stampFrame($lines, 300, 160, 'bottom', $aspect);
+
+            expect(abs($frame['image']['w'] / $frame['image']['h'] - $aspect))
+                ->toBeLessThan(0.01, "aspect {$aspect} not preserved");
+        }
+    });
+
+    it('fills the space when the image proportions cannot be read', function () {
+        // With no caption and no QR, "the space" is the whole box — the
+        // fallback for an unreadable file is the behaviour this had before
+        // proportions were respected at all.
+        config()->set('signature.qr.enabled', false);
+
+        $frame = stampFrame([], 300, 100, 'bottom', null);
+
+        expect($frame['image']['w'])->toBe(300.0)
+            ->and($frame['image']['h'])->toBe(100.0);
+    });
+
+    it('still leaves the QR its square when proportions are unknown', function () {
+        $frame = stampFrame([], 300, 100, 'bottom', null);
+
+        expect($frame['qr'])->not->toBeNull()
+            ->and($frame['image']['w'])->toBe(300.0 - $frame['qr']['size'] - 2.0);
+    });
+
+    it('centres the pair rather than the ink alone', function () use ($lines) {
+        $frame = stampFrame($lines, 300, 200, 'bottom', 4.0);
+
+        $top    = $frame['image']['y'];
+        $bottom = 200 - ($frame['caption']['y'] + $frame['caption']['height']);
+
+        expect(abs($top - $bottom))->toBeLessThan(0.5);
+    });
+
+    it('levels the QR with the ink', function () use ($lines) {
+        $frame = stampFrame($lines, 300, 200, 'bottom', 4.0);
+
+        expect($frame['qr'])->not->toBeNull();
+
+        $inkMid = $frame['image']['y'] + $frame['image']['h'] / 2;
+        $qrMid  = $frame['qr']['y'] + $frame['qr']['size'] / 2;
+
+        expect(abs($qrMid - $inkMid))->toBeLessThan(0.5);
     });
 });
 

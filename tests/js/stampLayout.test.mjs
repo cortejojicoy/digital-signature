@@ -172,6 +172,56 @@ test('gives a side caption its width back when sizing a dropped box', () => {
         'a caption beside the ink needs a wider box, not a taller one');
 });
 
+test('keeps the caption tucked under the ink at every box size', () => {
+    // The bug this guards: the caption was pinned to the bottom edge, so
+    // enlarging the placement pushed the provenance further and further from
+    // the signature it describes until it read as a note belonging to whatever
+    // the form had underneath.
+    for (const height of [40, 70, 120, 240]) {
+        const l = layoutStamp({ width: 300, height }, LINES, undefined, 'bottom', 4);
+        const inkBottom = l.image.y + l.image.height;
+
+        near(l.caption.y, inkBottom, 0.01, `caption gap at height ${height}`);
+    }
+});
+
+test('centres the ink-and-caption group rather than the ink alone', () => {
+    const box = { width: 300, height: 200 };
+    const l = layoutStamp(box, LINES, undefined, 'bottom', 4);
+
+    const groupTop = l.image.y;
+    const groupBottom = l.caption.y + l.caption.height;
+
+    near(groupTop, box.height - groupBottom, 0.5, 'group centring');
+});
+
+test('keeps the signature at its own proportions', () => {
+    // Stretching a signature to fill whatever rectangle was drawn produces a
+    // stamp that no longer matches the specimen on file.
+    for (const aspect of [1, 2.5, 6]) {
+        const l = layoutStamp({ width: 300, height: 160 }, LINES, undefined, 'bottom', aspect);
+
+        near(l.image.width / l.image.height, aspect, 0.01, `aspect ${aspect}`);
+    }
+});
+
+test('fills the space when there is no aspect to honour', () => {
+    const l = layoutStamp({ width: 300, height: 100 }, [], { caption: { enabled: false }, qr: { enabled: false } });
+
+    near(l.image.width, 300, 0.01, 'width');
+    near(l.image.height, 100, 0.01, 'height');
+});
+
+test('levels the QR with the ink instead of floating it above', () => {
+    const l = layoutStamp({ width: 300, height: 200 }, LINES, undefined, 'bottom', 4);
+
+    assert.ok(l.qr, 'expected a QR');
+    const inkMid = l.image.y + l.image.height / 2;
+    const qrMid  = l.qr.y + l.qr.size / 2;
+
+    near(qrMid, inkMid, 0.5, 'QR centre against ink centre');
+});
+
 if (failures > 0) {
     console.error(`\n${failures} failing`);
     process.exit(1);
