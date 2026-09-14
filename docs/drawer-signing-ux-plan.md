@@ -516,6 +516,33 @@ line, the QR squeezing the ink narrower than they had allowed for.
   exactly the right space; drawing a scannable one would invite someone to scan
   a signature that does not exist yet.
 
+### The caption hugs the ink, and the ink keeps its shape
+
+Two faults, visible the moment a placement was made large: the provenance
+drifted to the bottom edge of the box, metres of white space away from the
+signature it describes, and the preview and the print disagreed about the ink
+itself.
+
+- **The preview letterboxed the signature (`objectFit: contain`) while the PDF
+  stretched it** to fill the rectangle. So the gap on screen was not even what
+  would print — the print would have been a distorted signature that no longer
+  matched the specimen on file.
+- **The caption was pinned to the box's bottom edge**, so enlarging a placement
+  pushed it further from the ink until it read as a note about whatever the
+  form had underneath.
+
+Both are one fix: the layout is now aspect-aware. The ink is fitted at its own
+proportions, the caption is placed immediately beneath the **drawn ink** rather
+than the box, and the pair is centred together — so the gap between them is
+zero at every box size, which is what the small first drop always looked like.
+The QR is levelled with the ink for the same reason. Pinned by tests on both
+sides, at four box heights and three aspect ratios.
+
+The four side buttons are gone. They were a way to work around the drift; with
+the caption tucked under the signature there is nothing to work around.
+`caption.position` survives as configuration, and `signature_positions.
+caption_position` still stores a per-stamp override for hosts that want one.
+
 ### The caption can sit on any side, per stamp
 
 A form dictates where provenance can go. A signature line with the printed name
