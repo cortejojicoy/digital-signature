@@ -51,8 +51,56 @@ return [
     | signature's width of clear space, so forms that place signatures side by
     | side should turn it off rather than have it overlap the next block.
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Verification QR
+    |--------------------------------------------------------------------------
+    | A square barcode drawn on the stamp, encoding the URL of this package's
+    | public verification page. Scanning it from a printout answers the only
+    | question a person holding paper can otherwise not answer: is this mark
+    | real, and whose is it?
+    |
+    | It is drawn INSIDE the placement rectangle, taking a square off the right
+    | and leaving the rest to the signature — the same rule the caption follows.
+    | It used to be drawn beside the box, which put it wherever the form
+    | happened to have content.
+    |
+    | min_size: below this a phone will not decode it, so the QR stands down
+    |   rather than printing a barcode that cannot be scanned.
+    |
+    | max_size: an upper bound so it does not dominate a large placement.
+    |
+    | See the `verify` block for the page it points at.
+    */
     'qr' => [
-        'enabled' => env('SIGNATURE_QR_ENABLED', true),
+        'enabled'  => env('SIGNATURE_QR_ENABLED', true),
+        'min_size' => env('SIGNATURE_QR_MIN_SIZE', 26),
+        'max_size' => env('SIGNATURE_QR_MAX_SIZE', 48),
+        'gap'      => env('SIGNATURE_QR_GAP', 2),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Public verification page
+    |--------------------------------------------------------------------------
+    | Where the QR leads: GET /signature/verify/{uuid}.
+    |
+    | Deliberately public. It is scanned by whoever is holding the document —
+    | an auditor, a receiving office, a counterparty — and requiring an account
+    | would make it useless to exactly those people.
+    |
+    | It discloses only what the page they are holding already shows: the
+    | signer's name, their role, when they signed, and whether the signature
+    | still stands. Not the document, not the file, not the signer's email, not
+    | the other signatories. An unknown reference and a revoked one produce the
+    | same answer, so it cannot be used to probe whether a reference ever
+    | existed.
+    |
+    | Turn it off if your documents never leave an authenticated context; the
+    | QR then has nothing to point at and stands down with it.
+    */
+    'verify' => [
+        'enabled' => env('SIGNATURE_VERIFY_ENABLED', true),
     ],
 
     /*
@@ -88,6 +136,15 @@ return [
     'caption' => [
         'enabled'        => env('SIGNATURE_CAPTION_ENABLED', true),
         'fields'         => ['signer', 'signed_at', 'reference'],
+
+        /*
+        | Tight leading and centred under the ink, so the block reads as part
+        | of the signature rather than a note floating in whatever the form
+        | has underneath it. 'L', 'C' or 'R'.
+        */
+        'align'          => env('SIGNATURE_CAPTION_ALIGN', 'C'),
+        'line_height'    => env('SIGNATURE_CAPTION_LINE_HEIGHT', 1.06),
+
         'height_ratio'   => env('SIGNATURE_CAPTION_HEIGHT_RATIO', 0.38),
         'min_box_height' => env('SIGNATURE_CAPTION_MIN_BOX_HEIGHT', 28),
         'max_font_pt'    => env('SIGNATURE_CAPTION_MAX_FONT', 6),
