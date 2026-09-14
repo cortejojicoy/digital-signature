@@ -23,6 +23,7 @@ use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureDocumentController;
+use Kukux\DigitalSignature\Http\Controllers\SignatureVerificationController;
 use Kukux\DigitalSignature\Security\CrlValidator;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
@@ -179,6 +180,16 @@ class SignatureServiceProvider extends ServiceProvider
         Route::get('/signature/assets/{digitalSignature:uuid}', [SignatureAssetController::class, 'show'])
             ->middleware(['web', 'signed'])
             ->name('signature.asset');
+
+        // What the QR printed on a signed page resolves to.
+        //
+        // Public and unauthenticated on purpose: it is scanned by whoever is
+        // holding the paper — an auditor, a receiving office — and requiring
+        // an account would make it useless to exactly those people. The
+        // controller's docblock covers what it does and does not disclose.
+        Route::get('/signature/verify/{uuid}', [SignatureVerificationController::class, 'show'])
+            ->middleware(['web'])
+            ->name('signature.verify');
 
         // The document behind one signature request: read it, then sign it
         // where you put your signature.
