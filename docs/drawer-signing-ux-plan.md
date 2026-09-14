@@ -381,6 +381,28 @@ covers the invariant directly.
 state it was seeding, so clearing a placement immediately re-seeded it from the
 frozen slot. Seeding now happens once, guarded by a ref.
 
+### Added after the first pass: signed documents stay readable
+
+Signing removed a document from the queue and offered nothing in its place, so
+from the signatory's side it looked thrown away.
+
+- A third drawer tab, **Signed**, lists what this user has signed, newest
+  first, **grouped by the day they signed it**. Signing happens in bursts and
+  the date is what people actually remember, so the grouping is what turns a
+  list into a record. Day headings are sticky, since the heading is the first
+  thing to scroll away.
+- The query lives in `ActsOnSignatureRequests` alongside the queue, so the
+  drawer and the full-page inbox cannot disagree about what this user signed.
+  It is capped at 50: a drawer is not the place to page through a career.
+- **The same document pane serves as the reader.** `meta` reports `readOnly`
+  for a slot in a terminal state, and everything that places or commits a
+  signature is simply not rendered. The flag is advisory — `applySignature()`
+  refuses an already-signed slot whatever the client believes, and there is a
+  test for exactly that.
+- Signing now leaves a line on the queue saying where the document went, with
+  a link to the Signed tab. The user stays on the queue so they can carry on
+  with the next document rather than being navigated away mid-flow.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
@@ -396,7 +418,8 @@ redirecting it into the drawer; neither is in this plan's scope.
   three endpoints, running-document semantics, placement round-trip, and that a
   refused signature leaves the next signatory's slot unmoved.
 - `tests/Feature/SignatureLauncherTest.php` — drawer width from config, the
-  tabs, drawer-side signature registration, and that no blind `Sign` survives.
+  tabs, drawer-side signature registration, that no blind `Sign` survives, and
+  that signed history is grouped by day and never crosses between signatories.
 - `tests/js/pdfCoords.test.mjs` — the CSS-px ⇄ PDF-point conversion on A4,
   landscape, at render scales either side of 1:1, and the zoom invariance that
   the CSS-pixel bug violated.
