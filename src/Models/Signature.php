@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Facades\Storage;
@@ -45,9 +46,30 @@ class Signature extends Model
         return $this->morphTo();
     }
 
+    /**
+     * The first place this signature is stamped.
+     *
+     * Kept because most signatures land in exactly one spot and every existing
+     * caller reads it. `positions()` is the honest shape — see there.
+     */
     public function position(): HasOne
     {
         return $this->hasOne(SignaturePosition::class);
+    }
+
+    /**
+     * Every place this signature is stamped on the document.
+     *
+     * One signature, several appearances. A form routinely asks the same
+     * person for the same signature more than once — once in the signature
+     * block, again under a certificate, again on an acceptance clause — and
+     * that is one act of signing, not three. So there is one Signature row,
+     * one PKCS#7 block covering the whole document, and N rows here saying
+     * where it is drawn. The cryptography does not count stamps.
+     */
+    public function positions(): HasMany
+    {
+        return $this->hasMany(SignaturePosition::class)->orderBy('id');
     }
 
     /**
