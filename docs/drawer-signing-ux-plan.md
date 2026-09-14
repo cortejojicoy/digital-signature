@@ -516,6 +516,34 @@ line, the QR squeezing the ink narrower than they had allowed for.
   exactly the right space; drawing a scannable one would invite someone to scan
   a signature that does not exist yet.
 
+### The caption can sit on any side, per stamp
+
+A form dictates where provenance can go. A signature line with the printed name
+already underneath has no room below and plenty beside it; one at the foot of a
+page has exactly the opposite problem. A single application-wide setting could
+not be right for both, and one document can contain both.
+
+- `caption.position` — `bottom`, `top`, `left` or `right` — is the default, and
+  each placement can override it while being positioned. Four arrow buttons in
+  the tray move the selected stamp's caption.
+- `stampFrame()` now divides the box: the caption takes one whole side, the QR
+  a square out of what remains, the ink the rest. Left and right stack the
+  lines in a column, sized against the **band's** width rather than the box's —
+  a line that fits the whole box says nothing about whether it fits the strip
+  it is going in.
+- The QR is measured against the **content** area, not the box. Sizing it
+  against the original width would push it over a side caption.
+- Each side has its own stand-down: `min_box_height` below, `min_box_width`
+  beside. A sliver of signature is worse than an uncaptioned one.
+- Stored per placement in `signature_positions.caption_position`, so one
+  signatory can put the details below on one signature line and beside them on
+  the next.
+
+The column lives in the create migration rather than an `add_x_to_y` one,
+because `MigrationOrderTest` asserts this package has no alter-table migrations
+— every column is declared where its table is created, which holds while the
+schema has not shipped to hosts.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
