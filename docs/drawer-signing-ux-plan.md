@@ -463,6 +463,31 @@ you held. A drop now moves the selection to the next unplaced slot. Where you
 genuinely hold one slot, the tray says so rather than leaving the second drag
 looking broken.
 
+### The QR now verifies something
+
+The QR encoded four labelled lines of text including `Verify: {app}/signatures/
+{uuid}` — a route this package never registered. Scanning it produced a wall of
+text and a dead link.
+
+- `GET /signature/verify/{uuid}` is now a real page, and the QR encodes that URL
+  bare, so a phone camera offers to open it.
+- **Public and unauthenticated on purpose.** It is scanned by whoever is holding
+  the paper — an auditor, a receiving office — and requiring an account would
+  make it useless to exactly those people.
+- It discloses only what the page in their hand already shows: signer, role,
+  when, and whether the signature still stands. Not the document, not the file,
+  not the signer's email, not the other signatories.
+- A revoked reference and an unknown one return the same shape, so the endpoint
+  cannot be used to probe whether a reference ever existed. Tested directly.
+- The QR moved **inside** the placement, taking a square off the right — it was
+  drawn beside the box, which put it wherever the form happened to have content.
+  It stands down below a size no phone will decode, rather than printing a
+  barcode that cannot be scanned.
+
+Layout for image, QR and caption now lives in one `drawStamp()` in
+`DrawsSignatureStamp`, called once by each driver. Both had been doing this
+arithmetic separately.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
@@ -480,8 +505,10 @@ redirecting it into the drawer; neither is in this plan's scope.
 - `tests/Feature/SignatureLauncherTest.php` — drawer width from config, the
   tabs, drawer-side signature registration, that no blind `Sign` survives, and
   that signed history is grouped by day and never crosses between signatories.
-- `tests/Unit/Drivers/SignatureCaptionTest.php` — caption layout against a real
-  TCPDF: fitting, dropping, truncating, standing down on a short box.
+- `tests/Unit/Drivers/SignatureStampTest.php` — caption and QR layout against a
+  real TCPDF: fitting, dropping, truncating, standing down on a short box.
+- `tests/Feature/SignatureVerificationTest.php` — what the public page says,
+  and what it refuses to say.
 - `tests/Unit/PdfSignerServiceTest.php` — that the provenance reaches the driver.
 - `tests/js/pdfCoords.test.mjs` — the CSS-px ⇄ PDF-point conversion on A4,
   landscape, at render scales either side of 1:1, and the zoom invariance that
