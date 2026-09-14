@@ -66,6 +66,12 @@ class SignatureDocumentController extends Controller
         $session = $request->session;
         $document = $session?->signable;
 
+        // A slot that has already been signed or declined is history, not work.
+        // The document stays readable — the signatory's certificate is on it
+        // and they are entitled to see what they signed — but there is nothing
+        // left to place, so the client renders it without the signing surface.
+        $settled = $request->state->isTerminal();
+
         return response()->json([
             // The request named in the URL. The client opens on it, but it is
             // rarely the only one: the same person is routinely both "Prepared
@@ -74,7 +80,14 @@ class SignatureDocumentController extends Controller
             // surface exists to remove.
             'opened'   => $request->id,
             'sequential' => (bool) $session?->isSequential(),
-            'requests' => $this->siblingRequests($request),
+            // Advisory, like `blocked`. Signing an already-signed slot is
+            // refused by applySignature() whatever the client believes.
+            'readOnly' => $settled,
+            'state'    => $request->state->value,
+            'stateLabel' => $request->state->label(),
+            'settledAt'  => optional($request->responded_at)->toIso8601String(),
+            'role'       => $request->role,
+            'requests' => $settled ? [] : $this->siblingRequests($request),
             'document' => [
                 'title' => $document && method_exists($document, 'getSignableTitle')
                     ? $document->getSignableTitle()
