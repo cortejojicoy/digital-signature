@@ -5,23 +5,99 @@ namespace Kukux\DigitalSignature\Drivers\PdfSigners\Concerns;
 use TCPDF;
 
 /**
- * Draws the small block of human-readable provenance under a signature image.
+ * Draws one appearance of a signature: the ink, a verification QR, and the
+ * small block of readable provenance under them.
  *
- * The package already binds this information to the signature cryptographically
- * — HMAC-signed tEXt and XMP chunks inside the PNG, a PKCS#7 block in the PDF,
- * a QR alongside. All of it is invisible to somebody holding a printout. The
- * caption is the part a person can read: who signed, when, and the reference to
- * quote if they want it checked.
+ * **Everything fits inside the placement rectangle.** That rectangle is where a
+ * signatory dropped their signature, sized to the line it belongs on; anything
+ * outside it belongs to the form. The QR used to be drawn *beside* the box,
+ * which put it wherever the form happened to have content — so it is now carved
+ * out of the right-hand side, exactly as the caption is carved off the bottom.
  *
- * **It never grows the stamp.** The rectangle came from a signatory dropping
- * their signature onto a form, sized to the line it belongs on; spilling out of
- * it would land on whatever the form put underneath. So the caption is carved
- * out of the bottom of that rectangle and the image shrinks to fit the rest —
- * which is also why there is a floor below which the caption is skipped
- * entirely. A signature too small to read is worse than one with no caption.
+ * The layout, in one place, because two drivers doing this arithmetic
+ * separately is two chances to disagree about where a signature goes:
+ *
+ *     ┌──────────────────────────┬──────┐
+ *     │  signature image         │  QR  │
+ *     ├──────────────────────────┴──────┤
+ *     │  Name · Signed … · Ref …        │
+ *     └─────────────────────────────────┘
+ *
+ * Both extras stand down on a box too small to carry them. A signature
+ * squeezed into nothing is worse than one without a caption, and a QR too
+ * small to scan is worse than no QR at all.
  */
-trait DrawsSignatureCaption
+trait DrawsSignatureStamp
 {
+    /**
+     * Draw a complete stamp with its top-left corner at ($x, $y).
+     *
+     * @param  array<int, string>  $captionLines
+     */
+    protected function drawStamp(
+        TCPDF $pdf,
+        string $imageFsPath,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+        array $captionLines = [],
+        string $qrPayload = '',
+    ): void {
+        $caption = $this->layoutCaption($pdf, $captionLines, $width, $height);
+        $qrSize  = $this->qrSize($width, $height, $qrPayload !== '');
+
+        $imageWidth  = $width - ($qrSize > 0 ? $qrSize + $this->qrGap() : 0);
+        $imageHeight = $height - $caption['height'];
+
+        $pdf->Image($imageFsPath, $x, $y, $imageWidth, $imageHeight, 'PNG');
+
+        if ($qrSize > 0) {
+            $pdf->write2DBarcode(
+                $qrPayload,
+                'QRCODE,M',
+                $x + $width - $qrSize,
+                $y,
+                $qrSize,
+                $qrSize,
+                ['border' => false, 'padding' => 0],
+            );
+        }
+
+        // Under the full width, including beneath the QR: the caption names
+        // what the QR resolves to, and splitting them would read as two
+        // unrelated marks.
+        $this->drawCaption($pdf, $caption, $x, $y + $imageHeight, $width);
+    }
+
+    /**
+     * How big the verification QR may be, or 0 for "not on this stamp".
+     *
+     * Square, capped by the caption-free part of the box, and refused outright
+     * below a size no phone will decode — an unreadable barcode on a legal
+     * document is a promise the document cannot keep.
+     */
+    protected function qrSize(float $width, float $height, bool $wanted): float
+    {
+        if (! $wanted || ! config('signature.qr.enabled', true)) {
+            return 0.0;
+        }
+
+        $min = (float) config('signature.qr.min_size', 26);
+        $max = (float) config('signature.qr.max_size', 48);
+
+        // Never more than the box's own height, nor more than a third of its
+        // width — past that the signature itself stops being the main mark.
+        $size = min($height, $width / 3, $max);
+
+        return $size >= $min ? $size : 0.0;
+    }
+
+    protected function qrGap(): float
+    {
+        return (float) config('signature.qr.gap', 2);
+    }
+
     /**
      * Work out how much of the stamp the caption may take, and at what size.
      *
@@ -58,7 +134,7 @@ trait DrawsSignatureCaption
         // down in quarter points rather than solving it directly keeps this
         // readable, and the range is a couple of points wide.
         for ($size = $maxSize; $size >= $minSize; $size -= 0.25) {
-            $lineHeight = $size * 1.18;
+            $lineHeight = $size * $this->lineHeightRatio();
 
             $fitting = (int) floor($available / $lineHeight);
 
@@ -85,7 +161,7 @@ trait DrawsSignatureCaption
         // Nothing fit cleanly at any size. Rather than drop the provenance
         // altogether, draw as much of it as the box can hold at the smallest
         // size and let the ellipsis say the rest was cut.
-        $lineHeight = $minSize * 1.18;
+        $lineHeight = $minSize * $this->lineHeightRatio();
         $fitting    = (int) floor($available / $lineHeight);
 
         if ($fitting < 1) {
@@ -115,19 +191,39 @@ trait DrawsSignatureCaption
             return;
         }
 
-        $lineHeight = $caption['size'] * 1.18;
+        $lineHeight = $caption['size'] * $this->lineHeightRatio();
+        $align      = $this->captionAlign();
 
         $pdf->SetFont('helvetica', '', $caption['size']);
         $pdf->SetTextColor(...$this->captionColour());
 
         foreach ($caption['lines'] as $index => $line) {
             $pdf->SetXY($x, $y + ($index * $lineHeight));
-            $pdf->Cell($width, $lineHeight, $line, 0, 0, 'L');
+            $pdf->Cell($width, $lineHeight, $line, 0, 0, $align);
         }
 
         // Leave the document as it was found: anything drawn after this — a
         // second stamp on the same page — would otherwise inherit 4pt grey.
         $pdf->SetTextColor(0, 0, 0);
+    }
+
+    /**
+     * Leading as a multiple of the font size.
+     *
+     * Tight on purpose. The caption is a block of provenance attached to the
+     * signature above it, and loose leading makes it read as a separate note
+     * floating in whatever the form has underneath.
+     */
+    private function lineHeightRatio(): float
+    {
+        return max(1.0, (float) config('signature.caption.line_height', 1.06));
+    }
+
+    private function captionAlign(): string
+    {
+        $align = strtoupper((string) config('signature.caption.align', 'C'));
+
+        return in_array($align, ['L', 'C', 'R'], true) ? $align : 'C';
     }
 
     /**
