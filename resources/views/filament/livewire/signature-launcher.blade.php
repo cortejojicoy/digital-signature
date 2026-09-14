@@ -495,6 +495,25 @@
         .dsig-chip img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
         .dark .dsig-chip { background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.12); }
 
+        /*
+            Slot picker, shown when one person holds several slots on the same
+            document. `--placed` is a state, not a colour choice: it is the
+            only signal that a slot already has a signature waiting on it, and
+            committing without noticing an unplaced one is the mistake it
+            exists to prevent.
+        */
+        .dsig-viewer__slots { padding: .6rem 0 0; }
+        .dsig-slotchip {
+            border: 1px solid rgb(0 0 0 / 0.15); border-radius: .5rem;
+            background: transparent; color: inherit; cursor: pointer;
+            font-size: .75rem; font-weight: 600; padding: .3rem .6rem;
+        }
+        .dark .dsig-slotchip { border-color: rgb(255 255 255 / 0.2); }
+        .dsig-slotchip--on { border-color: rgb(20 184 166); box-shadow: 0 0 0 1px rgb(20 184 166); }
+        .dsig-slotchip--placed { color: rgb(15 118 110); }
+        .dark .dsig-slotchip--placed { color: rgb(45 212 191); }
+        .dsig-slotchip:disabled { opacity: .45; cursor: not-allowed; }
+
         .dsig-viewer__ghost {
             position: fixed; pointer-events: none; z-index: 2147483647;
             width: 7rem; transform: translate(-50%, -50%); opacity: .85;
