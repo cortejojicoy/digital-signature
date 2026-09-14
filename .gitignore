@@ -1,2 +1,10 @@
 vendor
 node_modules
+
+# PHPUnit's result cache, per `cacheDirectory` in phpunit.xml.dist.
+.phpunit.cache
+
+# The CI test step tees Pest's output here to check for a summary line.
+pest-output.txt
+
+.DS_Store
