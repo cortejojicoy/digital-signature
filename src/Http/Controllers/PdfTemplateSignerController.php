@@ -249,21 +249,16 @@ class PdfTemplateSignerController extends Controller
 
         // Let the signer nudge their own signature within the slot before
         // committing, but only for the slot that is actually theirs.
+        //
+        // `signAt()` owns "write the placement, then sign": the drawer's
+        // endpoint needs the same two steps, and two copies of them is one
+        // chance too many for a surface to skip the ownership reload in
+        // between.
         $placement = collect($placements)->firstWhere('slot', $signatureRequest->slot_key);
-
-        if ($placement !== null) {
-            $signatureRequest->update([
-                'page'   => $placement['page'],
-                'x'      => $placement['x'],
-                'y'      => $placement['y'],
-                'width'  => $placement['width'],
-                'height' => $placement['height'],
-            ]);
-        }
 
         try {
             $signed = app(SigningSessionManager::class)
-                ->sign($signatureRequest->fresh(), (int) auth()->id());
+                ->signAt($signatureRequest, (int) auth()->id(), $placement);
         } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
