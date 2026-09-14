@@ -4,6 +4,7 @@ import signaturePreview from './alpine/signaturePreview.js';
 import { mountIsland, unmountIsland } from './react/SignaturePadIsland.jsx';
 import { mountDesigner, unmountDesigner } from './react/PdfDesignerIsland.jsx';
 import { mountSigner, unmountSigner } from './react/PdfSigningIsland.jsx';
+import { mountLazyViewer, unmountLazyViewer } from './lazy/pdfViewer.js';
 
 // ── Alpine plugin registration ───────────────────────────────────────────────
 
@@ -40,6 +41,13 @@ const ISLANDS = [
         attr:    'data-pdf-signer',
         mount:   mountSigner,
         unmount: unmountSigner,
+    },
+    {
+        // Lazy: pdf.js is large and the launcher renders on every panel page,
+        // so the viewer's bundle is fetched only once one is actually opened.
+        attr:    'data-dsig-pdf-viewer',
+        mount:   mountLazyViewer,
+        unmount: unmountLazyViewer,
     },
 ];
 
