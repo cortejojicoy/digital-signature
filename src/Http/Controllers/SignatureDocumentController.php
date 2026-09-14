@@ -12,6 +12,7 @@ use Kukux\DigitalSignature\Exceptions\SignatoryNotReadyException;
 use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignatureRequest;
+use Kukux\DigitalSignature\Models\SigningSession;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -66,17 +67,14 @@ class SignatureDocumentController extends Controller
         $document = $session?->signable;
 
         return response()->json([
-            'request' => [
-                'id'       => $request->id,
-                'slot'     => $request->slot_key,
-                'role'     => $request->role,
-                'sequence' => $request->sequence,
-                'blocked'  => $this->isBlocked($request),
-                // The placement frozen when the request was created. The client
-                // opens its box here, so a signatory who simply drops the
-                // signature and commits reproduces the administrator's layout.
-                'placement' => $request->position(),
-            ],
+            // The request named in the URL. The client opens on it, but it is
+            // rarely the only one: the same person is routinely both "Prepared
+            // by" and "Noted by" on the same form, and making them open the
+            // document twice to sign it twice is the friction this whole
+            // surface exists to remove.
+            'opened'   => $request->id,
+            'sequential' => (bool) $session?->isSequential(),
+            'requests' => $this->siblingRequests($request),
             'document' => [
                 'title' => $document && method_exists($document, 'getSignableTitle')
                     ? $document->getSignableTitle()
@@ -85,6 +83,40 @@ class SignatureDocumentController extends Controller
             ],
             'signatures' => $this->library((int) $request->user_id),
         ]);
+    }
+
+    /**
+     * Every slot in this session that is still waiting on this same signatory,
+     * the opened one included, in signing order.
+     *
+     * Scoped to the session rather than the whole queue: these are the slots
+     * that can be placed on the document currently open, and a request from
+     * some other document has nowhere to go on this page.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function siblingRequests(SignatureRequest $request): array
+    {
+        return SignatureRequest::query()
+            ->with('session.requests')
+            ->outstandingFor((int) $request->user_id)
+            ->where('signing_session_id', $request->signing_session_id)
+            ->orderBy('sequence')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (SignatureRequest $r): array => [
+                'id'       => $r->id,
+                'slot'     => $r->slot_key,
+                'role'     => $r->role,
+                'sequence' => $r->sequence,
+                'required' => (bool) $r->required,
+                'blocked'  => $this->isBlocked($r),
+                // The placement frozen when the request was created. The client
+                // opens each box here, so a signatory who simply drops and
+                // commits reproduces the administrator's layout.
+                'placement' => $r->position(),
+            ])
+            ->all();
     }
 
     /**
@@ -128,6 +160,20 @@ class SignatureDocumentController extends Controller
         $request = $this->ownedRequest($signatureRequest);
 
         $data = $httpRequest->validate([
+            // Several slots at once. Each entry names one of this signatory's
+            // own requests in this session; omitting request_id means the one
+            // in the URL.
+            'placements'                 => ['sometimes', 'array', 'min:1', 'max:32'],
+            'placements.*.request_id'    => ['sometimes', 'nullable', 'integer'],
+            'placements.*.page'          => ['required_with:placements', 'integer', 'min:1'],
+            'placements.*.x'             => ['required_with:placements', 'numeric', 'min:0'],
+            'placements.*.y'             => ['required_with:placements', 'numeric', 'min:0'],
+            'placements.*.width'         => ['required_with:placements', 'numeric', 'min:1'],
+            'placements.*.height'        => ['required_with:placements', 'numeric', 'min:1'],
+            'placements.*.signature_id'  => ['sometimes', 'nullable', 'integer'],
+
+            // Single-slot shorthand, which is also the keyboard path and the
+            // shape the old one-click Sign button produced.
             'page'         => ['sometimes', 'required', 'integer', 'min:1'],
             'x'            => ['sometimes', 'required', 'numeric', 'min:0'],
             'y'            => ['sometimes', 'required', 'numeric', 'min:0'],
@@ -136,43 +182,172 @@ class SignatureDocumentController extends Controller
             'signature_id' => ['sometimes', 'nullable', 'integer'],
         ]);
 
-        $placement = array_key_exists('page', $data)
-            ? ['page' => $data['page'], 'x' => $data['x'] ?? 0, 'y' => $data['y'] ?? 0,
-               'width' => $data['width'] ?? 0, 'height' => $data['height'] ?? 0]
-            : null;
+        $jobs = $this->resolveSigningJobs($request, $data);
 
-        $signature = $this->resolveSignature($data['signature_id'] ?? null, (int) $request->user_id);
+        $signed  = [];
+        $last    = null;
 
-        try {
-            $signed = $this->sessions->signAt(
-                request:      $request,
-                actorUserId:  (int) $this->userId(),
-                placement:    $placement,
-                useSignature: $signature,
-            );
-        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        } catch (\Throwable $e) {
-            report($e);
+        // Sequence order, not payload order. Each signature is applied to the
+        // session's running document and chained to the one before it, so the
+        // order they are applied in is the order they appear in the chain —
+        // and a sequential session would refuse them in any other order
+        // anyway.
+        foreach ($jobs as $job) {
+            try {
+                $last = $this->sessions->signAt(
+                    request:      $job['request'],
+                    actorUserId:  (int) $this->userId(),
+                    placement:    $job['placement'],
+                    useSignature: $job['signature'],
+                );
+            } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
+                return $this->partialFailure($request, $signed, $e->getMessage(), $job['request']);
+            } catch (\Throwable $e) {
+                report($e);
 
-            return response()->json([
-                'error' => 'Signing failed: '.$e->getMessage(),
-                'hint'  => 'See storage/logs/laravel.log for the full stacktrace.',
-            ], 422);
+                return $this->partialFailure(
+                    $request,
+                    $signed,
+                    'Signing failed: '.$e->getMessage(),
+                    $job['request'],
+                    'See storage/logs/laravel.log for the full stacktrace.',
+                );
+            }
+
+            $signed[] = [
+                'request_id'     => $job['request']->id,
+                'slot'           => $job['request']->slot_key,
+                'role'           => $job['request']->role,
+                'signature_uuid' => $last->uuid,
+            ];
         }
 
         $session = $request->session->fresh(['requests']);
 
         return response()->json([
-            'status'               => 'signed',
-            'signature_uuid'       => $signed->uuid,
-            'signed_document_path' => $signed->signed_document_path,
-            'signed_at'            => optional($signed->signed_at)->toIso8601String(),
+            'status' => 'signed',
+            'signed' => $signed,
+            // The last signature is the one that produced the document as it
+            // now stands, so these describe the file a caller would fetch.
+            'signature_uuid'       => $last?->uuid,
+            'signed_document_path' => $last?->signed_document_path,
+            'signed_at'            => optional($last?->signed_at)->toIso8601String(),
             'outstanding'          => $session->outstandingRequests()->count(),
-            'message'              => $session->isComplete()
-                ? 'Document signed. All signatories have now signed.'
-                : 'Document signed. Waiting on the remaining signatories.',
+            'message'              => $this->outcomeMessage($session, count($signed)),
         ]);
+    }
+
+    /**
+     * Turn the payload into an ordered list of (request, placement, signature).
+     *
+     * Every request is re-resolved through the same ownership query as the one
+     * in the URL and pinned to the same session. Holding one request id is not
+     * a licence to sign a second: the client may only batch slots it could
+     * have signed one at a time.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, array{request: SignatureRequest, placement: ?array<string, mixed>, signature: ?Signature}>
+     */
+    protected function resolveSigningJobs(SignatureRequest $opened, array $data): array
+    {
+        $entries = $data['placements'] ?? null;
+
+        if ($entries === null) {
+            // Single-slot shorthand. No geometry at all means "sign where the
+            // slot already says", which is what the keyboard path sends.
+            $entries = [array_key_exists('page', $data) ? $data : ['request_id' => $opened->id]];
+        }
+
+        $jobs = [];
+        $seen = [];
+
+        foreach ($entries as $entry) {
+            $id = $entry['request_id'] ?? $opened->id;
+
+            $request = (int) $id === (int) $opened->id
+                ? $opened
+                : $this->ownedRequest((int) $id);
+
+            abort_unless(
+                (int) $request->signing_session_id === (int) $opened->signing_session_id,
+                403,
+                'That signature request belongs to a different document.',
+            );
+
+            // A slot can only be signed once, so a payload naming it twice is
+            // a client bug; silently applying the first and failing on the
+            // second would be a confusing way to report it.
+            abort_if(
+                in_array((int) $request->id, $seen, true),
+                422,
+                'The same slot was placed more than once.',
+            );
+
+            $seen[] = (int) $request->id;
+
+            $jobs[] = [
+                'request'   => $request,
+                'placement' => array_key_exists('page', $entry)
+                    ? [
+                        'page'   => $entry['page'],
+                        'x'      => $entry['x']      ?? 0,
+                        'y'      => $entry['y']      ?? 0,
+                        'width'  => $entry['width']  ?? 0,
+                        'height' => $entry['height'] ?? 0,
+                    ]
+                    : null,
+                'signature' => $this->resolveSignature(
+                    $entry['signature_id'] ?? null,
+                    (int) $request->user_id,
+                ),
+            ];
+        }
+
+        usort($jobs, fn (array $a, array $b): int => [$a['request']->sequence, $a['request']->id]
+            <=> [$b['request']->sequence, $b['request']->id]);
+
+        return $jobs;
+    }
+
+    /**
+     * One of a batch failed.
+     *
+     * Whatever was applied before it is genuinely signed and stays signed —
+     * each signature is its own committed transaction against the running
+     * document, and there is no honest way to un-sign a PDF that somebody
+     * already put their certificate on. So the response says exactly how far
+     * it got rather than implying the whole batch was rejected.
+     *
+     * @param  array<int, array<string, mixed>>  $signed
+     */
+    protected function partialFailure(
+        SignatureRequest $opened,
+        array $signed,
+        string $error,
+        SignatureRequest $failedOn,
+        ?string $hint = null,
+    ): JsonResponse {
+        $session = $opened->session->fresh(['requests']);
+
+        return response()->json(array_filter([
+            'status'      => $signed === [] ? 'failed' : 'partial',
+            'error'       => $error,
+            'hint'        => $hint,
+            'failed_on'   => ['request_id' => $failedOn->id, 'slot' => $failedOn->slot_key],
+            'signed'      => $signed,
+            'outstanding' => $session->outstandingRequests()->count(),
+        ], fn ($value): bool => $value !== null), 422);
+    }
+
+    protected function outcomeMessage(SigningSession $session, int $count): string
+    {
+        $applied = $count === 1
+            ? 'Document signed.'
+            : "Document signed in {$count} places.";
+
+        return $session->isComplete()
+            ? $applied.' All signatories have now signed.'
+            : $applied.' Waiting on the remaining signatories.';
     }
 
     // -------------------------------------------------------------------------
@@ -256,10 +431,17 @@ class SignatureDocumentController extends Controller
     }
 
     /**
-     * Whether an earlier required signatory still has to act.
+     * Whether somebody *else* still has to act before this slot can be signed.
      *
-     * Advisory only — the client uses it to disable the commit button, and
-     * `assertInSequence()` is what actually enforces it at signing time.
+     * An earlier slot belonging to this same signatory is deliberately not a
+     * blocker. They can clear it themselves — and routinely do, in the same
+     * batch, since placing "Prepared by" and "Noted by" together is the whole
+     * point of accepting several placements at once. Treating their own
+     * pending slot as a blocker would grey out the case this exists for.
+     *
+     * Advisory only. `assertInSequence()` is what actually enforces ordering
+     * at signing time, and it will still refuse a batch that leaves an earlier
+     * slot of their own unsigned.
      */
     protected function isBlocked(SignatureRequest $request): bool
     {
@@ -272,7 +454,8 @@ class SignatureDocumentController extends Controller
         return $session->requests
             ->where('required', true)
             ->where('sequence', '<', $request->sequence)
-            ->contains(fn (SignatureRequest $r): bool => ! $r->isSigned());
+            ->contains(fn (SignatureRequest $r): bool => ! $r->isSigned()
+                && (int) $r->user_id !== (int) $request->user_id);
     }
 
     protected function userId(): int|string|null
