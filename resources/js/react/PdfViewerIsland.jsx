@@ -229,6 +229,24 @@ function PdfViewerIsland({ el }) {
         if (Object.keys(seeded).length > 0) setPlacements(seeded);
     }, [meta, pages, requests, activeSigId]);
 
+    /**
+     * Select the next slot that still has nothing on it.
+     *
+     * Falls back to leaving the current one selected when every slot is
+     * placed, so a further drag repositions the highlighted box rather than
+     * doing nothing at all.
+     */
+    const advancePast = useCallback((justPlacedId) => {
+        setPlacements((current) => {
+            const next = requests.find((r) =>
+                r.id !== justPlacedId && !r.blocked && current[r.id] === undefined);
+
+            if (next) setActiveRequestId(next.id);
+
+            return current;
+        });
+    }, [requests]);
+
     // ── Dragging a signature out of the tray and onto a page ────────────────
 
     const beginTrayDrag = useCallback((sig, e) => {
@@ -297,8 +315,14 @@ function PdfViewerIsland({ el }) {
                 signatureId: dragging.sig.id,
             },
         }));
+
+        // Move on to the next slot still waiting for a signature. Without
+        // this the drop target never changes, so a second drag silently
+        // re-places the first slot and the surface looks like it only accepts
+        // one signature per document.
+        advancePast(activeRequest.id);
         setNotice(null);
-    }, [dragging, activeRequest, pages, zoom, aspects]);
+    }, [dragging, activeRequest, pages, zoom, aspects, advancePast]);
 
     /**
      * The keyboard/click equivalent of the drag. Drag is a convenience, not
@@ -317,6 +341,7 @@ function PdfViewerIsland({ el }) {
                 ...current,
                 [activeRequest.id]: { ...frozen, signatureId: activeSigId },
             }));
+            advancePast(activeRequest.id);
             return;
         }
 
@@ -338,7 +363,8 @@ function PdfViewerIsland({ el }) {
                 signatureId: activeSigId,
             },
         }));
-    }, [pages, activeRequest, zoom, aspects, activeSigId]);
+        advancePast(activeRequest.id);
+    }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast]);
 
     const removePlacement = useCallback((requestId) => {
         setPlacements((current) => {
@@ -591,7 +617,16 @@ function PdfViewerIsland({ el }) {
                 left to sign, so the reader is a reader. */}
             {!readOnly && (
             <div className="dsig-viewer__tray">
+                {/*
+                    Says which slot the next drop lands on, and how many are
+                    left. A document where you hold one slot accepts one
+                    signature, and saying so is the difference between a rule
+                    and a surface that looks broken on the second drag.
+                */}
                 <span className="dsig-viewer__trayhint">
+                    {requests.length > 1
+                        ? `${placedIds.length} of ${requests.length} slots placed. `
+                        : ''}
                     Drag a signature onto the page
                     {activeRequest && requests.length > 1
                         ? ` for ${activeRequest.role || activeRequest.slot}`
@@ -603,6 +638,7 @@ function PdfViewerIsland({ el }) {
                         place it with the keyboard
                     </button>
                     . Drag the corner to resize; hold Shift to distort.
+                    {requests.length === 1 && ' Dragging again moves the one you placed.'}
                 </span>
 
                 <div className="dsig-viewer__chips">
