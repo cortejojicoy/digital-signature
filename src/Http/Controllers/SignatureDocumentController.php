@@ -13,6 +13,7 @@ use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\SigningSession;
+use Kukux\DigitalSignature\Services\SignatureCaption;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -48,6 +49,7 @@ class SignatureDocumentController extends Controller
 {
     public function __construct(
         protected SigningSessionManager $sessions,
+        protected SignatureCaption $captions,
     ) {
     }
 
@@ -88,6 +90,9 @@ class SignatureDocumentController extends Controller
             'settledAt'  => optional($request->responded_at)->toIso8601String(),
             'role'       => $request->role,
             'requests' => $settled ? [] : $this->siblingRequests($request),
+            // How the stamp is composed, so the box a signatory drags shows
+            // what will actually print in it rather than the signature alone.
+            'stamp'    => $this->captions->rules(),
             'document' => [
                 'title' => $document && method_exists($document, 'getSignableTitle')
                     ? $document->getSignableTitle()
@@ -459,6 +464,9 @@ class SignatureDocumentController extends Controller
                 'uuid'       => $s->uuid,
                 'previewUrl' => $s->getTemporaryImageUrl(60),
                 'source'     => $s->source,
+                // Per signature, because the reference line is the signature's
+                // own. Built by the same object the PDF writer uses.
+                'caption'    => $this->captions->linesFor($s),
             ])
             ->all();
     }
