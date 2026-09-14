@@ -18,30 +18,117 @@ const DEFAULT_RULES = {
     caption: {
         enabled: true, minBoxHeight: 28, heightRatio: 0.38,
         maxFont: 6, minFont: 4, lineHeight: 1.06, align: 'C',
+        position: 'bottom', widthRatio: 0.42, minBoxWidth: 110,
     },
     qr: { enabled: true, minSize: 26, maxSize: 48, gap: 2 },
 };
+
+export const CAPTION_POSITIONS = ['bottom', 'top', 'left', 'right'];
 
 /**
  * @param {object} box       { width, height } in PDF points.
  * @param {string[]} lines   Caption lines, already chosen server-side.
  * @param {object} rules     The `stamp` block from the meta payload.
- * @returns {{image: {width, height}, qr: number, caption: {lines, size, height, align}}}
+ * @param {string} [position] Which side the caption takes, overriding the
+ *                            configured default for this one placement.
+ * @returns {{image: {x,y,width,height}, qr: {x,y,size}|null, caption: object}}
  */
-export function layoutStamp(box, lines = [], rules = DEFAULT_RULES) {
+export function layoutStamp(box, lines = [], rules = DEFAULT_RULES, position) {
     const captionRules = { ...DEFAULT_RULES.caption, ...(rules?.caption ?? {}) };
     const qrRules      = { ...DEFAULT_RULES.qr,      ...(rules?.qr      ?? {}) };
 
-    const caption = layoutCaption(box, lines, captionRules);
-    const qr      = qrSize(box, qrRules);
+    const side = CAPTION_POSITIONS.includes(position)
+        ? position
+        : (CAPTION_POSITIONS.includes(captionRules.position) ? captionRules.position : 'bottom');
+
+    const vertical = side === 'left' || side === 'right';
+
+    const caption = vertical
+        ? layoutCaptionColumn(box, lines, captionRules)
+        : layoutCaption(box, lines, captionRules);
+
+    const band = vertical ? caption.width : caption.height;
+
+    // What the caption did not claim.
+    const content = side === 'bottom' ? { x: 0,    y: 0,    w: box.width,        h: box.height - band }
+        : side === 'top'              ? { x: 0,    y: band, w: box.width,        h: box.height - band }
+        : side === 'left'             ? { x: band, y: 0,    w: box.width - band, h: box.height }
+        : /* right */                   { x: 0,    y: 0,    w: box.width - band, h: box.height };
+
+    const captionBox = side === 'bottom' ? { x: 0, y: box.height - band, w: box.width }
+        : side === 'top'                 ? { x: 0, y: 0,                 w: box.width }
+        : side === 'left'                ? { x: 0, y: 0,                 w: band }
+        : /* right */                      { x: box.width - band, y: 0,  w: band };
+
+    // Centre a column caption against the ink it belongs to.
+    if (vertical && caption.lines.length > 0) {
+        captionBox.y = Math.max(0, (box.height - caption.height) / 2);
+    }
+
+    const qr  = qrSize({ width: content.w, height: content.h }, qrRules);
+    const gap = qr > 0 ? qrRules.gap : 0;
 
     return {
+        position: side,
         image: {
-            width:  box.width - (qr > 0 ? qr + qrRules.gap : 0),
-            height: box.height - caption.height,
+            x: content.x,
+            y: content.y,
+            width:  content.w - (qr > 0 ? qr + gap : 0),
+            height: content.h,
         },
-        qr,
-        caption,
+        qr: qr > 0 ? { x: content.x + content.w - qr, y: content.y, size: qr } : null,
+        caption: { ...caption, ...captionBox },
+    };
+}
+
+/**
+ * The caption stacked down a column beside the signature.
+ *
+ * Sized against the band's WIDTH rather than the box's — a column is always
+ * narrow, and a line that fits the whole box says nothing about whether it
+ * fits the strip it is going in.
+ */
+function layoutCaptionColumn(box, lines, rules) {
+    const empty = { lines: [], size: 0, height: 0, width: 0, align: rules.align };
+
+    const candidates = (lines ?? []).map((l) => String(l).trim()).filter(Boolean);
+
+    if (candidates.length === 0 || !rules.enabled) return empty;
+    if (box.width < rules.minBoxWidth) return empty;
+
+    const band = box.width * Math.max(0.1, Math.min(0.9, rules.widthRatio));
+
+    for (let size = rules.maxFont; size >= rules.minFont; size -= 0.25) {
+        const lineHeight = size * rules.lineHeight;
+
+        if (candidates.length * lineHeight > box.height) continue;
+
+        const widest = Math.max(...candidates.map((line) => measure(line, size)));
+
+        if (widest <= band) {
+            return {
+                lines: candidates,
+                size,
+                height: candidates.length * lineHeight,
+                width: band,
+                align: rules.align,
+            };
+        }
+    }
+
+    const lineHeight = rules.minFont * rules.lineHeight;
+    const fitting = Math.floor(box.height / lineHeight);
+
+    if (fitting < 1) return empty;
+
+    const chosen = candidates.slice(0, fitting).map((line) => truncate(line, band, rules.minFont));
+
+    return {
+        lines: chosen,
+        size: rules.minFont,
+        height: chosen.length * lineHeight,
+        width: band,
+        align: rules.align,
     };
 }
 
@@ -74,10 +161,17 @@ export function defaultStampBox(aspect, maxWidth, rules = DEFAULT_RULES) {
     // Then by the QR, measured against the box we now know the height of.
     const qr = qrSize({ width: inkWidth, height }, qrRules);
 
-    return {
-        width:  Math.min(inkWidth + (qr > 0 ? qr + qrRules.gap : 0), maxWidth),
-        height,
-    };
+    let width = inkWidth + (qr > 0 ? qr + qrRules.gap : 0);
+
+    // A caption beside the ink takes width instead of height, so give it its
+    // share back — otherwise choosing "left" immediately squeezes the ink.
+    const side = captionRules.position;
+    if (captionRules.enabled && (side === 'left' || side === 'right')) {
+        const ratio = Math.max(0.1, Math.min(0.9, captionRules.widthRatio));
+        width = Math.max(width / (1 - ratio), captionRules.minBoxWidth);
+    }
+
+    return { width: Math.min(width, maxWidth), height };
 }
 
 function qrSize(box, rules) {
@@ -91,7 +185,7 @@ function qrSize(box, rules) {
 }
 
 function layoutCaption(box, lines, rules) {
-    const empty = { lines: [], size: 0, height: 0, align: rules.align };
+    const empty = { lines: [], size: 0, height: 0, width: 0, align: rules.align };
 
     const candidates = (lines ?? []).map((l) => String(l).trim()).filter(Boolean);
 
@@ -110,7 +204,7 @@ function layoutCaption(box, lines, rules) {
         const widest = Math.max(...chosen.map((line) => measure(line, size)));
 
         if (widest <= box.width) {
-            return { lines: chosen, size, height: chosen.length * lineHeight, align: rules.align };
+            return { lines: chosen, size, height: chosen.length * lineHeight, width: box.width, align: rules.align };
         }
     }
 
@@ -121,7 +215,7 @@ function layoutCaption(box, lines, rules) {
 
     const chosen = candidates.slice(0, fitting).map((line) => truncate(line, box.width, rules.minFont));
 
-    return { lines: chosen, size: rules.minFont, height: chosen.length * lineHeight, align: rules.align };
+    return { lines: chosen, size: rules.minFont, height: chosen.length * lineHeight, width: box.width, align: rules.align };
 }
 
 // ── Text measurement ────────────────────────────────────────────────────────
