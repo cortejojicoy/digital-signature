@@ -2,12 +2,15 @@
 
 namespace Kukux\DigitalSignature\Drivers\PdfSigners;
 
+use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Illuminate\Support\Facades\Storage;
 use TCPDF;
 
 class TcpdfDriver implements PdfSignerDriver
 {
+    use DrawsSignatureCaption;
+
     public function sign(
         string $pdfPath,
         string $imagePath,
@@ -15,6 +18,7 @@ class TcpdfDriver implements PdfSignerDriver
         array  $certData,
         string $reason = 'Approved',
         string $qrPayload = '',
+        array  $caption = [],
     ): string {
         $disk   = Storage::disk(config('signature.storage_disk'));
         $inPath = $disk->path($pdfPath);
@@ -49,7 +53,15 @@ class TcpdfDriver implements PdfSignerDriver
         $sigW = $position['width']  ?? 60;
         $sigH = $position['height'] ?? 20;
 
-        $pdf->Image($disk->path($imagePath), $sigX, $sigY, $sigW, $sigH);
+        // Same rule as the FPDI driver: the caption is carved out of the
+        // placement, so the stamp never occupies more of the page than the
+        // signatory positioned.
+        $captionLayout = $this->layoutCaption($pdf, $caption, $sigW, $sigH);
+        $imageH        = $sigH - $captionLayout['height'];
+
+        $pdf->Image($disk->path($imagePath), $sigX, $sigY, $sigW, $imageH);
+
+        $this->drawCaption($pdf, $captionLayout, $sigX, $sigY + $imageH, $sigW);
 
         if ($qrPayload !== '') {
             $qrSize = $sigH;

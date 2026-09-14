@@ -2,6 +2,7 @@
 
 namespace Kukux\DigitalSignature\Drivers\PdfSigners;
 
+use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Illuminate\Support\Facades\Storage;
 use setasign\Fpdi\TcpdfFpdi;
@@ -23,6 +24,8 @@ use setasign\Fpdi\TcpdfFpdi;
  */
 class FpdiDriver implements PdfSignerDriver
 {
+    use DrawsSignatureCaption;
+
     public function sign(
         string $pdfPath,
         string $imagePath,
@@ -30,6 +33,7 @@ class FpdiDriver implements PdfSignerDriver
         array  $certData,
         string $reason = 'Approved',
         string $qrPayload = '',
+        array  $caption = [],
     ): string {
         $disk   = Storage::disk(config('signature.storage_disk'));
         $inPath = $disk->path($pdfPath);
@@ -68,14 +72,23 @@ class FpdiDriver implements PdfSignerDriver
                 // so flip it against this page's own height.
                 $topY = $sz['height'] - ($sigY + $sigH);
 
+                // The caption comes out of the bottom of the placement, never
+                // out of the page around it: that rectangle is where the
+                // signatory said their signature goes, and anything below it
+                // belongs to the form.
+                $captionLayout = $this->layoutCaption($pdf, $caption, $sigW, $sigH);
+                $imageH        = $sigH - $captionLayout['height'];
+
                 $pdf->Image(
                     $disk->path($imagePath),
                     $sigX,
                     $topY,
                     $sigW,
-                    $sigH,
+                    $imageH,
                     'PNG',
                 );
+
+                $this->drawCaption($pdf, $captionLayout, $sigX, $topY + $imageH, $sigW);
 
                 if ($qrPayload !== '') {
                     $qrSize = $sigH;
