@@ -1,6 +1,6 @@
 <?php
 
-use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
+use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureStamp;
 
 /**
  * The caption layout.
@@ -9,21 +9,25 @@ use Kukux\DigitalSignature\Drivers\PdfSigners\Concerns\DrawsSignatureCaption;
  * below is a way for that to go wrong: a box too short to share, lines too wide
  * to fit, a configuration that asks for more than there is room for.
  */
-function captionLayout(array $lines, float $width, float $height): array
+function stampSubject(): object
 {
-    $subject = new class
+    return new class
     {
-        use DrawsSignatureCaption {
+        use DrawsSignatureStamp {
             layoutCaption as public;
+            qrSize as public;
         }
     };
+}
 
+function captionLayout(array $lines, float $width, float $height): array
+{
     // A real TCPDF, because the layout asks it how wide the text will actually
     // be. Measuring against a stub would test the arithmetic and not the fit.
     $pdf = new TCPDF('P', 'pt');
     $pdf->AddPage();
 
-    return $subject->layoutCaption($pdf, $lines, $width, $height);
+    return stampSubject()->layoutCaption($pdf, $lines, $width, $height);
 }
 
 describe('signature caption layout', function () {
@@ -97,5 +101,47 @@ describe('signature caption layout', function () {
         $layout = captionLayout(['Juan Dela Cruz', '', '   '], 160, 60);
 
         expect($layout['lines'])->toBe(['Juan Dela Cruz']);
+    });
+});
+
+/**
+ * The verification QR.
+ *
+ * It now sits inside the placement rather than beside it, which means it is
+ * competing with the signature for the same width — so the rules about when it
+ * stands down are the ones worth pinning.
+ */
+describe('verification QR sizing', function () {
+
+    it('fits a square inside the placement without crowding out the signature', function () {
+        $size = stampSubject()->qrSize(200, 60, true);
+
+        expect($size)->toBeGreaterThan(0.0)
+            // Never more than a third of the width, or the signature stops
+            // being the main mark on the page.
+            ->and($size)->toBeLessThanOrEqual(200 / 3)
+            ->and($size)->toBeLessThanOrEqual(60.0);
+    });
+
+    it('stands down when the box cannot hold a scannable square', function () {
+        // An unreadable barcode on a legal document is a promise the document
+        // cannot keep.
+        expect(stampSubject()->qrSize(60, 18, true))->toBe(0.0);
+    });
+
+    it('draws nothing when there is no payload to encode', function () {
+        expect(stampSubject()->qrSize(200, 60, false))->toBe(0.0);
+    });
+
+    it('can be switched off entirely', function () {
+        config()->set('signature.qr.enabled', false);
+
+        expect(stampSubject()->qrSize(200, 60, true))->toBe(0.0);
+    });
+
+    it('honours a configured minimum', function () {
+        config()->set('signature.qr.min_size', 100);
+
+        expect(stampSubject()->qrSize(200, 60, true))->toBe(0.0);
     });
 });

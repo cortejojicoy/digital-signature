@@ -162,6 +162,45 @@ describe('PdfSignerService', function () {
         Storage::disk('testing')->assertExists($outPath);
     });
 
+    it('encodes the verification URL in the QR, not a wall of text', function () {
+        // The old payload was four labelled lines including a Verify address
+        // pointing at a route this package never registered — so scanning it
+        // produced text and a dead link.
+        $user = makeFakeUser();
+
+        $sig = Signature::create([
+            'uuid'       => '11112222-0000-0000-0000-000000000000',
+            'user_id'    => $user->id,
+            'image_path' => 'signatures/test_sig.png',
+            'image_hash' => str_repeat('9', 64),
+            'source'     => 'draw',
+            'status'     => 'pending',
+        ]);
+        $sig->setRelation('user', $user);
+
+        $signable = Mockery::mock(\Kukux\DigitalSignature\Contracts\Signable::class);
+        $signable->shouldReceive('getSignablePdfPath')->andReturn('docs/test.pdf');
+        $sig->setRelation('signable', $signable);
+
+        $driver = Mockery::mock(\Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver::class);
+        $driver->shouldReceive('sign')
+            ->once()
+            ->andReturnUsing(function (...$args) {
+                $this->args = $args;
+
+                return 'signed-docs/out.pdf';
+            });
+
+        (new PdfSignerService($driver))->sign($sig, []);
+
+        $qr = $this->args[5];
+
+        expect($qr)->toContain('/signature/verify/11112222-0000-0000-0000-000000000000')
+            // A bare URL, so a phone camera offers to open it.
+            ->and($qr)->not->toContain("\n")
+            ->and($qr)->not->toContain('Signer:');
+    });
+
     it('hands the driver readable provenance to draw under the signature', function () {
         $user = makeFakeUser();
 
