@@ -20,6 +20,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
 | [Signatory Routing](signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory PDFs, Filament v3/v4/v5 compatibility |
+| [Drawer Signing UX](drawer-signing-ux-plan.md) | The drawer signing surface: inbox and signature library in one drawer, inline PDF viewing, drag-to-place signing |
 | [Concept: Signatory Routing](concepts/signatory-routing.md) | The design record behind the above — trade-offs, rejected approaches, resolved questions |
 
 ---

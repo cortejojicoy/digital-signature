@@ -204,6 +204,7 @@ SIGNATURE_LAUNCHER_POSITION=bottom-right
 SIGNATURE_LAUNCHER_LABEL=Signatures
 SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
+SIGNATURE_LAUNCHER_WIDTH=64rem
 SIGNATURE_LAUNCHER_AVOID_OVERLAP=true
 SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
 SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
@@ -287,8 +288,14 @@ Per-panel override: `SignaturePlugin::make()->withoutInbox()`.
 ### `launcher`
 
 The floating button, pinned to a corner of every panel page, that opens a
-slide-over with the documents waiting on the signed-in user and their signature
+drawer with the documents waiting on the signed-in user and their signature
 library. On by default.
+
+The drawer is the signing surface, not a notification rail: opening a document
+renders the PDF inside it, and the signatory drags their signature onto the
+page. `width` is sized for that — `64rem` by default, wide enough to read a
+page. It accepts any plain CSS length, never exceeds the viewport, and goes
+full-bleed below 640px regardless.
 
 | Key | Env | Default |
 |---|---|---|
@@ -300,6 +307,7 @@ library. On by default.
 | `launcher.color` | `SIGNATURE_LAUNCHER_COLOR` | `null` (built-in neutral) |
 | `launcher.poll_seconds` | `SIGNATURE_LAUNCHER_POLL` | `60` |
 | `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
+| `launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `64rem` |
 | `launcher.avoid_overlap` | `SIGNATURE_LAUNCHER_AVOID_OVERLAP` | `true` |
 | `launcher.offset.x` | `SIGNATURE_LAUNCHER_OFFSET_X` | `1.5rem` |
 | `launcher.offset.y` | `SIGNATURE_LAUNCHER_OFFSET_Y` | `1.5rem` |
