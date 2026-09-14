@@ -1,0 +1,87 @@
+name: pages
+
+# Builds the documentation site in `site/` and deploys it to GitHub Pages.
+#
+# Kept out of tests.yml deliberately: that workflow is the gate on whether the
+# package works, and a docs deployment must never be able to hold up — or be
+# mistaken for — a passing test run.
+#
+# The pull-request job builds without deploying. The site build verifies its
+# own output (every internal link and every in-page anchor has to resolve), so
+# this is a cheap way to catch a cross-reference that rotted when a heading was
+# reworded, which is invisible in a diff and obvious to a reader.
+#
+# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch: {}
+
+# Never cancel a deployment in progress: a half-published site is worse than a
+# slightly stale one. Queued runs simply wait their turn.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    name: Build the docs site
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No install step. The builder uses nothing but Node built-ins, which is
+      # what keeps this job to a couple of seconds and stops the site from
+      # breaking one day because a transitive dependency published a major.
+      - name: Build
+        run: node site/build.mjs
+        env:
+          # A project site lives at /<repo>/, so every absolute URL has to
+          # carry that prefix or the stylesheet 404s and the nav goes nowhere.
+          SITE_BASE: /${{ github.event.repository.name }}/
+          SITE_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+
+      - name: Upload artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    name: Deploy to GitHub Pages
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
