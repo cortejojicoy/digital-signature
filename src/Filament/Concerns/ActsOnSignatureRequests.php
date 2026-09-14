@@ -62,6 +62,68 @@ trait ActsOnSignatureRequests
     }
 
     /**
+     * What this user has already signed, newest first, grouped by the day they
+     * signed it.
+     *
+     * A signed document does not stop being the signatory's business. They are
+     * the one whose certificate is on it, and "which of these did I actually
+     * sign, and when?" is a question they should be able to answer without
+     * asking whoever sent it. Grouping by day is what turns a list into a
+     * record: signing happens in bursts, and the date is the thing people
+     * actually remember.
+     *
+     * Read-only by construction — nothing here can act on a request, and the
+     * signing path refuses an already-signed slot regardless.
+     *
+     * @return array<int, array{label: string, date: string, requests: \Illuminate\Support\Collection<int, SignatureRequest>}>
+     */
+    public function getSignedHistoryProperty(): array
+    {
+        $userId = auth()->id();
+
+        if (! $userId) {
+            return [];
+        }
+
+        return SignatureRequest::query()
+            ->signedFor((int) $userId)
+            ->with(['session.signable'])
+            // Capped rather than paginated: this is a drawer, and a signatory
+            // looking for something older than their last fifty signatures
+            // wants a searchable page, not more scrolling.
+            ->limit(50)
+            ->get()
+            ->groupBy(fn (SignatureRequest $request): string => $this->signedOn($request)->toDateString())
+            ->map(fn ($requests, string $date): array => [
+                'date'     => $date,
+                'label'    => $this->dayLabel($this->signedOn($requests->first())),
+                'requests' => $requests,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * When a request was signed. `responded_at` is set at the moment of
+     * signing; `updated_at` is the fallback for rows written before that
+     * column existed, so history never silently drops a signature.
+     */
+    protected function signedOn(SignatureRequest $request): \Illuminate\Support\Carbon
+    {
+        return $request->responded_at ?? $request->updated_at ?? now();
+    }
+
+    protected function dayLabel(\Illuminate\Support\Carbon $moment): string
+    {
+        return match (true) {
+            $moment->isToday()     => 'Today',
+            $moment->isYesterday() => 'Yesterday',
+            $moment->isCurrentYear() => $moment->format('j F'),
+            default                => $moment->format('j F Y'),
+        };
+    }
+
+    /**
      * Sign one request. The signature is produced here, in the signatory's
      * own request — which is what makes this the safe default path.
      */
