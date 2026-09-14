@@ -11,23 +11,11 @@ describe('PdfSignerService', function () {
     beforeEach(function () {
         Storage::fake('testing');
 
-        // Put a minimal real PDF on the fake disk for FPDI to read
-        $minimalPdf = base64_decode(
-            'JVBERi0xLjQKMSAwIG9iago8PC9UeXBlIC9DYXRhbG9nIC9QYWdlcyAyIDAgUj4+CmVuZG9iagoy'
-            .'IDAgb2JqCjw8L1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDE+PgplbmRvYmoKMyAw'
-            .'IG9iago8PC9UeXBlIC9QYWdlIC9QYXJlbnQgMiAwIFIgL01lZGlhQm94IFswIDAgNjEyIDc5Ml0+'
-            .'PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4g'
-            .'CjAwMDAwMDAwNTYgMDAwMDAgbiAKMDAwMDAwMDExMSAwMDAwMCBuIAp0cmFpbGVyCjw8L1NpemUg'
-            .'NCAvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgoxODAKJSVFT0YK'
-        );
+        Storage::disk('testing')->put('docs/test.pdf', minimalPdf());
 
-        Storage::disk('testing')->put('docs/test.pdf', $minimalPdf);
-
-        // Put a 1×1 PNG signature image
-        $pngBytes = base64_decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=='
-        );
-        Storage::disk('testing')->put('signatures/test_sig.png', $pngBytes);
+        // An OPAQUE png — see stampablePng(). A transparent one sends TCPDF
+        // down ImagePngAlpha(), which fatals and silently kills the runner.
+        Storage::disk('testing')->put('signatures/test_sig.png', stampablePng());
 
         $this->service = new PdfSignerService(new FpdiDriver());
     });

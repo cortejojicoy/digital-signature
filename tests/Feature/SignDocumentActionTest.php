@@ -76,30 +76,33 @@ describe('SignDocumentAction', function () {
         $managerMock = Mockery::mock(SignatureManager::class);
         $documentSignature = new Signature(['id' => 99, 'status' => 'pending']);
 
-        $managerMock->shouldReceive('store')
+        // The action reuses an already-registered signature rather than
+        // storing a new image, so it calls storeForDocument() — not store().
+        $managerMock->shouldReceive('storeForDocument')
             ->once()
             ->withArgs(function (
-                int $userId,
-                string $input,
-                string $source,
+                Signature $source,
+                int $signerUserId,
                 Signable $signable,
-                ?array $position,
-                string $deviceFp,
-                string $signerName,
-                ?string $certificatePassword,
-            ) use ($user, $document) {
-                return $userId === $user->id
-                    && str_starts_with($input, 'data:image/png;base64,')
-                    && $source === 'upload'
+                ?array $position = null,
+                ?string $sourcePdfPath = null,
+                ?array $chain = null,
+            ) use ($user, $document, $storedSignature) {
+                return $source->is($storedSignature)
+                    && $signerUserId === $user->id
                     && $signable === $document
                     && $position === null
-                    && $deviceFp === ''
-                    && $signerName === 'Test User <test@example.com>'
-                    && $certificatePassword === 'secret';
+                    && $sourcePdfPath === null
+                    && $chain === null;
             })
             ->andReturn($documentSignature);
 
-        $managerMock->shouldReceive('embedAndFinalize')->once()->with($documentSignature, 'secret');
+        // Two arguments: the action signs the record's own PDF, so it leaves
+        // the optional session source-document path unset.
+        $managerMock->shouldReceive('embedAndFinalize')
+            ->once()
+            ->with($documentSignature, 'secret');
+
         $this->app->instance(SignatureManager::class, $managerMock);
 
         $action = SignDocumentAction::make();
