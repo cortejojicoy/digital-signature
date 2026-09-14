@@ -15,7 +15,9 @@ import { SlotBox } from './components/SlotBox.jsx';
  *    just a placeholder label — the user is placing a real signature
  *    on the document.
  *  - One global "Finish & Save" instead of per-slot save buttons.
- *  - Bottom strip lets users swap which signature is being placed.
+ *  - Bottom strip lets users swap which signature is being placed, and
+ *    doubles as the drag source: a signature is dragged out of it and
+ *    dropped where it belongs on the page.
  *
  * Coordinate spaces are the same as the designer:
  *   CSS pixels (UI) ↔ Image pixels (server raster) ↔ PDF points (saved).
@@ -38,6 +40,8 @@ function PdfSigningIsland({ el }) {
     const [slotRects, setSlotRects] = useState({});      // slotKey → {x,y,w,h}
     const [finishing, setFinishing] = useState(false);
     const [finishedAck, setFinishedAck] = useState(null);
+    const [dragging, setDragging] = useState(null);   // { sig, x, y } mid-drag
+    const [aspect, setAspect] = useState(null);       // natural w/h of activeSig
 
     const imgRef = useRef(null);
     const [displayed, setDisplayed] = useState({ width: 0, height: 0 });
@@ -82,6 +86,22 @@ function PdfSigningIsland({ el }) {
         }
         setSlotRects(next);
     }, [meta, activePage, displayed]);
+
+    // ── Natural aspect of the active signature ──────────────────────────────
+    //
+    // Fed to SlotBox so resizing holds the ratio. A stretched signature is a
+    // stamp that no longer matches the specimen on file — a defect in the
+    // document rather than in the layout.
+    useEffect(() => {
+        if (!activeSig?.previewUrl) { setAspect(null); return; }
+        let alive = true;
+        const img = new Image();
+        img.onload = () => {
+            if (alive && img.naturalHeight > 0) setAspect(img.naturalWidth / img.naturalHeight);
+        };
+        img.src = activeSig.previewUrl;
+        return () => { alive = false; };
+    }, [activeSig]);
 
     // ── Image sizing observer ────────────────────────────────────────────────
     useEffect(() => {
@@ -171,6 +191,100 @@ function PdfSigningIsland({ el }) {
         }));
         setSelectedSlot(slotKey);
     }, [meta, displayed, scaleX, scaleY]);
+
+    /**
+     * Which slot a drop at this point belongs to.
+     *
+     * Placement is slot-bound — `finalize` refuses a rectangle that does not
+     * name a declared slot — so a free drop still has to resolve to one. Where
+     * the template positions slots on this page, the nearest one wins; where it
+     * does not, the drop claims the next slot that has not been placed yet.
+     */
+    const slotForDrop = useCallback((localX, localY) => {
+        if (!meta || meta.slots.length === 0) return null;
+
+        const onThisPage = meta.slots.filter((s) => s.placement?.page === activePage);
+
+        if (onThisPage.length > 0) {
+            let best = null;
+            let bestDistance = Infinity;
+
+            for (const slot of onThisPage) {
+                const p = slot.placement;
+                const cx = (p.x + p.width  / 2) * scaleX;
+                const cy = displayed.height - (p.y + p.height / 2) * scaleY;
+                const d  = (cx - localX) ** 2 + (cy - localY) ** 2;
+                if (d < bestDistance) { bestDistance = d; best = slot; }
+            }
+
+            return best;
+        }
+
+        return meta.slots.find((s) => slotRects[s.key] === undefined) ?? meta.slots[0];
+    }, [meta, activePage, scaleX, scaleY, displayed, slotRects]);
+
+    // ── Dragging a signature out of the strip and onto the page ─────────────
+    //
+    // Pointer events rather than HTML5 drag-and-drop: SlotBox already drags
+    // with setPointerCapture, and one input model avoids the drag-image and
+    // touch gaps that come with mixing the two.
+
+    const beginTrayDrag = useCallback((sig, e) => {
+        e.preventDefault();
+        setActiveSig(sig);
+        setDragging({ sig, x: e.clientX, y: e.clientY, fromX: e.clientX, fromY: e.clientY });
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+    }, []);
+
+    const moveTrayDrag = useCallback((e) => {
+        setDragging((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
+    }, []);
+
+    const endTrayDrag = useCallback((e) => {
+        if (!dragging) return;
+        setDragging(null);
+
+        // A press that never moved is a click swapping which signature is
+        // active, not a drop onto the page.
+        if (!movedEnough(dragging, e)) return;
+
+        const img = imgRef.current;
+        if (!img) return;
+
+        const box = img.getBoundingClientRect();
+        const inside = e.clientX >= box.left && e.clientX <= box.right
+                    && e.clientY >= box.top  && e.clientY <= box.bottom;
+
+        if (!inside) return;
+
+        const localX = e.clientX - box.left;
+        const localY = e.clientY - box.top;
+        const slot   = slotForDrop(localX, localY);
+
+        if (!slot) {
+            setError('This template declares no signature slots, so there is nowhere to place a signature.');
+            return;
+        }
+
+        const width  = slot.placement?.width
+            ? slot.placement.width * scaleX
+            : Math.min(box.width * 0.25, 200);
+        const height = aspect ? width / aspect : (slot.placement?.height ? slot.placement.height * scaleY : 60);
+
+        // Centred on the pointer: the signature was under the cursor while
+        // dragging, so that is where the user believes they dropped it.
+        setSlotRects((s) => ({
+            ...s,
+            [slot.key]: {
+                x: clamp(localX - width  / 2, 0, box.width  - width),
+                y: clamp(localY - height / 2, 0, box.height - height),
+                width,
+                height,
+            },
+        }));
+        setSelectedSlot(slot.key);
+        setError(null);
+    }, [dragging, slotForDrop, scaleX, scaleY, aspect]);
 
     const removeSlot = useCallback((slotKey) => {
         setSlotRects((s) => {
@@ -328,6 +442,7 @@ function PdfSigningIsland({ el }) {
                                 canvasWidth={displayed.width}
                                 canvasHeight={displayed.height}
                                 backgroundImageUrl={activeSig?.previewUrl}
+                                aspect={aspect}
                                 onSelect={() => setSelectedSlot(slotKey)}
                                 onChange={(next) =>
                                     setSlotRects((s) => ({ ...s, [slotKey]: next }))
@@ -369,15 +484,22 @@ function PdfSigningIsland({ el }) {
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Your stored signatures
                 </div>
+                <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    Drag one onto the page, or use the slot buttons above. Drag a box's
+                    corner to resize it; hold Shift to distort.
+                </p>
                 <div className="flex flex-wrap items-center gap-3">
                     {/* Currently-active signature card */}
                     <SignatureChip
                         signature={meta.signature}
-                        active={true}
+                        active={activeSig?.uuid === meta.signature.uuid}
                         onSelect={() => setActiveSig({
                             uuid:       meta.signature.uuid,
                             previewUrl: meta.signature.previewUrl,
                         })}
+                        onDragStart={beginTrayDrag}
+                        onDragMove={moveTrayDrag}
+                        onDragEnd={endTrayDrag}
                     />
 
                     {meta.library.map((sig) => (
@@ -389,6 +511,9 @@ function PdfSigningIsland({ el }) {
                                 uuid:       sig.uuid,
                                 previewUrl: sig.previewUrl,
                             })}
+                            onDragStart={beginTrayDrag}
+                            onDragMove={moveTrayDrag}
+                            onDragEnd={endTrayDrag}
                         />
                     ))}
 
@@ -399,15 +524,40 @@ function PdfSigningIsland({ el }) {
                     )}
                 </div>
             </div>
+
+            {/* What follows the cursor while a signature is being dragged. */}
+            {dragging && (
+                <img
+                    src={dragging.sig.previewUrl}
+                    alt=""
+                    draggable={false}
+                    style={{
+                        position: 'fixed',
+                        left: `${dragging.x}px`,
+                        top:  `${dragging.y}px`,
+                        width: '7rem',
+                        transform: 'translate(-50%, -50%)',
+                        opacity: 0.85,
+                        pointerEvents: 'none',
+                        zIndex: 2147483647,
+                        filter: 'drop-shadow(0 4px 6px rgb(0 0 0 / 0.3))',
+                    }}
+                />
+            )}
         </div>
     );
 }
 
-function SignatureChip({ signature, active, onSelect }) {
+function SignatureChip({ signature, active, onSelect, onDragStart, onDragMove, onDragEnd }) {
     return (
         <button
             type="button"
             onClick={onSelect}
+            onPointerDown={(e) => onDragStart?.(signature, e)}
+            onPointerMove={onDragMove}
+            onPointerUp={onDragEnd}
+            onPointerCancel={onDragEnd}
+            style={{ cursor: 'grab', touchAction: 'none' }}
             className={
                 'flex h-16 w-24 items-center justify-center overflow-hidden rounded-lg border-2 bg-white p-1 transition dark:bg-white/5 ' +
                 (active
@@ -437,6 +587,16 @@ function ErrorPanel({ message }) {
             {message}
         </div>
     );
+}
+
+/** Did this press travel far enough to be a drag rather than a click? */
+function movedEnough(drag, e, threshold = 6) {
+    return Math.abs(e.clientX - drag.fromX) > threshold
+        || Math.abs(e.clientY - drag.fromY) > threshold;
+}
+
+function clamp(n, min, max) {
+    return Math.min(Math.max(n, min), Math.max(min, max));
 }
 
 function round2(n) {
