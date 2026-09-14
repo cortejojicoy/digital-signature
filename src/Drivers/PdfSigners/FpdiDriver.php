@@ -34,6 +34,7 @@ class FpdiDriver implements PdfSignerDriver
         string $reason = 'Approved',
         string $qrPayload = '',
         array  $caption = [],
+        array  $extraPositions = [],
     ): string {
         $disk   = Storage::disk(config('signature.storage_disk'));
         $inPath = $disk->path($pdfPath);
@@ -52,6 +53,11 @@ class FpdiDriver implements PdfSignerDriver
         // exists; there is never a reason for one to spill onto a new page.
         $pdf->SetAutoPageBreak(false);
 
+        // One signature, however many appearances. The first is the primary —
+        // it is the one the QR sits beside, because a document with a barcode
+        // against every stamp is noise rather than provenance.
+        $stamps = array_merge([$position], array_values($extraPositions));
+
         $count = $pdf->setSourceFile($inPath);
 
         for ($i = 1; $i <= $count; $i++) {
@@ -60,12 +66,15 @@ class FpdiDriver implements PdfSignerDriver
             $pdf->AddPage($sz['orientation'], [$sz['width'], $sz['height']]);
             $pdf->useTemplate($tpl);
 
-            // Stamp the visible signature image on the designated page
-            if ($i === ($position['page'] ?? 1)) {
-                $sigX = $position['x']      ?? 20;
-                $sigY = $position['y']      ?? 250;
-                $sigW = $position['width']  ?? 60;
-                $sigH = $position['height'] ?? 20;
+            foreach ($stamps as $index => $stamp) {
+                if ($i !== ($stamp['page'] ?? 1)) {
+                    continue;
+                }
+
+                $sigX = $stamp['x']      ?? 20;
+                $sigY = $stamp['y']      ?? 250;
+                $sigW = $stamp['width']  ?? 60;
+                $sigH = $stamp['height'] ?? 20;
 
                 // Placements are PDF-native: y is the BOTTOM edge measured from
                 // the BOTTOM of the page. TCPDF draws from the top-left corner,
@@ -88,9 +97,12 @@ class FpdiDriver implements PdfSignerDriver
                     'PNG',
                 );
 
+                // Under every stamp, not just the first: each appearance has
+                // to say for itself who signed and when, or the ones further
+                // down the document are unattributed marks.
                 $this->drawCaption($pdf, $captionLayout, $sigX, $topY + $imageH, $sigW);
 
-                if ($qrPayload !== '') {
+                if ($index === 0 && $qrPayload !== '') {
                     $qrSize = $sigH;
                     $qrX    = $sigX + $sigW + 2;
                     $qrY    = $topY;
