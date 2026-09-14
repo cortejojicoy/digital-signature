@@ -89,6 +89,15 @@ class PdfSignerService
         ));
     }
 
+    /**
+     * What the QR resolves to when somebody scans the printed page.
+     *
+     * A URL, not a block of text. The previous payload was four labelled lines
+     * including a `Verify:` address that pointed at a route this package never
+     * registered — so scanning it produced a wall of text and a dead link. A
+     * bare URL opens the verification page, which is the only form of "scan
+     * this to check the signature" that actually checks anything.
+     */
     private function buildQrPayload(Signature $signature): string
     {
         // Opt-out: the QR is drawn immediately to the right of the signature,
@@ -100,20 +109,13 @@ class PdfSignerService
             return '';
         }
 
-        $signer = $signature->user;
-        $appUrl = rtrim((string) config('app.url'), '/');
-
-        $lines = [
-            'App: '.config('app.name'),
-            'Signer: '.($signer?->name ?? 'Unknown').' <'.($signer?->email ?? '').'>',
-            'Signature: '.$signature->uuid,
-            'Signed: '.now()->toIso8601String(),
-        ];
-
-        if ($appUrl !== '') {
-            $lines[] = 'Verify: '.$appUrl.'/signatures/'.$signature->uuid;
+        try {
+            return route('signature.verify', ['uuid' => $signature->uuid]);
+        } catch (\Throwable) {
+            // Route not registered — a host that disabled the package's routes,
+            // or a unit test booting the service alone. No QR is better than
+            // one that leads nowhere.
+            return '';
         }
-
-        return implode("\n", $lines);
     }
 }
