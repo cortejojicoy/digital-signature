@@ -145,6 +145,20 @@ return [
         'align'          => env('SIGNATURE_CAPTION_ALIGN', 'C'),
         'line_height'    => env('SIGNATURE_CAPTION_LINE_HEIGHT', 1.06),
 
+        /*
+        | Which side of the stamp the caption sits on: bottom, top, left or
+        | right. The default for new placements; a signatory can move it per
+        | signature while positioning, because a form dictates it — a signature
+        | line with the printed name already underneath has no room below and
+        | plenty beside it.
+        |
+        | width_ratio / min_box_width apply to the left and right positions,
+        | where the constraint is horizontal rather than vertical.
+        */
+        'position'       => env('SIGNATURE_CAPTION_POSITION', 'bottom'),
+        'width_ratio'    => env('SIGNATURE_CAPTION_WIDTH_RATIO', 0.42),
+        'min_box_width'  => env('SIGNATURE_CAPTION_MIN_BOX_WIDTH', 110),
+
         'height_ratio'   => env('SIGNATURE_CAPTION_HEIGHT_RATIO', 0.38),
         'min_box_height' => env('SIGNATURE_CAPTION_MIN_BOX_HEIGHT', 28),
         'max_font_pt'    => env('SIGNATURE_CAPTION_MAX_FONT', 6),
