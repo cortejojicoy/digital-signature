@@ -203,6 +203,69 @@ class SigningSessionManager
     }
 
     /**
+     * Sign after nudging the stamp to where the signatory actually put it.
+     *
+     * The placement is written to the request's own row and nowhere else: a
+     * signatory may move their signature inside the document, but they cannot
+     * move it into somebody else's slot, sign a different request, or change
+     * the order — `sign()` still runs every one of those checks afterwards on
+     * the reloaded model. Position is the only thing this adds.
+     *
+     * It exists as one method because three surfaces need it — the drawer, the
+     * full-page inbox, and the template signer's finalize endpoint — and three
+     * copies of "update the row, then sign" is three chances for one of them to
+     * forget the ownership reload.
+     *
+     * @param  array{page?:mixed,x?:mixed,y?:mixed,width?:mixed,height?:mixed}|null  $placement
+     *         PDF points, y measured from the bottom of the page. Null keeps
+     *         the placement frozen at request time.
+     */
+    public function signAt(
+        SignatureRequest $request,
+        int $actorUserId,
+        ?array $placement = null,
+        ?Signature $useSignature = null,
+        ?string $password = null,
+    ): Signature {
+        if ($placement !== null) {
+            // Guard before writing rather than after: sign() re-reads the row,
+            // so a half-applied placement would be committed even if the
+            // signature itself then failed.
+            if ((int) $request->user_id !== $actorUserId) {
+                throw new ForgedSignatureException(
+                    'This signature request is assigned to a different user.'
+                );
+            }
+
+            $request->update($this->normalisePlacement($placement));
+            $request = $request->fresh();
+        }
+
+        return $this->sign($request, $actorUserId, $useSignature, $password);
+    }
+
+    /**
+     * Coerce a submitted placement into the columns the request stores.
+     *
+     * Only the five geometry keys survive — the rest of the payload is a
+     * signatory's to send and not a signatory's to decide, and `$fillable`
+     * alone would still let `state` or `signature_id` through.
+     *
+     * @param  array<string, mixed>  $placement
+     * @return array{page:int,x:float,y:float,width:float,height:float}
+     */
+    protected function normalisePlacement(array $placement): array
+    {
+        return [
+            'page'   => max(1, (int) ($placement['page'] ?? 1)),
+            'x'      => max(0.0, (float) ($placement['x'] ?? 0)),
+            'y'      => max(0.0, (float) ($placement['y'] ?? 0)),
+            'width'  => max(1.0, (float) ($placement['width'] ?? 0)),
+            'height' => max(1.0, (float) ($placement['height'] ?? 0)),
+        ];
+    }
+
+    /**
      * Shared signing body for both the in-person and delegated paths.
      *
      * Kept internal so the ownership rules stay at the entry points: sign()
