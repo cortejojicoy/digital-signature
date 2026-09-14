@@ -361,12 +361,44 @@ describe('signature request document endpoints', function () {
             ->assertStatus(403);
     });
 
-    it('refuses the same slot placed twice', function () {
+    it('stamps one signature in several places on the same slot', function () {
+        // A form asks the same person for the same signature more than once —
+        // the signature block, then again under a certificate, then on an
+        // acceptance clause. That is one act of signing with several
+        // appearances, not several signatures.
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90,  'width' => 160, 'height' => 50],
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 300, 'width' => 160, 'height' => 50],
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 500, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertOk()
+            // One signature...
+            ->assertJsonCount(1, 'signed')
+            // ...drawn three times.
+            ->assertJsonPath('signed.0.stamps', 3);
+
+        $signature = Signature::where('slot_key', 'prepared_by')
+            ->whereNotNull('signing_session_id')
+            ->firstOrFail();
+
+        // One row, one PKCS#7 block, one link in the chain — three placements.
+        expect($signature->positions)->toHaveCount(3)
+            ->and($signature->positions->pluck('y')->all())->toBe([90.0, 300.0, 500.0])
+            ->and(Signature::where('slot_key', 'prepared_by')
+                ->whereNotNull('signing_session_id')->count())->toBe(1);
+    });
+
+    it('needs coordinates for a repeated placement', function () {
+        // The first placement may be omitted to mean "use the frozen slot";
+        // a second one has no such default to fall back on.
         $this->actingAs(TestUser::find(11))
             ->postJson("/signature/requests/{$this->prepared->id}/sign", [
                 'placements' => [
                     ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
-                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 200, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $this->prepared->id],
                 ],
             ])
             ->assertStatus(422);
