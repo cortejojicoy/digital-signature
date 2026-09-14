@@ -10,6 +10,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *
  * Resize handle is the bottom-right corner only. Plenty for placement;
  * a full eight-handle rig is more weight than the use case justifies.
+ *
+ * When `aspect` is given, resizing preserves it unless the user holds Shift.
+ * A signature is a picture of someone's handwriting: stretching it produces a
+ * stamp that does not match the specimen on file, which is a problem with the
+ * document rather than with the layout. So the ratio is kept by default and
+ * distorting it has to be asked for.
  */
 export function SlotBox({
     slotKey,
@@ -25,6 +31,8 @@ export function SlotBox({
     backgroundImageUrl,   // optional — when set, renders the image inside
                           //            the box (used by the signer flow to
                           //            preview the placed signature)
+    aspect,               // optional width/height ratio to hold while resizing;
+                          //          Shift overrides it for one drag
 }) {
     const ref = useRef(null);
     const [mode, setMode] = useState(null);   // 'drag' | 'resize' | null
@@ -73,12 +81,35 @@ export function SlotBox({
             };
         } else {
             // resize from bottom-right
-            const newWidth  = clamp(r.width  + dx, minSize, canvasWidth  - r.x);
-            const newHeight = clamp(r.height + dy, minSize, canvasHeight - r.y);
+            let newWidth  = clamp(r.width  + dx, minSize, canvasWidth  - r.x);
+            let newHeight = clamp(r.height + dy, minSize, canvasHeight - r.y);
+
+            if (aspect && aspect > 0 && !e.shiftKey) {
+                // Drive the ratio from whichever axis the pointer moved more,
+                // so a mostly-horizontal drag doesn't feel like it is fighting
+                // a vertical correction. Re-clamp after: holding the ratio can
+                // push the other axis back outside the canvas.
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    newHeight = newWidth / aspect;
+                } else {
+                    newWidth = newHeight * aspect;
+                }
+
+                const maxWidth  = canvasWidth  - r.x;
+                const maxHeight = canvasHeight - r.y;
+                const overflow  = Math.max(newWidth / maxWidth, newHeight / maxHeight, 1);
+                newWidth  /= overflow;
+                newHeight /= overflow;
+
+                const shortfall = Math.max(minSize / newWidth, minSize / newHeight, 1);
+                newWidth  *= shortfall;
+                newHeight *= shortfall;
+            }
+
             next = { x: r.x, y: r.y, width: newWidth, height: newHeight };
         }
         onChange?.(next);
-    }, [mode, canvasWidth, canvasHeight, minSize, onChange]);
+    }, [mode, canvasWidth, canvasHeight, minSize, onChange, aspect]);
 
     const endInteraction = useCallback((e) => {
         if (!mode) return;
