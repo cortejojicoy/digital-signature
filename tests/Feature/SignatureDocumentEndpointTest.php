@@ -63,10 +63,15 @@ describe('signature request document endpoints', function () {
         $manager->shouldReceive('embedAndFinalize')
             ->andReturnUsing(function (Signature $sig, string $pw, ?string $source = null) {
                 $out = 'signed-docs/sig-'.$sig->id.'.pdf';
-                Storage::disk('testing')->put($out, 'signed');
+                // The bytes and the recorded hash have to agree, or the chain
+                // assertions below compare a real hash of the file against a
+                // fabricated one and fail for reasons that say nothing about
+                // the code under test.
+                $body = 'signed-pdf-'.$sig->id;
+                Storage::disk('testing')->put($out, $body);
                 $sig->update([
                     'signed_document_path' => $out,
-                    'signed_document_hash' => hash('sha256', 'signed-'.$sig->id),
+                    'signed_document_hash' => hash('sha256', $body),
                     'status'               => 'signed',
                     'signed_at'            => now(),
                 ]);
@@ -88,12 +93,13 @@ describe('signature request document endpoints', function () {
         $this->actingAs(TestUser::find(11))
             ->getJson("/signature/requests/{$this->prepared->id}/meta")
             ->assertOk()
-            ->assertJsonPath('request.slot', 'prepared_by')
-            ->assertJsonPath('request.blocked', false)
+            ->assertJsonPath('opened', $this->prepared->id)
+            ->assertJsonPath('requests.0.slot', 'prepared_by')
+            ->assertJsonPath('requests.0.blocked', false)
             // The frozen placement, so the box opens where the administrator
             // positioned the slot rather than somewhere arbitrary.
-            ->assertJsonPath('request.placement.x', 100)
-            ->assertJsonPath('request.placement.page', 1)
+            ->assertJsonPath('requests.0.placement.x', 100)
+            ->assertJsonPath('requests.0.placement.page', 1)
             ->assertJsonPath('signatures.0.id', $this->juanSig->id);
     });
 
@@ -101,7 +107,18 @@ describe('signature request document endpoints', function () {
         $this->actingAs(TestUser::find(12))
             ->getJson("/signature/requests/{$this->attested->id}/meta")
             ->assertOk()
-            ->assertJsonPath('request.blocked', true);
+            ->assertJsonPath('requests.0.blocked', true);
+    });
+
+    it('lists only this signatory’s own slots, never the other signatory’s', function () {
+        // Juan is on one slot here; Maria's must not appear in his payload,
+        // or the client would offer him somewhere to place a signature he is
+        // not entitled to put there.
+        $this->actingAs(TestUser::find(11))
+            ->getJson("/signature/requests/{$this->prepared->id}/meta")
+            ->assertOk()
+            ->assertJsonCount(1, 'requests')
+            ->assertJsonPath('requests.0.id', $this->prepared->id);
     });
 
     it('streams the PDF to its own signatory', function () {
@@ -215,6 +232,137 @@ describe('signature request document endpoints', function () {
                 'error',
                 'This document is signed in order — "prepared_by" must be signed before "attested_by".',
             );
+    });
+
+    // ── Several slots at once ────────────────────────────────────────────────
+    //
+    // The same person being two signatories on one form is routine — "Prepared
+    // by" and "Noted by" on an accomplishment report, say. Each signature is
+    // still its own record, chained to the one before it; the batch only saves
+    // the signatory from opening the document twice.
+
+    it('places and signs several of its own slots in one call', function () {
+        // Re-route the report so Juan holds both slots.
+        $this->report->update(['attested_by_id' => 11]);
+        app(SigningSessionManager::class)->refreshAssignments($this->session);
+
+        $prepared = $this->prepared->fresh();
+        $attested = $this->attested->fresh();
+
+        expect($attested->user_id)->toBe(11);
+
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $attested->id, 'page' => 1, 'x' => 300, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('status', 'signed')
+            ->assertJsonCount(2, 'signed')
+            // Applied in sequence order regardless of payload order — each
+            // signature chains onto the previous one's document.
+            ->assertJsonPath('signed.0.slot', 'prepared_by')
+            ->assertJsonPath('signed.1.slot', 'attested_by')
+            ->assertJsonPath('outstanding', 0);
+
+        expect($prepared->fresh()->state)->toBe(RouteState::Signed)
+            ->and($attested->fresh()->state)->toBe(RouteState::Signed);
+    });
+
+    it('chains the second signature onto the first one’s document', function () {
+        $this->report->update(['attested_by_id' => 11]);
+        app(SigningSessionManager::class)->refreshAssignments($this->session);
+
+        $attested = $this->attested->fresh();
+
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $attested->id,       'page' => 1, 'x' => 300, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertOk();
+
+        $first  = Signature::where('slot_key', 'prepared_by')->whereNotNull('signing_session_id')->first();
+        $second = Signature::where('slot_key', 'attested_by')->whereNotNull('signing_session_id')->first();
+
+        // The chain is the point: without it the second stamp would be applied
+        // to a document that does not contain the first.
+        expect($second->parent_signature_id)->toBe($first->id)
+            ->and($second->document_hash)->toBe($first->signed_document_hash);
+    });
+
+    it('refuses to batch a slot belonging to somebody else', function () {
+        // Juan holds prepared_by; attested_by is Maria's. Holding one request
+        // id must not become a licence to sign the other.
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $this->attested->id, 'page' => 1, 'x' => 300, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertStatus(403);
+
+        // Nothing was applied: the batch is resolved in full before any of it
+        // is signed, so an unauthorised entry stops the whole call.
+        expect($this->prepared->fresh()->state)->not->toBe(RouteState::Signed);
+    });
+
+    it('refuses a slot from a different document', function () {
+        $other = AccomplishmentReport::create(['prepared_by_id' => 11, 'attested_by_id' => 12]);
+        $otherSession = app(SigningSessionManager::class)->open($other);
+        $otherRequest = $otherSession->requests->firstWhere('slot_key', 'prepared_by');
+
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $otherRequest->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertStatus(403);
+    });
+
+    it('refuses the same slot placed twice', function () {
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 200, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ])
+            ->assertStatus(422);
+    });
+
+    it('reports how far a partly-successful batch got', function () {
+        // Juan takes both slots, but the session is sequential and the second
+        // one is made unsignable by declining it first.
+        $this->report->update(['attested_by_id' => 11]);
+        app(SigningSessionManager::class)->refreshAssignments($this->session);
+
+        $attested = $this->attested->fresh();
+        app(SigningSessionManager::class)->decline($attested, 11, 'not mine to sign');
+
+        $response = $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'placements' => [
+                    ['request_id' => $this->prepared->id, 'page' => 1, 'x' => 100, 'y' => 90, 'width' => 160, 'height' => 50],
+                    ['request_id' => $attested->id,       'page' => 1, 'x' => 300, 'y' => 90, 'width' => 160, 'height' => 50],
+                ],
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'partial')
+            ->assertJsonCount(1, 'signed')
+            ->assertJsonPath('signed.0.slot', 'prepared_by')
+            ->assertJsonPath('failed_on.slot', 'attested_by');
+
+        // A signature that happened stays happened — there is no honest way to
+        // un-sign a PDF somebody already put a certificate on.
+        expect($this->prepared->fresh()->state)->toBe(RouteState::Signed);
     });
 
     it('rejects a placement that is not a usable rectangle', function () {

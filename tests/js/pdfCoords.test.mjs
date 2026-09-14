@@ -105,6 +105,46 @@ test('round-trips a frozen placement back to the same rectangle', () => {
     near(again.height, placement.height, 0.01, 'height');
 });
 
+test('a placement stored in points survives a zoom change', () => {
+    // The bug this guards: placements were once held in CSS pixels, so zooming
+    // left the box behind and committed the signature somewhere the signatory
+    // had not put it. Points are the only space that does not move.
+    const placement = { x: 100, y: 591.89, width: 160, height: 50 };
+
+    for (const zoom of [0.5, 1, 1.4, 2.5]) {
+        const box  = { width: A4.widthPt * zoom, height: A4.heightPt * zoom };
+        const rect = pdfPointsToCssRect(placement, A4, box);
+
+        // Rendered position scales with the zoom...
+        near(rect.x, 100 * zoom, 0.01, `x at ${zoom}x`);
+        near(rect.width, 160 * zoom, 0.01, `width at ${zoom}x`);
+
+        // ...but what would be committed does not move at all.
+        const committed = cssRectToPdfPoints(rect, A4, box);
+        near(committed.x, placement.x, 0.01, `committed x at ${zoom}x`);
+        near(committed.y, placement.y, 0.01, `committed y at ${zoom}x`);
+        near(committed.width, placement.width, 0.01, `committed width at ${zoom}x`);
+        near(committed.height, placement.height, 0.01, `committed height at ${zoom}x`);
+    }
+});
+
+test('places two slots on one page independently', () => {
+    // Several placements share a page and a scale; nothing about converting one
+    // may depend on the others.
+    const box = { width: A4.widthPt * 1.5, height: A4.heightPt * 1.5 };
+
+    const prepared = { x: 100, y: 90, width: 160, height: 50 };
+    const noted    = { x: 300, y: 90, width: 160, height: 50 };
+
+    const back = [prepared, noted]
+        .map((p) => pdfPointsToCssRect(p, A4, box))
+        .map((rect) => cssRectToPdfPoints(rect, A4, box));
+
+    near(back[0].x, 100, 0.01, 'prepared x');
+    near(back[1].x, 300, 0.01, 'noted x');
+    assert.notEqual(back[0].x, back[1].x);
+});
+
 test('keeps a landscape page from borrowing the wrong axis', () => {
     const landscape = { widthPt: 841.89, heightPt: 595.28 };
     const box = { width: landscape.widthPt, height: landscape.heightPt };
