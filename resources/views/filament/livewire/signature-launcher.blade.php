@@ -931,15 +931,16 @@
             </div>
         </div>
 
-        @if ($this->inboxUrl || $this->libraryUrl)
+        {{--
+            No link to the full-page inbox. The drawer is the queue now — it
+            reads the document, places the signature and keeps the history —
+            so a second door to the same room was offering a worse version of
+            what the user is already looking at. The page stays routable for
+            hosts that want it in their navigation.
+        --}}
+        @if ($this->libraryUrl)
             <div class="dsig-panel__foot" x-show="! viewing">
-                @if ($this->inboxUrl)
-                    <a href="{{ $this->inboxUrl }}">Open full inbox</a>
-                @endif
-
-                @if ($this->libraryUrl)
-                    <a href="{{ $this->libraryUrl }}">Manage signatures</a>
-                @endif
+                <a href="{{ $this->libraryUrl }}">Manage signatures</a>
             </div>
         @endif
     </div>
