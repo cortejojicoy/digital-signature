@@ -344,6 +344,43 @@ when a viewer opens. esbuild's IIFE output cannot code-split, so
 bundle is unchanged in size. The worker is copied verbatim rather than bundled,
 because pdf.js always instantiates it with `{ type: 'module' }`.
 
+### Added after the first pass: several slots at once
+
+The same person is routinely two signatories on one form — "Prepared by" and
+"Noted by" on an accomplishment report. The first implementation opened one
+request per viewer, so that meant opening the same document twice.
+
+- `meta` now returns **every** outstanding slot this signatory holds *in that
+  session*, not just the one in the URL. Scoped to the session because a
+  request from another document has nowhere to land on this page.
+- `sign` accepts a `placements[]` array. Each entry is re-resolved through the
+  same ownership query as the opened request and pinned to the same session, so
+  holding one request id is never a licence to sign a second.
+- Placements are applied in **sequence order, not payload order**: each
+  signature is chained to the one before it and applied to the session's
+  running document, which is the existing multi-signatory mechanism rather than
+  a new one. `PdfSignerService` still stamps one image per call; nothing about
+  the cryptographic pipeline changed.
+- A batch that fails partway returns `status: "partial"` with what was signed
+  and what it failed on. There is no honest way to un-sign a PDF somebody
+  already put a certificate on, so the response says how far it got rather than
+  implying the whole batch was rejected.
+- `blocked` no longer counts the signatory's *own* earlier slot as a blocker —
+  they can clear it themselves in the same batch. `assertInSequence()` still
+  enforces ordering for real at signing time.
+
+### Two bugs fixed in the drag surface
+
+**Zoom moved the signature.** Placements were held in CSS pixels, so zooming
+re-rendered the page at a new scale while the box stayed put — committing the
+signature somewhere the signatory had not placed it. Placements are now stored
+in PDF points and converted to CSS per render. `tests/js/pdfCoords.test.mjs`
+covers the invariant directly.
+
+**Removing a box sprang it back.** The seeding effect depended on the placement
+state it was seeding, so clearing a placement immediately re-seeded it from the
+frozen slot. Seeding now happens once, guarded by a ref.
+
 ### Still outstanding
 
 The **full-page inbox still has the blind `Sign` button**. §1 says the page
@@ -361,4 +398,5 @@ redirecting it into the drawer; neither is in this plan's scope.
 - `tests/Feature/SignatureLauncherTest.php` — drawer width from config, the
   tabs, drawer-side signature registration, and that no blind `Sign` survives.
 - `tests/js/pdfCoords.test.mjs` — the CSS-px ⇄ PDF-point conversion on A4,
-  landscape, and at render scales either side of 1:1.
+  landscape, at render scales either side of 1:1, and the zoom invariance that
+  the CSS-pixel bug violated.
