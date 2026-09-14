@@ -57,6 +57,9 @@ const MARK = '\u0000';
  */
 export function renderMarkdown(source, options = {}) {
     const rewrite = options.rewriteLink ?? ((href) => href);
+    // Injected rather than imported, so this module stays a plain Markdown
+    // renderer that can be tested without the site's code chrome.
+    const renderCode = options.renderCode ?? defaultCodeBlock;
     const lines = String(source).replace(/\r\n?/g, '\n').split('\n');
 
     const out = [];
@@ -77,8 +80,7 @@ export function renderMarkdown(source, options = {}) {
             i++;
             while (i < lines.length && !/^```\s*$/.test(lines[i])) body.push(lines[i++]);
             i++;   // closing fence
-            const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
-            out.push(`<pre><code${cls}>${escapeHtml(body.join('\n'))}</code></pre>`);
+            out.push(renderCode(body.join('\n'), lang));
             continue;
         }
 
@@ -139,7 +141,7 @@ export function renderMarkdown(source, options = {}) {
 
         // -- Lists --------------------------------------------------------
         if (isListItem(line)) {
-            const [html, next] = renderList(lines, i, inline);
+            const [html, next] = renderList(lines, i, options, inline);
             out.push(html);
             i = next;
             continue;
@@ -171,6 +173,12 @@ export function renderMarkdown(source, options = {}) {
     return { html: out.join('\n'), headings, title };
 }
 
+function defaultCodeBlock(code, lang) {
+    const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
+
+    return `<pre><code${cls}>${escapeHtml(code)}</code></pre>`;
+}
+
 // -- Lists -------------------------------------------------------------------
 
 const LIST_ITEM = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
@@ -180,12 +188,19 @@ function isListItem(line) {
 }
 
 /**
- * One list, and any list nested directly inside it.
+ * One list, and everything belonging to its items.
  *
- * Indentation decides nesting: an item indented further than the one that
- * opened the list starts a child list, which is the only shape these docs use.
+ * An item is not just its first line. Anything indented past the marker is
+ * part of it — a nested list, a fenced block, a second paragraph, a
+ * blockquote — and that content is rendered as blocks rather than flattened
+ * into the item's text.
+ *
+ * The flattening is what this replaced. An indented quote inside a numbered
+ * step came out as one run-on paragraph with literal ">" characters in it,
+ * which is exactly the kind of thing nobody notices in a diff and everybody
+ * notices on the page.
  */
-function renderList(lines, start, inline) {
+function renderList(lines, start, options, inline) {
     const first = lines[start].match(LIST_ITEM);
     const baseIndent = first[1].length;
     const ordered = /\d/.test(first[2]);
@@ -197,23 +212,34 @@ function renderList(lines, start, inline) {
         const line = lines[i];
         const match = line.match(LIST_ITEM);
 
+        // A sibling item. A change of kind — bullets to numbers — ends the
+        // list rather than continuing it in the wrong element.
         if (match && match[1].length === baseIndent) {
             if (/\d/.test(match[2]) !== ordered) break;
-            items.push({ text: [match[3]], children: [] });
+            items.push([match[3]]);
             i++;
             continue;
         }
 
-        if (match && match[1].length > baseIndent && items.length > 0) {
-            const [html, next] = renderList(lines, i, inline);
-            items[items.length - 1].children.push(html);
-            i = next;
+        if (items.length === 0) break;
+
+        // A blank line belongs to the item only when indented content follows
+        // it. Otherwise it is the end of the list.
+        if (line.trim() === '') {
+            const next = lines[i + 1];
+            const continues = next !== undefined
+                && (/^\s{2,}\S/.test(next)
+                    || (next.match(LIST_ITEM)?.[1].length ?? -1) === baseIndent);
+
+            if (!continues) break;
+
+            items[items.length - 1].push('');
+            i++;
             continue;
         }
 
-        // A continuation line: wrapped prose belonging to the current item.
-        if (items.length > 0 && line.trim() !== '' && /^\s{2,}/.test(line) && !match) {
-            items[items.length - 1].text.push(line.trim());
+        if (/^\s{2,}\S/.test(line)) {
+            items[items.length - 1].push(line);
             i++;
             continue;
         }
@@ -222,11 +248,34 @@ function renderList(lines, start, inline) {
     }
 
     const tag = ordered ? 'ol' : 'ul';
-    const body = items
-        .map((item) => `<li>${inline(item.text.join(' '))}${item.children.join('')}</li>`)
-        .join('');
+    const body = items.map((raw) => `<li>${renderItem(raw, options, inline)}</li>`).join('');
 
     return [`<${tag}>${body}</${tag}>`, i];
+}
+
+/**
+ * One item's contents.
+ *
+ * Prose that merely wrapped stays inline, so an ordinary list renders tight.
+ * An item carrying actual blocks goes through the full renderer, which is what
+ * makes a quote or a code sample inside a step work.
+ */
+function renderItem(raw, options, inline) {
+    if (raw.length === 1) return inline(raw[0]);
+
+    const rest = raw.slice(1);
+    const indents = rest.filter((l) => l.trim() !== '').map((l) => l.match(/^\s*/)[0].length);
+    const dedent = indents.length > 0 ? Math.min(...indents) : 0;
+    const tail = rest.map((l) => l.slice(dedent));
+
+    const hasBlocks = tail.some((l) => /^(>|```|[-*+]\s|\d+\.\s)/.test(l))
+        || tail.some((l, n) => l.trim() === '' && tail.slice(n + 1).some((m) => m.trim() !== ''));
+
+    if (!hasBlocks) {
+        return inline([raw[0], ...tail.map((l) => l.trim())].join(' ').trim());
+    }
+
+    return renderMarkdown([raw[0], ...tail].join('\n'), options).html;
 }
 
 // -- Inline ------------------------------------------------------------------

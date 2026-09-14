@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderMarkdown, escapeHtml, stripInline } from './markdown.mjs';
+import { renderCodeBlock } from './highlight.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DOCS = join(ROOT, 'docs');
@@ -125,6 +126,7 @@ async function build() {
         const source = await readFile(join(DOCS, page.file), 'utf8');
         const { html, headings, title } = renderMarkdown(source, {
             rewriteLink: (href) => rewriteLink(href, page, pages),
+            renderCode: renderCodeBlock,
         });
 
         const heading = title ?? page.label;
@@ -537,10 +539,18 @@ a { color: var(--accent); }
 .prose h3 { font-size: 1.05rem; margin: 1.8rem 0 .6rem; }
 .prose h4 { font-size: .95rem; margin: 1.4rem 0 .5rem; color: var(--muted); }
 .prose p { margin: 0 0 1rem; }
+/* An item carrying real blocks renders as paragraphs; without this the list
+   loosens up and stops looking like a list. */
+.prose li > p { margin: 0 0 .5rem; }
+.prose li > p:last-child { margin-bottom: 0; }
+.prose li > blockquote { margin: .5rem 0; }
 .prose ul, .prose ol { margin: 0 0 1rem; padding-left: 1.3rem; }
 .prose li { margin: .25rem 0; }
 .prose li > ul, .prose li > ol { margin: .25rem 0 .25rem; }
 .prose hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }
+/* These documents put a rule before most section headings, and h2 draws its
+   own. Left alone that is two lines a few pixels apart. */
+.prose hr + h2 { border-top: 0; padding-top: 0; margin-top: 1.5rem; }
 .prose blockquote {
   margin: 0 0 1rem; padding: .1rem 1rem; border-left: 3px solid var(--accent);
   color: var(--muted);
@@ -555,6 +565,108 @@ a { color: var(--accent); }
   padding: .9rem 1rem; overflow-x: auto; margin: 0 0 1.2rem;
 }
 .prose pre code { background: none; padding: 0; font-size: .82rem; line-height: 1.6; }
+
+/* --------------------------------------------------------------------------
+   Code frames
+   --------------------------------------------------------------------------
+   Dark in both site themes, deliberately. An editor is dark in most people's
+   editors, and a code block that inverts with the page reads as part of the
+   prose rather than as something you are about to paste into a file.
+
+   Colours are VS Code's Dark+ palette, because matching the editor a reader
+   already has open is the whole point of the exercise.
+*/
+.code {
+  --ed-bg: #1e1e1e;
+  --ed-bar: #252526;
+  --ed-fg: #d4d4d4;
+  --ed-line: rgba(255,255,255,.08);
+  --ed-gutter: #6e7681;
+
+  margin: 0 0 1.3rem; border-radius: .6rem; overflow: hidden;
+  border: 1px solid var(--ed-line); background: var(--ed-bg);
+  box-shadow: 0 6px 20px -12px rgba(0,0,0,.55);
+}
+.code__bar {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .4rem .75rem; background: var(--ed-bar);
+  border-bottom: 1px solid var(--ed-line);
+  font-size: .72rem; letter-spacing: .03em; color: #9d9d9d;
+}
+.code__name { font-weight: 600; text-transform: uppercase; }
+.code__copy {
+  margin-left: auto; border: 1px solid var(--ed-line); background: transparent;
+  color: #c9c9c9; border-radius: .35rem; padding: .12rem .5rem;
+  font: inherit; font-size: .7rem; cursor: pointer;
+}
+.code__copy:hover { background: rgba(255,255,255,.08); color: #fff; }
+.code__copy[data-done] { color: #4ec9b0; border-color: #4ec9b0; }
+
+.code__body { display: flex; align-items: stretch; }
+/* Scoped with .code so it outranks the .prose pre rule above, which would
+   otherwise hand the gutter that block's padding, background and border. */
+.code .code__gutter {
+  margin: 0; padding: .85rem .6rem .85rem .85rem; flex: none; text-align: right;
+  color: var(--ed-gutter); background: var(--ed-bg);
+  border: 0; border-right: 1px solid var(--ed-line); border-radius: 0;
+  user-select: none; -webkit-user-select: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .78rem; line-height: 1.65; overflow: hidden;
+}
+/* The font metrics live on both <pre> elements, not on the <code> inside.
+   A <pre> without its own line-height inherits the body's — 26px against the
+   gutter's 20.6px — and the numbers drift a line out of step by the tenth
+   row. The two columns have to be metrically identical. */
+.code .code__pre {
+  margin: 0; padding: .85rem 1rem; flex: 1 1 auto; min-width: 0;
+  background: var(--ed-bg); border: 0; border-radius: 0; overflow-x: auto;
+  color: var(--ed-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .78rem; line-height: 1.65;
+}
+.code .code__pre code {
+  color: inherit; background: none; padding: 0;
+  font-family: inherit; font-size: inherit; line-height: inherit;
+}
+
+/* -- Terminal ------------------------------------------------------------ */
+.code--terminal { --ed-bg: #15151a; --ed-bar: #2b2b31; }
+.code--terminal .code__bar { justify-content: flex-start; }
+.code__dots { display: flex; gap: .32rem; }
+.code__dots i { width: .62rem; height: .62rem; border-radius: 50%; display: block; }
+.code__dots i:nth-child(1) { background: #ff5f57; }
+.code__dots i:nth-child(2) { background: #febc2e; }
+.code__dots i:nth-child(3) { background: #28c840; }
+
+/* The prompt is drawn, never written: a reader copying the block gets the
+   command, not a shell sigil they then have to delete. */
+.code--terminal .ln { display: block; padding-left: 1.15rem; text-indent: -1.15rem; }
+.code--terminal .ln--cmd::before {
+  content: '$'; color: #27c93f; font-weight: 700;
+  display: inline-block; width: 1.15rem; text-indent: 0;
+}
+
+/* -- Tokens (VS Code Dark+) ---------------------------------------------- */
+.t-comment      { color: #6a9955; font-style: italic; }
+.t-string       { color: #ce9178; }
+.t-keyword      { color: #569cd6; }
+.t-variable     { color: #9cdcfe; }
+.t-number       { color: #b5cea8; }
+.t-function     { color: #dcdcaa; }
+.t-type         { color: #4ec9b0; }
+.t-operator     { color: #d4d4d4; }
+.t-tag          { color: #569cd6; }
+.t-attr         { color: #9cdcfe; }
+.t-attribute    { color: #c586c0; }
+.t-directive    { color: #c586c0; }
+.t-interpolation{ color: #dcdcaa; }
+.t-envkey       { color: #9cdcfe; }
+.t-flag         { color: #c586c0; }
+.t-builtin      { color: #dcdcaa; }
+
+@media (max-width: 40rem) {
+  .code .code__gutter { display: none; }
+}
 .table-scroll { overflow-x: auto; margin: 0 0 1.2rem; }
 .prose table { border-collapse: collapse; width: 100%; font-size: .875rem; }
 .prose th, .prose td {
@@ -679,6 +791,45 @@ const CLIENT = `/**
 
   document.addEventListener('click', function (e) {
     if (!panel.contains(e.target) && e.target !== input) panel.hidden = true;
+  });
+
+  // Copy buttons. The source lives in a data attribute rather than being read
+  // back out of the DOM, so what lands on the clipboard is what the author
+  // wrote — no line numbers, no shell prompts, both of which are drawn by CSS
+  // and are not text.
+  document.addEventListener('click', function (e) {
+    var button = e.target.closest && e.target.closest('.code__copy');
+    if (!button) return;
+
+    var figure = button.closest('.code');
+    var code = figure && figure.getAttribute('data-code');
+    if (!code) return;
+
+    var done = function () {
+      button.textContent = 'Copied';
+      button.setAttribute('data-done', '');
+      setTimeout(function () {
+        button.textContent = 'Copy';
+        button.removeAttribute('data-done');
+      }, 1600);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(done, function () {});
+      return;
+    }
+
+    // execCommand is deprecated, but it is the only path on a page served
+    // over plain HTTP, which a local preview is.
+    var pad = document.createElement('textarea');
+    pad.value = code;
+    pad.setAttribute('readonly', '');
+    pad.style.position = 'fixed';
+    pad.style.opacity = '0';
+    document.body.appendChild(pad);
+    pad.select();
+    try { document.execCommand('copy'); done(); } catch (err) { /* nothing to do */ }
+    document.body.removeChild(pad);
   });
 
   // "/" focuses search, the convention every docs site shares.
