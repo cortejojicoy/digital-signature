@@ -147,6 +147,41 @@ describe('signature request document endpoints', function () {
         expect($response->streamedContent())->toBe(Storage::disk('testing')->get($running));
     });
 
+    it('serves an already-signed slot as history rather than work', function () {
+        app(SigningSessionManager::class)->sign($this->prepared, 11);
+
+        $this->actingAs(TestUser::find(11))
+            ->getJson("/signature/requests/{$this->prepared->id}/meta")
+            ->assertOk()
+            // Still readable: the signatory's certificate is on this document
+            // and they are entitled to see what they signed.
+            ->assertJsonPath('readOnly', true)
+            ->assertJsonPath('state', 'signed')
+            ->assertJsonPath('stateLabel', 'Signed')
+            // Nothing left to place, so the client renders no signing surface.
+            ->assertJsonCount(0, 'requests');
+    });
+
+    it('still streams the document to a signatory who has already signed it', function () {
+        app(SigningSessionManager::class)->sign($this->prepared, 11);
+
+        $this->actingAs(TestUser::find(11))
+            ->get("/signature/requests/{$this->prepared->id}/document")
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+    });
+
+    it('refuses to sign a slot that is already signed', function () {
+        app(SigningSessionManager::class)->sign($this->prepared, 11);
+
+        // The read-only flag is advisory; this is the rule that enforces it.
+        $this->actingAs(TestUser::find(11))
+            ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'page' => 1, 'x' => 10, 'y' => 10, 'width' => 100, 'height' => 30,
+            ])
+            ->assertStatus(422);
+    });
+
     // ── Refusals ─────────────────────────────────────────────────────────────
 
     it('refuses a request from somebody else’s queue', function () {

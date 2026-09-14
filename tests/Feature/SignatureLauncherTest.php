@@ -210,6 +210,77 @@ describe('floating launcher component', function () {
             ->assertSet('newSignature', null);
     });
 
+    it('keeps a signed document as a dated record instead of dropping it', function () {
+        // The complaint this answers: signing made the document vanish, with
+        // no way to see what you had put your certificate on.
+        launcherSession();
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        $request = SignatureRequest::where('user_id', 11)->firstOrFail();
+        $request->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        $component = new SignatureLauncher;
+        $history = $component->getSignedHistoryProperty();
+
+        expect($history)->toHaveCount(1)
+            ->and($history[0]['label'])->toBe('Today')
+            ->and($history[0]['requests'])->toHaveCount(1)
+            // ...and it is out of the queue, which is still only what is
+            // waiting on them.
+            ->and($component->getRequestsProperty())->toHaveCount(0);
+    });
+
+    it('groups signed documents by the day they were signed', function () {
+        launcherSession();
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        $request = SignatureRequest::where('user_id', 11)->firstOrFail();
+        $request->update(['state' => RouteState::Signed, 'responded_at' => now()->subDay()]);
+
+        $history = (new SignatureLauncher)->getSignedHistoryProperty();
+
+        expect($history)->toHaveCount(1)
+            ->and($history[0]['label'])->toBe('Yesterday');
+    });
+
+    it('shows a guest no history at all', function () {
+        launcherSession();
+
+        SignatureRequest::query()->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        expect((new SignatureLauncher)->getSignedHistoryProperty())->toBe([]);
+    });
+
+    it('never shows one signatory another signatory’s history', function () {
+        launcherSession();
+
+        SignatureRequest::query()->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        $this->actingAs(TestUser::findOrFail(11));
+        $mine = (new SignatureLauncher)->getSignedHistoryProperty();
+
+        expect($mine[0]['requests'])->toHaveCount(1)
+            ->and($mine[0]['requests']->first()->user_id)->toBe(11);
+    });
+
+    it('renders the signed tab with its day headings', function () {
+        launcherSession();
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        SignatureRequest::where('user_id', 11)
+            ->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        $html = Livewire::test(SignatureLauncher::class)->call('loadRequests')->html();
+
+        expect($html)->toContain("tab === 'signed'")
+            ->and($html)->toContain('dsig-daygroup')
+            ->and($html)->toContain('Today')
+            ->and($html)->toContain('View document');
+    });
+
     it('hides the button entirely when configured to and nothing is waiting', function () {
         config()->set('signature.launcher.hide_when_empty', true);
 
