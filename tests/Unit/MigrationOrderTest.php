@@ -65,6 +65,14 @@ describe('migration ordering', function () {
     });
 
     it('has no alter-table migrations — schema is declared where the table is created', function () {
+        // An `add_x_to_y` migration is only warranted for schema whose create
+        // migration had already shipped to hosts: editing that create migration
+        // after the fact leaves every existing installation without the column.
+        // Each entry here is one such repair, and nothing new belongs in it.
+        $shipped = [
+            '2024_01_01_000010_add_caption_position_to_signature_positions_table.php',
+        ];
+
         $alters = [];
 
         foreach (migrationFiles() as $file) {
@@ -73,10 +81,7 @@ describe('migration ordering', function () {
             }
         }
 
-        // Every column this package needs is declared in the create migration
-        // for its table. An `add_x_to_y` migration would only be warranted for
-        // schema that had already shipped to hosts.
-        expect($alters)->toBe([]);
+        expect(array_values(array_diff($alters, $shipped)))->toBe([]);
     });
 
     it('runs against a database that actually enforces foreign keys', function () {
