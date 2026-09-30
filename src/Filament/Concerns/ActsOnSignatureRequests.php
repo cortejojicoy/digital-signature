@@ -4,6 +4,8 @@ namespace Kukux\DigitalSignature\Filament\Concerns;
 
 use Filament\Notifications\Notification;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Exceptions\OutOfSequenceException;
 use Kukux\DigitalSignature\Exceptions\SignatoryNotReadyException;
 use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
@@ -137,7 +139,7 @@ trait ActsOnSignatureRequests
 
         try {
             app(SigningSessionManager::class)->sign($request, (int) auth()->id());
-        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
+        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
             $this->fail('Cannot sign yet', $e->getMessage());
 
             return;

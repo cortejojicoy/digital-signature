@@ -4,6 +4,7 @@ namespace Kukux\DigitalSignature\Filament\Concerns;
 
 use Filament\Notifications\Notification;
 use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
@@ -76,6 +77,10 @@ trait RegistersSignatures
             // the user spent drawing, which is plenty of time to have created
             // one in another tab.
             $this->signatureFailure('Signature already exists', $e->getMessage());
+
+            return null;
+        } catch (UnregisteredDeviceException $e) {
+            $this->signatureFailure('Device not allowed to sign', $e->getMessage());
 
             return null;
         } catch (\Throwable $e) {
