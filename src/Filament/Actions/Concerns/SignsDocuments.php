@@ -6,6 +6,8 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Filament\Fields\SignaturePickerField;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
@@ -147,6 +149,8 @@ trait SignsDocuments
                 ->send();
         } catch (ForgedSignatureException $e) {
             $this->fail('Signature rejected', $e->getMessage());
+        } catch (UnregisteredDeviceException|MachineBindingException $e) {
+            $this->fail('Device not allowed to sign', $e->getMessage());
         } catch (\Exception $e) {
             $this->fail('Signing failed', 'An error occurred while signing: '.$e->getMessage());
         }
