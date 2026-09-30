@@ -71,6 +71,10 @@ describe('migration ordering', function () {
         // Each entry here is one such repair, and nothing new belongs in it.
         $shipped = [
             '2024_01_01_000010_add_caption_position_to_signature_positions_table.php',
+            // Not a repair: device_id is new, but both target tables had
+            // already shipped, so a create-migration edit would never reach
+            // existing installs.
+            '2024_01_01_000012_add_device_id_to_signatures_and_audits.php',
         ];
 
         $alters = [];

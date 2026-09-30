@@ -1,0 +1,9 @@
+{
+    "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKS3GjXeNToDfDA+N2tzkE4uNeJKwiT+hfj3/TVQ2J8Rxjb5bYgjPoYUuYztERMUlsAht/TtkPpim1Flhc3XTGg==",
+    "fingerprint": "def7a02d69d584e275aca8cae64c6bd1f49065318648eab368a9bb8d5962ad8c",
+    "nonce": "fixture-nonce-Zm9vYmFy",
+    "user_id": 1,
+    "message": "v1|attest|fixture-nonce-Zm9vYmFy|1|def7a02d69d584e275aca8cae64c6bd1f49065318648eab368a9bb8d5962ad8c",
+    "signature": "xro7PICwAVYTmLlnJ7DrnzNMHjsii7IROfO9tXH8AJOB8H8K5g4jpeAmW9dkVltNsHqWDDqTeKa/88FcvFfd5w==",
+    "signature_format": "raw"
+}
