@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
+use Kukux\DigitalSignature\Security\DeviceRegistry;
 
 /**
  * Append-only audit row. Never updated, never deleted by package code.
@@ -37,7 +38,7 @@ class SignatureAudit extends Model
     protected $fillable = [
         'uuid', 'event',
         'subject_user_id', 'actor_user_id', 'actor_type',
-        'signing_session_id', 'signature_request_id', 'signature_id', 'delegation_id',
+        'signing_session_id', 'signature_request_id', 'signature_id', 'delegation_id', 'device_id',
         'ip', 'user_agent', 'context',
     ];
 
@@ -86,6 +87,11 @@ class SignatureAudit extends Model
             'actor_type' => $actorType,
             'ip'         => $request?->ip(),
             'user_agent' => $request?->userAgent(),
+            // The verified device only for the person actually present — a
+            // system or delegated act has none, whatever the session holds.
+            'device_id'  => $actorType === 'user' && $actorId !== null
+                ? app(DeviceRegistry::class)->current((int) $actorId)?->id
+                : null,
         ], $attributes));
     }
 }
