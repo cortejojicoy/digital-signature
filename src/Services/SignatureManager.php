@@ -15,6 +15,7 @@ use Kukux\DigitalSignature\Jobs\EmbedSignatureJob;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignaturePosition;
 use Kukux\DigitalSignature\Security\CrlValidator;
+use Kukux\DigitalSignature\Security\DeviceRegistry;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
 use Kukux\DigitalSignature\Security\SignatureMetadataService;
@@ -76,6 +77,11 @@ class SignatureManager
                 'This user already has an active signature. Revoke the existing one before creating another.'
             );
         }
+
+        // ── 0b. Signing device ────────────────────────────────────────────────
+        //     Before anything touches disk, so a device the policy refuses
+        //     leaves no orphaned image behind.
+        $device = $this->devices()->forSigning($userId);
 
         $disk = Storage::disk(config('signature.storage_disk'));
         $dir = config('signature.signatures_path');
@@ -154,6 +160,7 @@ class SignatureManager
             'image_hash' => $imageHash,
             'document_hash' => $documentHash,
             'machine_fingerprint' => $machineFingerprint,
+            'device_id' => $device?->id,
             'source' => $source,
             'status' => $status,
             'signable_type' => $signable ? get_class($signable) : null,
@@ -208,6 +215,10 @@ class SignatureManager
             );
         }
 
+        // The device this act happens on — not the one the signature was
+        // drawn on, which $source keeps. Both facts matter.
+        $device = $this->devices()->forSigning($signerUserId, $source);
+
         // In a multi-signatory session the document being signed is the
         // session's running PDF, not a fresh render of the record. Hashing the
         // wrong one would break the chain: signature N's document_hash must
@@ -223,6 +234,7 @@ class SignatureManager
             'image_hash' => $source->image_hash,
             'document_hash' => $documentHash,
             'machine_fingerprint' => $source->machine_fingerprint,
+            'device_id' => $device?->id,
             'source' => $source->source,
             'status' => 'pending',
             'signable_type' => get_class($signable),
@@ -287,6 +299,9 @@ class SignatureManager
             // machine-binding record truthful; fabricating a new one would
             // corrupt it. `source = auto` is what marks the difference.
             'machine_fingerprint' => $source->machine_fingerprint,
+            // Likewise no device: nobody was at one. `source = auto` is the
+            // record of what happened instead.
+            'device_id' => null,
             'source' => 'auto',
             'status' => 'pending',
             'signable_type' => get_class($signable),
@@ -348,6 +363,15 @@ class SignatureManager
                 .'Please draw a new signature on this device.'
             );
         }
+    }
+
+    /**
+     * Resolved per call: the registry is request-scoped and this manager is a
+     * singleton, so holding one would carry a device across requests.
+     */
+    private function devices(): DeviceRegistry
+    {
+        return app(DeviceRegistry::class);
     }
 
     /**
