@@ -285,6 +285,13 @@ class SignaturePlugin implements Plugin
                 ->loadedOnRequest(),
         ], 'kukux/digital-signature');
 
+        // Endpoints for the browser's device-key attestation. Rendered only
+        // for a signed-in user, so the script stays idle everywhere else.
+        $panel->renderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => $this->deviceAttestationMeta(),
+        );
+
         // The launcher is mounted through a panel render hook rather than a
         // navigation item: it has to be reachable from whatever page the
         // signatory happens to be on, which is the whole point of it.
@@ -294,6 +301,20 @@ class SignaturePlugin implements Plugin
                 fn (): string => view('signature::filament.launcher')->render(),
             );
         }
+    }
+
+    protected function deviceAttestationMeta(): string
+    {
+        if (! config('signature.devices.enabled', true) || ! auth()->check()) {
+            return '';
+        }
+
+        $config = json_encode([
+            'challengeUrl' => route('signature.devices.challenge'),
+            'attestUrl'    => route('signature.devices.attest'),
+        ]);
+
+        return '<meta name="kukux-signature-devices" content="'.e($config).'">';
     }
 
     public function boot(Panel $panel): void

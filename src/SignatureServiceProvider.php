@@ -18,6 +18,7 @@ use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource\ViewSignatureResolver;
+use Kukux\DigitalSignature\Http\Controllers\DeviceController;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
@@ -25,6 +26,7 @@ use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureDocumentController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureVerificationController;
 use Kukux\DigitalSignature\Security\CrlValidator;
+use Kukux\DigitalSignature\Security\DeviceRegistry;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
 use Kukux\DigitalSignature\Security\PngMetaEmbedder;
@@ -103,6 +105,10 @@ class SignatureServiceProvider extends ServiceProvider
             );
         });
 
+        // Scoped for the same reason: it reads the session, and memoises the
+        // device it resolved for the rest of the request only.
+        $this->app->scoped(DeviceRegistry::class);
+
         $this->app->singleton(PdfTemplateRegistry::class);
 
         // Signatory routing. The factory is a singleton because the plugin's
@@ -172,6 +178,18 @@ class SignatureServiceProvider extends ServiceProvider
         Route::post('/signature/device-fingerprint', [DeviceFingerprintController::class, 'store'])
             ->middleware(['web'])
             ->name('signature.device-fingerprint');
+
+        // Signing-device key attestation — see DeviceController. `web` only,
+        // like the endpoints below, with the controller checking auth itself.
+        Route::prefix('signature/devices')
+            ->middleware(['web', 'throttle:60,1'])
+            ->name('signature.devices.')
+            ->group(function () {
+                Route::post('challenge', [DeviceController::class, 'challenge'])->name('challenge');
+                Route::post('attest', [DeviceController::class, 'attest'])->name('attest');
+                Route::patch('{uuid}', [DeviceController::class, 'update'])->whereUuid('uuid')->name('update');
+                Route::delete('{uuid}', [DeviceController::class, 'destroy'])->whereUuid('uuid')->name('destroy');
+            });
 
         // Signed-URL endpoint that streams signature images from the (typically
         // private) storage disk. The `signed` middleware enforces the URL's
