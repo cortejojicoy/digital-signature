@@ -6,6 +6,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\SignatureManager;
 
@@ -38,6 +39,14 @@ class CreateSignature extends CreateRecord
                 source: $data['source'] ?? 'draw',
                 certificatePassword: $data['certificate_password'] ?? null,
             );
+        } catch (UnregisteredDeviceException $e) {
+            Notification::make()
+                ->title('Device not allowed to sign')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+
+            $this->halt();
         } catch (PrimarySignatureExistsException $e) {
             Notification::make()
                 ->title('Signature already exists')
