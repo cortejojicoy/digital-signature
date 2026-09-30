@@ -9,6 +9,8 @@ use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Contracts\RendersSamplePageImage;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Exceptions\OutOfSequenceException;
 use Kukux\DigitalSignature\Exceptions\SignatoryNotReadyException;
 use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
@@ -259,7 +261,7 @@ class PdfTemplateSignerController extends Controller
         try {
             $signed = app(SigningSessionManager::class)
                 ->signAt($signatureRequest, (int) auth()->id(), $placement);
-        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
+        } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             report($e);

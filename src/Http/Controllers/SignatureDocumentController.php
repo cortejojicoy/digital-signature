@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
+use Kukux\DigitalSignature\Exceptions\MachineBindingException;
+use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Exceptions\OutOfSequenceException;
 use Kukux\DigitalSignature\Exceptions\SignatoryNotReadyException;
 use Kukux\DigitalSignature\Exceptions\SigningSessionClosedException;
@@ -221,7 +223,7 @@ class SignatureDocumentController extends Controller
                     useSignature:    $job['signature'],
                     extraPlacements: $job['extra'],
                 );
-            } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException $e) {
+            } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
                 return $this->partialFailure($request, $signed, $e->getMessage(), $job['request']);
             } catch (\Throwable $e) {
                 report($e);
