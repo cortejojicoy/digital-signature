@@ -18,6 +18,7 @@ This document covers every security mechanism in the plugin, what problem each o
 | XMP metadata visible in macOS Preview & Windows Explorer | Always on |
 | DB cross-validation on re-upload (Sig-Record-Id) | Always on |
 | Machine lock — reject re-upload from different device | `SIGNATURE_MACHINE_LOCK=true` (default) |
+| Registered signing devices — each signature records the device it was created / used on | `SIGNATURE_DEVICES_ENABLED=true` (default), `SIGNATURE_DEVICES_REQUIRE=off` |
 | CRL certificate revocation check | `SIGNATURE_CRL_ENABLED=false` |
 | RFC 3161 trusted timestamp via TSA | `SIGNATURE_TSA_URL=` (disabled) |
 
@@ -329,6 +330,31 @@ TCPDF contacts the TSA during `Output()` and embeds the `TimeStampToken` in the 
 
 ---
 
+## 10. Registered signing devices
+
+The browser fingerprint in §6–7 is a value the browser *asserts*. A device key is something the browser has to *prove* it holds.
+
+**How it works:**
+
+1. On every panel page, `deviceAttestation.js` loads the browser's P-256 key pair from IndexedDB, or generates one with `extractable: false`. Script can use the private key but never read it.
+2. The page fetches a single-use challenge (`POST /signature/devices/challenge`), signs `v1|attest|<nonce>|<user_id>|<key fingerprint>`, and posts the proof (`POST /signature/devices/attest`).
+3. `DeviceRegistry` verifies the proof with `DeviceProofVerifier` and remembers the key in the session for `attestation_ttl` seconds. The page proves it again before that runs out.
+4. When a signature is created or used, `DeviceRegistry::forSigning()` registers the key as a device the first time it signs, and records it in `digital_signatures.device_id` and `digital_signature_audits.device_id`.
+
+**What each row means:**
+
+| Row | `device_id` |
+|---|---|
+| Primary signature | Device it was **created on** |
+| Document signature | Device it was **used on** (not the creation device) |
+| Delegated / auto-affix | Always null. Nobody was at a device. |
+
+**New devices.** A user's second and later devices trigger `NewSigningDeviceNotification`. That's the defence against a stolen session registering an attacker's browser.
+
+**Limits.** The key belongs to a browser profile, not to hardware. Clearing site data creates a new device. See [device-registration-plan.md §9](device-registration-plan.md#9--security-analysis--limitations). For hardware-bound keys (Secure Enclave / TPM), see [desktop-agent-plan.md](desktop-agent-plan.md).
+
+---
+
 ## Exception reference
 
 | Exception | Thrown in | Meaning |
@@ -336,6 +362,8 @@ TCPDF contacts the TSA during `Output()` and embeds the `TimeStampToken` in the 
 | `ForgedSignatureException` | `SignatureManager::store()` | HMAC/user-id invalid, or DB cross-validation failed |
 | `MachineBindingException` | `SignatureManager::store()` | Machine lock enabled and device doesn't match (PNG or DB layer) |
 | `CertificateRevokedException` | `SignatureManager::embedAndFinalize()` | Certificate serial is on a downloaded CRL |
+| `UnregisteredDeviceException` | `SignatureManager::store()` / `storeForDocument()` | `require = enforce` and no verified device, the device was revoked, or the user is at `max_per_user` |
+| `MachineBindingException` | `SignatureManager::storeForDocument()` | `usage_policy = creation_device_only` and this isn't the device the signature was created on |
 
 All three extend `\RuntimeException`. `SignDocumentAction` signs with an existing signature record; custom registration flows that call `SignatureManager::store()` should handle `ForgedSignatureException` and `MachineBindingException` and show the user a clear rejection message.
 
