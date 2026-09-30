@@ -508,6 +508,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Registered signing devices
+    |--------------------------------------------------------------------------
+    | Each browser (and, later, each desktop agent) holds a non-extractable
+    | key pair. The browser proves possession of the private key to the
+    | server, and every signature records the device it was created or used
+    | on. See docs/device-registration-plan.md.
+    |
+    | require:
+    |   off      — record the device when there is one, never block
+    |   warn     — the same, and the act is logged without a device
+    |   enforce  — creating or using a signature needs a verified device
+    |
+    | usage_policy:
+    |   any_registered       — any active device of the owner may use it
+    |   creation_device_only — only the device the signature was created on
+    |
+    | attestation_ttl: seconds a browser's proof of its key stays valid for
+    |   the session before the page has to prove it again.
+    */
+    'devices' => [
+        'enabled'               => env('SIGNATURE_DEVICES_ENABLED', true),
+        'require'               => env('SIGNATURE_DEVICES_REQUIRE', 'off'),
+        'usage_policy'          => env('SIGNATURE_DEVICES_USAGE_POLICY', 'any_registered'),
+        'notify_on_new_device'  => env('SIGNATURE_DEVICES_NOTIFY', true),
+        'notification_channels' => ['mail'],
+        'max_per_user'          => 10,
+        'challenge_ttl'         => 120,
+        'attestation_ttl'       => 900,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | CRL Validation (Certificate Revocation List)
     |--------------------------------------------------------------------------
     | When enabled, the CRL Distribution Points embedded in the signer's
