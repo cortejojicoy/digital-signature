@@ -127,6 +127,33 @@ Every stored signature PNG receives HMAC-signed `tEXt` chunks and XMP metadata. 
 
 ---
 
+## Registered signing devices
+
+Each browser holds a non-extractable P-256 key in IndexedDB and proves to the server that it holds the key. Every signature then records the device it was created on or used on. See [security.md §10](security.md#10-registered-signing-devices) and [device-registration-plan.md](device-registration-plan.md).
+
+```php
+'devices' => [
+    'enabled'               => env('SIGNATURE_DEVICES_ENABLED', true),
+    'require'               => env('SIGNATURE_DEVICES_REQUIRE', 'off'),   // off | warn | enforce
+    'usage_policy'          => env('SIGNATURE_DEVICES_USAGE_POLICY', 'any_registered'), // or creation_device_only
+    'notify_on_new_device'  => env('SIGNATURE_DEVICES_NOTIFY', true),
+    'notification_channels' => ['mail'],
+    'max_per_user'          => 10,
+    'challenge_ttl'         => 120,  // seconds a challenge can be answered
+    'attestation_ttl'       => 900,  // seconds a browser's proof stays valid
+],
+```
+
+| `require` | Effect |
+|---|---|
+| `off` (default) | Record the device when there is one, never block |
+| `warn` | The same, and log each signature act that had no verified device |
+| `enforce` | Creating or using a signature fails with `UnregisteredDeviceException` without a verified device |
+
+A **revoked** device is refused in every mode.
+
+---
+
 ## Queue
 
 ```php
@@ -192,6 +219,10 @@ SIGNATURE_RESOURCE_LABEL=Signatures
 
 # Security
 SIGNATURE_MACHINE_LOCK=true         # reject re-upload from different device
+SIGNATURE_DEVICES_ENABLED=true      # browser device keys
+SIGNATURE_DEVICES_REQUIRE=off       # off | warn | enforce
+SIGNATURE_DEVICES_USAGE_POLICY=any_registered  # or creation_device_only
+SIGNATURE_DEVICES_NOTIFY=true       # mail the owner when a new device registers
 
 # Queue
 SIGNATURE_QUEUE=default
