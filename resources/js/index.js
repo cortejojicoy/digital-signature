@@ -5,6 +5,7 @@ import { mountIsland, unmountIsland } from './react/SignaturePadIsland.jsx';
 import { mountDesigner, unmountDesigner } from './react/PdfDesignerIsland.jsx';
 import { mountSigner, unmountSigner } from './react/PdfSigningIsland.jsx';
 import { mountLazyViewer, unmountLazyViewer } from './lazy/pdfViewer.js';
+import { startDeviceAttestation } from './utils/deviceAttestation.js';
 
 // ── Alpine plugin registration ───────────────────────────────────────────────
 
@@ -19,6 +20,26 @@ document.addEventListener('alpine:init', () => {
         window.Alpine.plugin(SignaturePlugin);
     }
 });
+
+// ── Signing-device attestation ───────────────────────────────────────────────
+//
+// The panel renders its endpoints into a meta tag for signed-in users only
+// (SignaturePlugin), so pages without it — logged out, feature off — do
+// nothing.
+
+function bootDeviceAttestation() {
+    const meta = document.querySelector('meta[name="kukux-signature-devices"]');
+    if (!meta) return;
+    try {
+        startDeviceAttestation(JSON.parse(meta.content));
+    } catch (_) { /* malformed config: signing still works without a device */ }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootDeviceAttestation, { once: true });
+} else {
+    bootDeviceAttestation();
+}
 
 // ── React island bootstrap ───────────────────────────────────────────────────
 //
