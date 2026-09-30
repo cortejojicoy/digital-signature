@@ -75,6 +75,12 @@
                             @endif
                         </p>
 
+                        @if ($route->signature && $route->state->value === 'signed')
+                            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                Signed on {{ $route->signature->deviceSummary() }}
+                            </p>
+                        @endif
+
                         @if ($blocker)
                             <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ $blocker }}</p>
                         @endif
