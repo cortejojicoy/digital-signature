@@ -170,6 +170,11 @@ class SignatureResource extends Resource
                             ->formatStateUsing(fn (string $state): string => ucfirst($state))
                             ->color(fn (string $state): string => $state === 'draw' ? 'info' : 'primary'),
 
+                        TextEntry::make('device_summary')
+                            ->label(fn (Signature $record): string => $record->isPrimary() ? 'Created on' : 'Signed on')
+                            ->getStateUsing(fn (Signature $record): string => $record->deviceSummary())
+                            ->icon(fn (Signature $record): ?string => $record->device?->icon()),
+
                         TextEntry::make('signed_at')
                             ->label('Signed At')
                             ->dateTime()
@@ -179,6 +184,18 @@ class SignatureResource extends Resource
                         TextEntry::make('created_at')
                             ->label('Registered')
                             ->dateTime(),
+                    ]),
+
+                // ── Where this signature has been used, and from which device ──
+                Section::make('Used on')
+                    ->columnSpanFull()
+                    ->visible(fn (Signature $record): bool => $record->isPrimary())
+                    ->schema([
+                        TextEntry::make('document_uses')
+                            ->hiddenLabel()
+                            ->getStateUsing(fn (Signature $record): array => $record->documentUseSummaries())
+                            ->listWithLineBreaks()
+                            ->placeholder('Not used on any document yet'),
                     ]),
 
                 // ── Security metadata (collapsed) ─────────────────────────────
@@ -202,6 +219,12 @@ class SignatureResource extends Resource
                             ->fontFamily(FontFamily::Mono)
                             ->formatStateUsing(fn (?string $state): string => $state ? substr($state, 0, 20).'…' : '—')
                             ->copyable(),
+
+                        TextEntry::make('device_key')
+                            ->label('Device Key')
+                            ->fontFamily(FontFamily::Mono)
+                            ->getStateUsing(fn (Signature $record): ?string => $record->device?->shortFingerprint())
+                            ->placeholder('—'),
 
                         TextEntry::make('certificate_fingerprint')
                             ->label('Certificate Fingerprint')
