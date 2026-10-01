@@ -120,17 +120,27 @@ Registered automatically by `SignaturePlugin`. Provides a full admin interface f
 ### List page
 
 - Table with signature thumbnail, signer name + email, status badge, capture method, and dates
-- Per-row **View** and **Revoke** actions
+- Per-row **View** (a slide-over with the signature's details), **Download** and **Revoke** actions
 - Header **Add Signature** action for registering a reusable signature
 - Header **Sign Document** action for signing with a registered signature
 - Filters for status and capture method
 
-### View page
+### Managing a signature
 
-- Large signature image with dark-mode support
-- Signer name, email, status, capture method, signed-at timestamp
-- Collapsible **Security Metadata** section: UUID, image hash, device fingerprint, certificate fingerprint (all copyable)
-- Header actions: **Sign Document**, **Download Image**, **Revoke**
+There is no View page. **Manage signatures**, in the launcher drawer's footer,
+widens the drawer and lists the user's signatures beside the selected one's
+details. Clicking a thumbnail in the **My signatures** tab opens the same view
+with that signature selected. For the selected signature it shows:
+
+- The signature image, **Download image** and **Revoke** (with an inline confirmation)
+- Signer, status, capture method, device, signed and registered dates
+- **Used on**: the documents this signature has been applied to
+- **Apply this signature**: one card per registered PDF template, with its setup state and links to the signer and the designer
+- Collapsible **Security metadata**: record id, image hash, device fingerprint, device key, certificate fingerprint (each copyable)
+
+Old `/signatures/{record}` links redirect to the list with the drawer open on
+that signature (`?dsig=manage:{uuid}`). Anyone who doesn't own the signature
+gets a 404.
 
 ### Using with your own resource
 

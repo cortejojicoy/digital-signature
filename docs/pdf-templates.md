@@ -106,7 +106,7 @@ app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class)->all();
 // → ['dtr' => Kukux\DigitalSignature\Pdf\BladePdfTemplate { … }]
 ```
 
-Then visit a signature's view page — the registered templates now appear as cards.
+Then open **Manage signatures** in the launcher drawer and pick a signature. The registered templates now appear as cards under **Apply this signature**.
 
 ### Using a different PDF renderer
 
@@ -457,7 +457,7 @@ In addition to the admin designer, the plugin ships an end-user **signer page** 
 /<panel-path>/signature-templates/{templateKey}/sign/{signatureUuid}
 ```
 
-The route is built for you from the Signature view page's card grid (`view-signature-with-templates.blade.php`). Each card's body click navigates to the signer with that signature's UUID pre-bound to the URL.
+The route is built for you by the template cards in the drawer's **Manage signatures** view (`partials/manage-signatures.blade.php`). Clicking a card's preview or its **Sign document** link opens the signer with that signature's UUID already in the URL.
 
 ### What the page does
 

@@ -269,6 +269,7 @@ SIGNATURE_LAUNCHER_LABEL=Signatures
 SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
 SIGNATURE_LAUNCHER_WIDTH=64rem
+SIGNATURE_LAUNCHER_MANAGE_WIDTH=80rem
 SIGNATURE_CAPTION_ENABLED=true
 SIGNATURE_QR_ENABLED=true
 SIGNATURE_VERIFY_ENABLED=true
@@ -376,6 +377,7 @@ full-bleed below 640px regardless.
 | `launcher.poll_seconds` | `SIGNATURE_LAUNCHER_POLL` | `60` |
 | `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
 | `launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `64rem` |
+| `launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `80rem` (drawer width while **Manage signatures** is open) |
 | `launcher.avoid_overlap` | `SIGNATURE_LAUNCHER_AVOID_OVERLAP` | `true` |
 | `launcher.offset.x` | `SIGNATURE_LAUNCHER_OFFSET_X` | `1.5rem` |
 | `launcher.offset.y` | `SIGNATURE_LAUNCHER_OFFSET_Y` | `1.5rem` |
