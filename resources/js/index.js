@@ -6,6 +6,7 @@ import { mountDesigner, unmountDesigner } from './react/PdfDesignerIsland.jsx';
 import { mountSigner, unmountSigner } from './react/PdfSigningIsland.jsx';
 import { mountLazyViewer, unmountLazyViewer } from './lazy/pdfViewer.js';
 import { startDeviceAttestation } from './utils/deviceAttestation.js';
+import { listenForLivewireApprovals } from './utils/agentApproval.js';
 
 // ── Alpine plugin registration ───────────────────────────────────────────────
 
@@ -34,6 +35,9 @@ function bootDeviceAttestation() {
         startDeviceAttestation(JSON.parse(meta.content));
     } catch (_) { /* malformed config: signing still works without a device */ }
 }
+
+// Livewire surfaces ask for desktop-agent approval with a browser event.
+listenForLivewireApprovals();
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootDeviceAttestation, { once: true });
