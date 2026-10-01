@@ -351,6 +351,11 @@ The browser fingerprint in §6–7 is a value the browser *asserts*. A device ke
 
 **New devices.** A user's second and later devices trigger `NewSigningDeviceNotification`. That's the defence against a stolen session registering an attacker's browser.
 
+**Desktop agent.** With `SIGNATURE_AGENT_ENABLED=true`, a user can pair Kukux Sign Agent. Its identity key is in the Secure Enclave or TPM, and Touch ID or Windows Hello is enforced by the key itself.
+- Signing a document then pauses until the agent signs a receipt over **that document's hash**. The signature records the agent as its device.
+- Agent requests need both the bearer token and a session-key proof over the exact request (`AuthenticateAgent`). A leaked token alone is useless.
+- Revoking an agent device revokes its tokens, and its next call is a 401, on which the agent deletes its keys.
+
 **Limits.** The key belongs to a browser profile, not to hardware. Clearing site data creates a new device. See [device-registration-plan.md §9](device-registration-plan.md#9--security-analysis--limitations). For hardware-bound keys (Secure Enclave / TPM), see [desktop-agent-plan.md](desktop-agent-plan.md).
 
 ---
@@ -364,6 +369,7 @@ The browser fingerprint in §6–7 is a value the browser *asserts*. A device ke
 | `CertificateRevokedException` | `SignatureManager::embedAndFinalize()` | Certificate serial is on a downloaded CRL |
 | `UnregisteredDeviceException` | `SignatureManager::store()` / `storeForDocument()` | `require = enforce` and no verified device, the device was revoked, or the user is at `max_per_user` |
 | `MachineBindingException` | `SignatureManager::storeForDocument()` | `usage_policy = creation_device_only` and this isn't the device the signature was created on |
+| `AgentApprovalRequiredException` | `SignatureManager::storeForDocument()` | The signer has a paired computer and hasn't approved this document yet. It carries the job; surfaces turn it into 428 or a browser event. It's not an error. |
 
 All three extend `\RuntimeException`. `SignDocumentAction` signs with an existing signature record; custom registration flows that call `SignatureManager::store()` should handle `ForgedSignatureException` and `MachineBindingException` and show the user a clear rejection message.
 
