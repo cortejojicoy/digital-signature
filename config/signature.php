@@ -536,6 +536,32 @@ return [
         'max_per_user'          => 10,
         'challenge_ttl'         => 120,
         'attestation_ttl'       => 900,
+
+        /*
+        | Desktop agent (Kukux Sign Agent): hardware-bound keys in the Secure
+        | Enclave / TPM. Wire contract: digital-signature-agent/docs/protocol.md.
+        |
+        | approval: when a user who has a paired computer signs a document
+        |   off      — never ask the agent; the browser device is recorded
+        |   prefer   — ask the agent first, with "sign in the browser instead"
+        |   enforce  — signing a document requires approval on a paired computer
+        |
+        | server_id / salt: must stay stable for the installation. Left null,
+        |   both are derived from APP_KEY.
+        */
+        'agent' => [
+            'enabled'          => env('SIGNATURE_AGENT_ENABLED', false),
+            'approval'         => env('SIGNATURE_AGENT_APPROVAL', 'prefer'),
+            'scheme'           => 'kukuxsign',
+            'download_url'     => env('SIGNATURE_AGENT_DOWNLOAD_URL', 'https://github.com/cortejojicoy/digital-signature-agent/releases/latest'),
+            'min_version'      => env('SIGNATURE_AGENT_MIN_VERSION', '0.1.0'),
+            'require_presence' => env('SIGNATURE_AGENT_REQUIRE_PRESENCE', true),
+            'server_id'        => env('SIGNATURE_AGENT_SERVER_ID'),
+            'salt'             => env('SIGNATURE_AGENT_SALT'),
+            'pairing_ttl'      => 600,
+            'job_ttl'          => 300,
+            'skip_ttl'         => 120,
+        ],
     ],
 
     /*
