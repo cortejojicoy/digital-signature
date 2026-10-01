@@ -3,6 +3,7 @@
 namespace Kukux\DigitalSignature\Filament\Concerns;
 
 use Filament\Notifications\Notification;
+use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -139,6 +140,11 @@ trait ActsOnSignatureRequests
 
         try {
             app(SigningSessionManager::class)->sign($request, (int) auth()->id());
+        } catch (AgentApprovalRequiredException $e) {
+            // agentApproval.js runs the approval, then calls signRequest again.
+            $this->dispatch('kukux-signature:agent-approval', ...$e->livewireEvent($this->getId(), 'signRequest', [$requestId]));
+
+            return;
         } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
             $this->fail('Cannot sign yet', $e->getMessage());
 
