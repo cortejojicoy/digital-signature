@@ -451,6 +451,10 @@ return [
     |   panel never exceeds the viewport, and below 640px it goes full-bleed
     |   regardless.
     |
+    | manage_width: how wide the slide-over grows while "Manage signatures" is
+    |   open, where the signature list sits beside the selected signature's
+    |   details. Same rules as `width`.
+    |
     | offset: distance from the corner before any stacking. Any CSS length.
     |
     | gap: pixels left between the button and whatever it stacks above.
@@ -475,6 +479,7 @@ return [
         'poll_seconds'        => env('SIGNATURE_LAUNCHER_POLL', 60),
         'hide_when_empty'     => env('SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY', false),
         'width'               => env('SIGNATURE_LAUNCHER_WIDTH', '64rem'),
+        'manage_width'        => env('SIGNATURE_LAUNCHER_MANAGE_WIDTH', '80rem'),
 
         'avoid_overlap'       => env('SIGNATURE_LAUNCHER_AVOID_OVERLAP', true),
         'offset'              => [
