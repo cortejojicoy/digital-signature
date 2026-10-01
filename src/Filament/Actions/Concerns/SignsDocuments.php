@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Filament\Actions\Concerns;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
+use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -147,6 +148,13 @@ trait SignsDocuments
                 ->body('The document has been signed successfully.')
                 ->success()
                 ->send();
+        } catch (AgentApprovalRequiredException $e) {
+            // Keep the modal open; agentApproval.js runs the approval on the
+            // signer's computer, then re-submits this same mounted action.
+            $livewire = $this->getLivewire();
+            $livewire->dispatch('kukux-signature:agent-approval', ...$e->livewireEvent($livewire->getId(), 'callMountedAction'));
+
+            $this->halt();
         } catch (ForgedSignatureException $e) {
             $this->fail('Signature rejected', $e->getMessage());
         } catch (UnregisteredDeviceException|MachineBindingException $e) {
