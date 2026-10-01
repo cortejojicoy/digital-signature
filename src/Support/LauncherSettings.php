@@ -109,6 +109,18 @@ final class LauncherSettings
     }
 
     /**
+     * How wide the slide-over grows while "Manage signatures" is open.
+     *
+     * Managing puts the signature list beside its details and the templates it
+     * can be applied to, which needs more room than the queue does. Capped at
+     * the viewport like width().
+     */
+    public static function manageWidth(): string
+    {
+        return self::cssLength(config('signature.launcher.manage_width'), '80rem');
+    }
+
+    /**
      * Whether the button should measure its corner before settling into it.
      *
      * A plugin does not own the corner it is dropped into: host apps put chat
