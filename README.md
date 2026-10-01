@@ -155,10 +155,9 @@ When the plugin is registered, a **Signatures** resource appears in the sidebar 
 
 Register `SignaturePlugin::make()` on every Filament panel that should use the package. If a panel discovers or registers `SignatureResource` without the plugin, Filament can report `Plugin [signature] is not registered for panel [admin]`.
 
-**List page** — table of all signature records with thumbnail, signer, status, and method.  
-**View page** — full infolist showing the large signature image, signer details, security metadata.
+**List page**: a table of all signature records with thumbnail, signer, status and method. Each row has **View** (a slide-over with the details), **Download** and **Revoke**.
 
-Both pages include a **Sign Document** header action.
+There is no separate View page. **Manage signatures** in the launcher drawer widens the drawer to show every signature's details, download, revoke, usage history and the PDF templates it can be applied to, without leaving the current page.
 
 Customize appearance:
 
