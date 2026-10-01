@@ -18,6 +18,23 @@ class ListSignatures extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            // ── Signing devices ──────────────────────────────────────────────────
+            //
+            // Browsers and paired computers that can sign as this user, and
+            // where a desktop agent is paired. The component is shared with
+            // the launcher's Devices tab.
+            Action::make('signingDevices')
+                ->label('Signing devices')
+                ->icon('heroicon-o-computer-desktop')
+                ->color('gray')
+                ->visible(fn (): bool => (bool) config('signature.devices.enabled', true))
+                ->modalHeading('Signing devices')
+                ->modalWidth('2xl')
+                ->slideOver()
+                ->modalContent(view('signature::filament.signing-devices-modal'))
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Close'),
+
             // ── Add Signature ────────────────────────────────────────────────────
             //
             // The body of this action lives in RegistersSignatures, shared with
