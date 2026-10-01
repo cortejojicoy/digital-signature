@@ -8,6 +8,7 @@ use Illuminate\Routing\Controller;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Contracts\RendersSamplePageImage;
 use Kukux\DigitalSignature\Contracts\Signable;
+use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -261,6 +262,8 @@ class PdfTemplateSignerController extends Controller
         try {
             $signed = app(SigningSessionManager::class)
                 ->signAt($signatureRequest, (int) auth()->id(), $placement);
+        } catch (AgentApprovalRequiredException $e) {
+            return $e->toJsonResponse();
         } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\Throwable $e) {

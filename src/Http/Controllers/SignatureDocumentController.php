@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
+use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -223,6 +224,11 @@ class SignatureDocumentController extends Controller
                     useSignature:    $job['signature'],
                     extraPlacements: $job['extra'],
                 );
+            } catch (AgentApprovalRequiredException $e) {
+                // Waiting on the signer's computer. Placements are already
+                // saved on the request rows, so the client retries this same
+                // call once the job completes.
+                return $e->toJsonResponse(['signed' => $signed]);
             } catch (OutOfSequenceException|SignatoryNotReadyException|SigningSessionClosedException|ForgedSignatureException|UnregisteredDeviceException|MachineBindingException $e) {
                 return $this->partialFailure($request, $signed, $e->getMessage(), $job['request']);
             } catch (\Throwable $e) {
