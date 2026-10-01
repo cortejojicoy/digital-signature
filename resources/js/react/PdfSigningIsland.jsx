@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWithAgentApproval } from '../utils/agentApproval.js';
 import { createRoot } from 'react-dom/client';
 import { SlotBox } from './components/SlotBox.jsx';
 
@@ -148,7 +149,9 @@ function PdfSigningIsland({ el }) {
         setError(null);
 
         try {
-            const res = await fetch(config.finalizeUrl, {
+            // A paired computer may need to approve first (HTTP 428); the
+            // helper runs that and re-sends this same request.
+            const res = await fetchWithAgentApproval(() => fetch(config.finalizeUrl, {
                 method:  'POST',
                 credentials: 'same-origin',
                 headers: {
@@ -160,7 +163,7 @@ function PdfSigningIsland({ el }) {
                     placements,
                     signable_id: config.signableId,
                 }),
-            });
+            }));
             const body = await res.json();
             if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
             setFinishedAck(body);

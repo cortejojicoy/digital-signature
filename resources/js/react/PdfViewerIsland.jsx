@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWithAgentApproval } from '../utils/agentApproval.js';
 import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
@@ -440,7 +441,9 @@ function PdfViewerIsland({ el }) {
         setNotice(null);
 
         try {
-            const res = await fetch(config.signUrl, {
+            // A paired computer may need to approve first (HTTP 428); the
+            // helper runs that and re-sends this same request.
+            const res = await fetchWithAgentApproval(() => fetch(config.signUrl, {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {
@@ -449,7 +452,7 @@ function PdfViewerIsland({ el }) {
                     'X-CSRF-TOKEN': config.csrfToken,
                 },
                 body: JSON.stringify({ placements: payload }),
-            });
+            }));
             const body = await res.json().catch(() => ({}));
 
             if (!res.ok) {
