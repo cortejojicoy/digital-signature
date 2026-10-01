@@ -152,6 +152,36 @@ Each browser holds a non-extractable P-256 key in IndexedDB and proves to the se
 
 A **revoked** device is refused in every mode.
 
+### Desktop agent (Kukux Sign Agent)
+
+Pairs a computer whose signing key lives in its Secure Enclave or TPM. See [desktop-agent-plan.md §15](desktop-agent-plan.md#15--what-was-built-package-side).
+
+```php
+'devices' => [
+    // …
+    'agent' => [
+        'enabled'          => env('SIGNATURE_AGENT_ENABLED', false),
+        'approval'         => env('SIGNATURE_AGENT_APPROVAL', 'prefer'),   // off | prefer | enforce
+        'download_url'     => env('SIGNATURE_AGENT_DOWNLOAD_URL', 'https://github.com/cortejojicoy/digital-signature-agent/releases/latest'),
+        'min_version'      => env('SIGNATURE_AGENT_MIN_VERSION', '0.1.0'),
+        'require_presence' => env('SIGNATURE_AGENT_REQUIRE_PRESENCE', true),
+        'server_id'        => env('SIGNATURE_AGENT_SERVER_ID'),   // null = derived from APP_KEY
+        'salt'             => env('SIGNATURE_AGENT_SALT'),        // null = derived from APP_KEY
+        'pairing_ttl'      => 600,
+        'job_ttl'          => 300,
+        'skip_ttl'         => 120,
+    ],
+],
+```
+
+| `approval` | When a user with a paired computer signs a document |
+|---|---|
+| `off` | The agent is never asked |
+| `prefer` (default) | Approve on the computer, with *Sign in the browser instead* |
+| `enforce` | Approval on a paired computer is required, so a user with no paired computer can't sign documents |
+
+`server_id` and `salt` must stay stable for an installation. If you rotate `APP_KEY`, pin them first, or every paired agent will have to pair again. The agent only connects to **HTTPS** origins.
+
 ---
 
 ## Queue
@@ -223,6 +253,9 @@ SIGNATURE_DEVICES_ENABLED=true      # browser device keys
 SIGNATURE_DEVICES_REQUIRE=off       # off | warn | enforce
 SIGNATURE_DEVICES_USAGE_POLICY=any_registered  # or creation_device_only
 SIGNATURE_DEVICES_NOTIFY=true       # mail the owner when a new device registers
+SIGNATURE_AGENT_ENABLED=false       # desktop agent pairing + approval
+SIGNATURE_AGENT_APPROVAL=prefer     # off | prefer | enforce
+SIGNATURE_AGENT_MIN_VERSION=0.1.0   # older agents get HTTP 426
 
 # Queue
 SIGNATURE_QUEUE=default
