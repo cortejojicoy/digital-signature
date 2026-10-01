@@ -8,10 +8,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Kukux\DigitalSignature\Agent\AgentJobService;
+use Kukux\DigitalSignature\Agent\AgentServer;
+use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Events\DeviceRegistered;
 use Kukux\DigitalSignature\Events\DeviceRevoked;
+use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
+use Kukux\DigitalSignature\Models\AgentJob;
+use Kukux\DigitalSignature\Models\AgentToken;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SigningDevice;
 use Kukux\DigitalSignature\Notifications\NewSigningDeviceNotification;
@@ -44,7 +50,13 @@ class DeviceRegistry
 
     public const SESSION_KEY = 'signature.device';
 
+    public const SKIP_KEY = 'signature.agent_skip';
+
     private ?SigningDevice $resolved = null;
+
+    private ?SigningDevice $approvedAgent = null;
+
+    private ?AgentJob $approvedJob = null;
 
     private bool $resolvedLoaded = false;
 
@@ -220,19 +232,34 @@ class DeviceRegistry
      *
      * @param  Signature|null  $source  When *using* an existing signature: the
      *                                  signature being used, for usage_policy.
+     * @param  string|null  $documentHash  When signing a document: the hash of
+     *                                     the exact PDF, which an agent job
+     *                                     must have approved.
      *
      * @throws UnregisteredDeviceException when a device is required and absent,
      *                                     revoked, or over the per-user limit.
      * @throws MachineBindingException     under creation_device_only, when this
      *                                     is not the device $source was made on.
+     * @throws AgentApprovalRequiredException  waiting on the user's computer.
      */
-    public function forSigning(int $userId, ?Signature $source = null): ?SigningDevice
-    {
+    public function forSigning(
+        int $userId,
+        ?Signature $source = null,
+        ?string $documentHash = null,
+        ?Signable $signable = null,
+    ): ?SigningDevice {
         if (! config('signature.devices.enabled', true)) {
             return null;
         }
 
-        $device = $this->resolveOrRegister($userId);
+        // A paired computer outranks the browser: its key is in hardware and
+        // the OS made the owner confirm. Only for using a signature on a
+        // document — that is what an agent job approves.
+        $device = $documentHash !== null
+            ? $this->agentApproval($userId, $documentHash, $signable)
+            : null;
+
+        $device ??= $this->resolveOrRegister($userId);
 
         if ($device === null) {
             $mode = config('signature.devices.require', 'off');
@@ -273,6 +300,108 @@ class DeviceRegistry
         return $device;
     }
 
+    // -------------------------------------------------------------------------
+    // Desktop agent approval
+    // -------------------------------------------------------------------------
+
+    /**
+     * The agent device that approved signing $documentHash, or null when the
+     * agent is not involved. Throws to ask for approval when it should be.
+     *
+     * Once an approval is spent, it covers the rest of this request: one
+     * document signed in several slots is one act of signing, but every slot
+     * changes the document's hash, so only the first can match the job.
+     *
+     * @throws AgentApprovalRequiredException
+     * @throws UnregisteredDeviceException  approval = enforce, no paired computer.
+     */
+    private function agentApproval(int $userId, string $documentHash, ?Signable $signable): ?SigningDevice
+    {
+        if (! AgentServer::enabled()) {
+            return null;
+        }
+
+        if ($this->approvedAgent !== null && (int) $this->approvedAgent->user_id === $userId) {
+            return $this->approvedAgent;
+        }
+
+        $mode = config('signature.devices.agent.approval', 'prefer');
+
+        if ($mode === 'off') {
+            return null;
+        }
+
+        $jobs = app(AgentJobService::class);
+
+        if ($job = $jobs->approvalFor($userId, $documentHash)) {
+            $this->approvedAgent = $job->device;
+            $this->approvedJob = $job;
+
+            return $job->device;
+        }
+
+        $agent = SigningDevice::query()
+            ->where('user_id', $userId)
+            ->where('kind', 'agent')
+            ->active()
+            ->latest('last_used_at')
+            ->first();
+
+        if ($agent === null) {
+            if ($mode === 'enforce') {
+                throw new UnregisteredDeviceException(
+                    'Signing documents requires approval on a paired computer. '
+                    .'Pair the Kukux Sign Agent from your signing devices first.'
+                );
+            }
+
+            return null;
+        }
+
+        if ($mode === 'prefer' && $this->skippingAgent($userId)) {
+            return null;
+        }
+
+        [$job, $link] = $jobs->createForDocument($userId, $documentHash, $signable);
+
+        throw new AgentApprovalRequiredException($job, $link, $agent, canSkip: $mode === 'prefer');
+    }
+
+    /**
+     * Mark the approval this request used as spent on $signature.
+     */
+    public function settleApproval(Signature $signature): void
+    {
+        if ($this->approvedJob !== null && $this->approvedJob->consumed_at === null) {
+            app(AgentJobService::class)->consume($this->approvedJob, $signature);
+        }
+    }
+
+    /**
+     * "Sign in the browser instead" — for the next few minutes, document
+     * signing does not ask this user's agent.
+     */
+    public function skipAgent(int $userId): void
+    {
+        request()->session()->put(self::SKIP_KEY, [
+            'user_id' => $userId,
+            'until'   => now()->addSeconds((int) config('signature.devices.agent.skip_ttl', 120))->getTimestamp(),
+        ]);
+    }
+
+    private function skippingAgent(int $userId): bool
+    {
+        if (! app()->bound('request') || ! request()->hasSession()) {
+            return false;
+        }
+
+        $skip = request()->session()->get(self::SKIP_KEY);
+
+        return is_array($skip)
+            && (int) ($skip['user_id'] ?? 0) === $userId
+            && (int) ($skip['until'] ?? 0) >= now()->getTimestamp();
+    }
+
     private function resolveOrRegister(int $userId): ?SigningDevice
     {
         $key = $this->verifiedKey($userId);
@@ -303,14 +432,7 @@ class DeviceRegistry
      */
     private function register(int $userId, array $key): SigningDevice
     {
-        $max = (int) config('signature.devices.max_per_user', 10);
-        $active = SigningDevice::query()->where('user_id', $userId)->active()->count();
-
-        if ($max > 0 && $active >= $max) {
-            throw new UnregisteredDeviceException(
-                "You already have {$max} signing devices. Revoke one you no longer use, then try again."
-            );
-        }
+        $this->assertCapacity($userId);
 
         $attributes = [
             'uuid'            => (string) Str::uuid(),
@@ -348,12 +470,39 @@ class DeviceRegistry
         $this->resolved = $device;
         $this->resolvedLoaded = true;
 
-        event(new DeviceRegistered($device));
-
-        $this->notifyNewDevice($device, isFirst: $active === 0
-            && ! SigningDevice::query()->where('user_id', $userId)->whereKeyNot($device->id)->exists());
+        $this->announce($device);
 
         return $device;
+    }
+
+    /**
+     * @throws UnregisteredDeviceException at signature.devices.max_per_user.
+     */
+    public function assertCapacity(int $userId): void
+    {
+        $max = (int) config('signature.devices.max_per_user', 10);
+
+        if ($max > 0 && SigningDevice::query()->where('user_id', $userId)->active()->count() >= $max) {
+            throw new UnregisteredDeviceException(
+                "You already have {$max} signing devices. Revoke one you no longer use, then try again."
+            );
+        }
+    }
+
+    /**
+     * Fire DeviceRegistered, and tell the owner — unless this is their first
+     * device, which is starting out rather than a change worth an alert.
+     */
+    public function announce(SigningDevice $device): void
+    {
+        event(new DeviceRegistered($device));
+
+        $isFirst = ! SigningDevice::query()
+            ->where('user_id', $device->user_id)
+            ->whereKeyNot($device->id)
+            ->exists();
+
+        $this->notifyNewDevice($device, $isFirst);
     }
 
     // -------------------------------------------------------------------------
@@ -374,6 +523,13 @@ class DeviceRegistry
         }
 
         $device->update(['status' => 'revoked', 'revoked_at' => now()]);
+
+        // A revoked agent loses its API access with it; its next request is
+        // a 401, on which the agent deletes its keys.
+        AgentToken::query()
+            ->where('device_id', $device->id)
+            ->whereNull('revoked_at')
+            ->update(['revoked_at' => now()]);
 
         if ($this->resolved?->is($device)) {
             $this->forget();
