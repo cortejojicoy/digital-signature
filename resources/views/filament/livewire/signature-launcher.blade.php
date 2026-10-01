@@ -29,10 +29,10 @@
 
 <div
     class="dsig-launcher dsig-launcher--{{ $settings['position'] }}"
-    style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}; --dsig-w: {{ $settings['width'] }}"
+    style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}; --dsig-w: {{ $settings['width'] }}; --dsig-w-manage: {{ $settings['manageWidth'] }}"
     data-dsig-loaded="{{ $this->loaded ? '1' : '0' }}"
     x-data="dsigLauncher(@js($this->placement), @js($this->viewer))"
-    x-on:keydown.escape.window="open = false"
+    x-on:keydown.escape.window="escape()"
     @if ($settings['poll'] > 0) wire:poll.{{ $settings['poll'] }}s.visible @endif
 >
     {{--
@@ -55,6 +55,12 @@
             tab: 'queue',
             // Id of the request whose document is open, or null for the list.
             viewing: null,
+            // 'tabs' | 'manage'. Manage mode widens the drawer and replaces the
+            // tabs with the signature list and the selected signature's
+            // details — what the View Signature page used to be.
+            mode: 'tabs',
+            // Status chip in manage mode's list: 'all' or a signature status.
+            manageFilter: 'all',
             // How many slots the last commit signed, while the confirmation
             // that they moved to the Signed tab is still showing.
             justSigned: 0,
@@ -91,6 +97,8 @@
                     this.$wire.set('newSignature', e.detail.png)
                 }
                 window.addEventListener('sig:exported', this.onPadExport)
+
+                this.openFromLink()
 
                 if (! this.config.enabled) return
 
@@ -136,6 +144,52 @@
             },
 
             /**
+             * `?dsig=manage` or `?dsig=manage:{uuid}` opens the drawer straight
+             * into manage mode. Old View Signature URLs redirect here. The
+             * parameter is dropped afterwards so a reload does not reopen it.
+             */
+            openFromLink() {
+                const url = new URL(window.location.href)
+                const link = url.searchParams.get('dsig') ?? ''
+
+                if (! link.startsWith('manage')) return
+
+                url.searchParams.delete('dsig')
+                window.history.replaceState(window.history.state, '', url)
+
+                this.open = true
+                this.loaded = true
+                this.manage(link.slice('manage:'.length) || null)
+            },
+
+            /**
+             * Widen the drawer into manage mode. The server owns which
+             * signature is selected, because it decides whether the uuid is
+             * this user's at all.
+             */
+            manage(uuid = null) {
+                this.viewing = null
+                this.mode = 'manage'
+                this.loaded = true
+                this.$wire.manage(uuid)
+            },
+
+            leaveManage() {
+                this.mode = 'tabs'
+            },
+
+            /** First Escape leaves manage mode; the next closes the drawer. */
+            escape() {
+                if (this.open && this.mode === 'manage') {
+                    this.leaveManage()
+
+                    return
+                }
+
+                this.open = false
+            },
+
+            /**
              * Swap the drawer body for the document behind one request.
              *
              * Used by both the queue and the signed history. Which of the two
@@ -143,6 +197,7 @@
              * there is anything left to sign, and renders itself accordingly.
              */
             view(requestId) {
+                this.mode = 'tabs'
                 this.viewing = requestId
             },
 
@@ -303,7 +358,9 @@
             width: min(var(--dsig-w, 26rem), 100vw);
             background: #fff; color: #09090b;
             box-shadow: -12px 0 32px -12px rgb(0 0 0 / 0.25);
+            transition: width .2s ease;
         }
+        .dsig-panel--wide { width: min(var(--dsig-w-manage, 80rem), 100vw); }
         .dsig-panel--right { right: 0; }
         .dsig-panel--left  { left: 0; box-shadow: 12px 0 32px -12px rgb(0 0 0 / 0.25); }
         .dark .dsig-panel { background: #18181b; color: #fafafa; }
@@ -324,6 +381,13 @@
         .dsig-panel__close:hover { opacity: 1; background: rgb(0 0 0 / 0.05); }
         .dark .dsig-panel__close:hover { background: rgb(255 255 255 / 0.08); }
         .dsig-panel__close svg { width: 1.25rem; height: 1.25rem; }
+        .dsig-panel__back {
+            border: 0; background: transparent; cursor: pointer; color: inherit;
+            opacity: .7; padding: .25rem; border-radius: .375rem; display: flex;
+        }
+        .dsig-panel__back:hover { opacity: 1; background: rgb(0 0 0 / 0.05); }
+        .dark .dsig-panel__back:hover { background: rgb(255 255 255 / 0.08); }
+        .dsig-panel__back svg { width: 1.25rem; height: 1.25rem; }
 
         /*
             A flex column so the document pane can claim the full height and
@@ -354,6 +418,8 @@
         .dark .dsig-panel__foot { border-color: rgb(255 255 255 / 0.1); }
         .dsig-panel__foot a { color: inherit; opacity: .7; text-decoration: none; }
         .dsig-panel__foot a:hover { opacity: 1; text-decoration: underline; }
+        .dsig-panel__foot .dsig-linkbtn { opacity: .7; text-decoration: none; }
+        .dsig-panel__foot .dsig-linkbtn:hover { opacity: 1; text-decoration: underline; }
 
         .dsig-card {
             border: 1px solid rgb(0 0 0 / 0.08); border-radius: .75rem;
@@ -407,7 +473,7 @@
         .dsig-panel--left.dsig-t-from  { transform: translateX(-100%); opacity: 0; }
 
         @media (prefers-reduced-motion: reduce) {
-            .dsig-t-enter, .dsig-t-leave, .dsig-fab { transition: none; }
+            .dsig-t-enter, .dsig-t-leave, .dsig-fab, .dsig-panel { transition: none; }
             .dsig-skeleton { animation: none; }
         }
 
@@ -448,7 +514,10 @@
             display: flex; align-items: center; justify-content: center;
             width: 8rem; height: 4.5rem; padding: .35rem;
             border: 1px solid rgb(0 0 0 / 0.1); border-radius: .625rem; background: #fff;
+            cursor: pointer; transition: border-color .15s ease;
         }
+        .dsig-lib__item:hover { border-color: var(--dsig-accent, #18181b); }
+        .dark .dsig-lib__item:hover { border-color: var(--dsig-accent, #f4f4f5); }
         .dark .dsig-lib__item { border-color: rgb(255 255 255 / 0.12); background: rgb(255 255 255 / 0.04); }
         .dsig-lib__item img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
@@ -590,8 +659,114 @@
         }
         .dsig-linkbtn:disabled { opacity: .5; cursor: not-allowed; text-decoration: none; }
 
+        /*
+            ── Manage signatures ──────────────────────────────────────────
+            List and detail side by side. Each pane scrolls on its own, so a
+            long list never scrolls the selected signature out of view.
+        */
+        .dsig-manage-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        .dsig-manage {
+            flex: 1; min-height: 0;
+            display: grid; grid-template-columns: minmax(15rem, 20rem) 1fr; gap: 1.25rem;
+        }
+        .dsig-manage__list, .dsig-manage__detail { min-height: 0; overflow-y: auto; }
+        .dsig-manage__list { padding-right: .25rem; }
+        .dsig-manage__back { display: none; margin-bottom: .75rem; font-size: .8125rem; }
+
+        .dsig-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .75rem; }
+        .dsig-filter {
+            border: 1px solid rgb(0 0 0 / 0.15); border-radius: 9999px; cursor: pointer;
+            background: transparent; color: inherit; font-size: .75rem; font-weight: 600;
+            padding: .2rem .6rem; opacity: .7;
+        }
+        .dark .dsig-filter { border-color: rgb(255 255 255 / 0.2); }
+        .dsig-filter--on { opacity: 1; border-color: var(--dsig-accent, #18181b); box-shadow: 0 0 0 1px var(--dsig-accent, #18181b); }
+        .dark .dsig-filter--on { border-color: var(--dsig-accent, #f4f4f5); box-shadow: 0 0 0 1px var(--dsig-accent, #f4f4f5); }
+
+        .dsig-row {
+            display: flex; align-items: center; gap: .75rem; width: 100%; text-align: left;
+            border: 1px solid rgb(0 0 0 / 0.08); border-radius: .625rem;
+            background: transparent; color: inherit; cursor: pointer;
+            padding: .5rem; margin-bottom: .5rem;
+        }
+        .dark .dsig-row { border-color: rgb(255 255 255 / 0.1); }
+        .dsig-row:hover { border-color: rgb(0 0 0 / 0.2); }
+        .dark .dsig-row:hover { border-color: rgb(255 255 255 / 0.25); }
+        .dsig-row--on { border-color: var(--dsig-accent, #18181b); box-shadow: 0 0 0 1px var(--dsig-accent, #18181b); }
+        .dark .dsig-row--on { border-color: var(--dsig-accent, #f4f4f5); box-shadow: 0 0 0 1px var(--dsig-accent, #f4f4f5); }
+        .dsig-row__thumb {
+            flex: none; width: 4.5rem; height: 2.5rem; padding: .15rem;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: .375rem; background: #fff;
+        }
+        .dsig-row__thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .dsig-row__body { min-width: 0; flex: 1; }
+        .dsig-row__title { display: block; font-size: .8125rem; font-weight: 600; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dsig-row__meta { display: block; font-size: .75rem; opacity: .65; margin: .1rem 0 0; }
+
+        .dsig-badge {
+            display: inline-block; font-size: .6875rem; font-weight: 600; line-height: 1.4;
+            padding: 0 .4rem; border-radius: .375rem;
+            background: rgb(245 158 11 / 0.14); color: rgb(180 83 9);
+        }
+        .dsig-badge--ok   { background: rgb(16 185 129 / 0.14); color: rgb(4 120 87); }
+        .dsig-badge--bad  { background: rgb(220 38 38 / 0.12); color: rgb(185 28 28); }
+        .dsig-badge--info { background: rgb(59 130 246 / 0.12); color: rgb(29 78 216); }
+        .dark .dsig-badge       { color: rgb(251 191 36); }
+        .dark .dsig-badge--ok   { color: rgb(52 211 153); }
+        .dark .dsig-badge--bad  { color: rgb(248 113 113); }
+        .dark .dsig-badge--info { color: rgb(96 165 250); }
+
+        .dsig-detail__image {
+            display: flex; align-items: center; justify-content: center;
+            height: 10rem; padding: .75rem; border-radius: .75rem; background: #fff;
+            border: 1px solid rgb(0 0 0 / 0.08);
+        }
+        .dsig-detail__image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .dsig-detail__actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .75rem 0 1rem; }
+        .dsig-btn--danger { background: #dc2626; color: #fff; }
+        .dark .dsig-btn--danger { background: #dc2626; color: #fff; }
+        a.dsig-btn { text-decoration: none; display: inline-block; }
+        .dsig-confirm { font-size: .8125rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+
+        .dsig-section { margin-bottom: 1.25rem; }
+        .dsig-section__title { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; opacity: .55; margin: 0 0 .5rem; }
+        .dsig-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .75rem 1rem; margin: 0; }
+        .dsig-facts dt { font-size: .75rem; opacity: .6; }
+        .dsig-facts dd { margin: .1rem 0 0; font-size: .8125rem; overflow-wrap: anywhere; }
+        .dsig-uses { margin: 0; padding-left: 1rem; font-size: .8125rem; }
+        .dsig-uses li + li { margin-top: .25rem; }
+
+        .dsig-meta summary { cursor: pointer; font-size: .8125rem; font-weight: 600; }
+        .dsig-meta__row { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .75rem; }
+        .dsig-meta__label { flex: none; width: 11rem; opacity: .6; }
+        .dsig-meta__value { min-width: 0; flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+        .dsig-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .75rem; }
+        .dsig-template {
+            border: 1px solid rgb(0 0 0 / 0.08); border-radius: .75rem; overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+        .dark .dsig-template { border-color: rgb(255 255 255 / 0.1); background: rgb(255 255 255 / 0.03); }
+        .dsig-template__head { padding: .5rem .75rem; border-bottom: 1px solid rgb(0 0 0 / 0.08); }
+        .dark .dsig-template__head { border-color: rgb(255 255 255 / 0.1); }
+        .dsig-template__label { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dsig-template__key { font-size: .6875rem; opacity: .6; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dsig-template__preview { display: block; height: 6rem; padding: .25rem; background: rgb(0 0 0 / 0.03); }
+        .dsig-template__preview img { width: 100%; height: 100%; object-fit: contain; }
+        .dsig-template__foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem .75rem; font-size: .6875rem; }
+        .dsig-template__links { display: flex; gap: .75rem; padding: 0 .75rem .6rem; font-size: .75rem; }
+        .dsig-template__links a { color: inherit; font-weight: 600; }
+
         @media (max-width: 640px) {
-            .dsig-panel { width: 100vw; }
+            .dsig-panel, .dsig-panel--wide { width: 100vw; }
+
+            /* One pane at a time: the list, or the signature picked from it. */
+            .dsig-manage { grid-template-columns: 1fr; }
+            .dsig-manage--picked .dsig-manage__list { display: none; }
+            .dsig-manage:not(.dsig-manage--picked) .dsig-manage__detail { display: none; }
+            .dsig-manage__back { display: inline-block; }
+            .dsig-meta__label { width: 8rem; }
         }
     </style>
 
@@ -632,15 +807,28 @@
         x-transition:leave-start="dsig-t-to"
         x-transition:leave-end="dsig-t-from"
         class="dsig-panel dsig-panel--{{ $onLeft ? 'left' : 'right' }}"
+        x-bind:class="mode === 'manage' ? 'dsig-panel--wide' : ''"
         style="display: none"
         role="dialog"
         aria-modal="true"
         aria-label="{{ $settings['label'] }}"
     >
         <div class="dsig-panel__head">
+            <button
+                type="button"
+                class="dsig-panel__back"
+                x-show="mode === 'manage'"
+                x-cloak
+                x-on:click="leaveManage()"
+                aria-label="Back"
+            >
+                <x-filament::icon icon="heroicon-o-arrow-left" />
+            </button>
+
             <div>
                 <p class="dsig-panel__title">{{ $settings['label'] }}</p>
-                <p class="dsig-panel__sub">
+                <p class="dsig-panel__sub" x-show="mode === 'manage'" x-cloak>Manage signatures</p>
+                <p class="dsig-panel__sub" x-show="mode !== 'manage'">
                     @if ($count === 0)
                         Nothing awaiting your signature
                     @elseif ($count === 1)
@@ -662,7 +850,7 @@
             has to be reachable from the same overlay rather than behind it.
             Hidden while a document is open: the pane has its own tray.
         --}}
-        <div class="dsig-tabs" role="tablist" x-show="! viewing">
+        <div class="dsig-tabs" role="tablist" x-show="! viewing && mode === 'tabs'">
             <button
                 type="button"
                 role="tab"
@@ -736,7 +924,7 @@
                 </template>
             </div>
 
-            <div x-show="! viewing && tab === 'queue'">
+            <div x-show="! viewing && mode === 'tabs' && tab === 'queue'">
                 <div class="dsig-note dsig-note--ok" x-show="justSigned" x-cloak>
                     <span x-text="justSigned === 1
                         ? 'Signed. The document has moved to your Signed tab.'
@@ -838,7 +1026,7 @@
                 is what people actually remember. Read-only throughout — these
                 open in the same document pane with its signing surface absent.
             --}}
-            <div x-show="! viewing && tab === 'signed'" x-cloak>
+            <div x-show="! viewing && mode === 'tabs' && tab === 'signed'" x-cloak>
                 @if (! $this->loaded)
                     <div class="dsig-skeleton"></div>
                     <div class="dsig-skeleton"></div>
@@ -890,7 +1078,7 @@
                 @endif
             </div>
 
-            <div x-show="! viewing && tab === 'library'" x-cloak>
+            <div x-show="! viewing && mode === 'tabs' && tab === 'library'" x-cloak>
                 @if (! $this->loaded)
                     <div class="dsig-skeleton"></div>
                 @else
@@ -899,9 +1087,15 @@
                     @if ($signatures->isNotEmpty())
                         <div class="dsig-lib">
                             @foreach ($signatures as $signature)
-                                <div class="dsig-lib__item" wire:key="dsig-sig-{{ $signature->id }}">
+                                <button
+                                    type="button"
+                                    class="dsig-lib__item"
+                                    wire:key="dsig-sig-{{ $signature->id }}"
+                                    x-on:click="manage(@js($signature->uuid))"
+                                    title="Manage this signature"
+                                >
                                     <img src="{{ $signature->getTemporaryImageUrl() }}" alt="Stored signature" />
-                                </div>
+                                </button>
                             @endforeach
                         </div>
                     @endif
@@ -957,8 +1151,9 @@
                         </div>
                     @else
                         <div class="dsig-note">
-                            You already have an active signature. Revoke it from the Signatures
-                            page before registering another.
+                            You already have an active signature. Revoke it from
+                            <a href="#" x-on:click.prevent="manage(@js($signatures->first()?->uuid))">Manage signatures</a>
+                            before registering another.
                         </div>
                     @endif
                 @endif
@@ -969,12 +1164,22 @@
                 computers (Kukux Sign Agent). Its own component, mounted once
                 the drawer has been opened.
             --}}
-            <div x-show="! viewing && tab === 'devices'" x-cloak>
+            <div x-show="! viewing && mode === 'tabs' && tab === 'devices'" x-cloak>
                 @if (! $this->loaded)
                     <div class="dsig-skeleton"></div>
                 @else
                     @livewire('kukux-digital-signature.signing-devices', key('dsig-signing-devices'))
                 @endif
+            </div>
+
+            {{--
+                Manage signatures: the list beside the selected signature's
+                details, download, revoke and templates. Replaces the View
+                Signature page, so nothing here navigates away except the
+                template signer and designer, which are full pages of their own.
+            --}}
+            <div x-show="! viewing && mode === 'manage'" x-cloak class="dsig-manage-wrap">
+                @include('signature::filament.livewire.partials.manage-signatures')
             </div>
         </div>
 
@@ -985,10 +1190,8 @@
             what the user is already looking at. The page stays routable for
             hosts that want it in their navigation.
         --}}
-        @if ($this->libraryUrl)
-            <div class="dsig-panel__foot" x-show="! viewing">
-                <a href="{{ $this->libraryUrl }}">Manage signatures</a>
-            </div>
-        @endif
+        <div class="dsig-panel__foot" x-show="! viewing && mode === 'tabs'">
+            <button type="button" class="dsig-linkbtn" x-on:click="manage()">Manage signatures</button>
+        </div>
     </div>
 </div>
