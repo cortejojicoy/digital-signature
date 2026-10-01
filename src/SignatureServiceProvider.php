@@ -17,8 +17,13 @@ use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
+use Kukux\DigitalSignature\Filament\Livewire\SigningDevices;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource\ViewSignatureResolver;
+use Kukux\DigitalSignature\Http\Controllers\Agent\AgentController;
+use Kukux\DigitalSignature\Http\Controllers\Agent\AgentWebController;
 use Kukux\DigitalSignature\Http\Controllers\DeviceController;
+use Kukux\DigitalSignature\Http\Middleware\AuthenticateAgent;
+use Kukux\DigitalSignature\Http\Middleware\EnsureAgentVersion;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
@@ -165,6 +170,7 @@ class SignatureServiceProvider extends ServiceProvider
         // in its own layout can do so without the plugin.
         if (class_exists(Livewire::class)) {
             Livewire::component('kukux-digital-signature.launcher', SignatureLauncher::class);
+            Livewire::component('kukux-digital-signature.signing-devices', SigningDevices::class);
         }
 
         // Register templates declared in config. Runtime registration via the
@@ -189,6 +195,39 @@ class SignatureServiceProvider extends ServiceProvider
                 Route::post('attest', [DeviceController::class, 'attest'])->name('attest');
                 Route::patch('{uuid}', [DeviceController::class, 'update'])->whereUuid('uuid')->name('update');
                 Route::delete('{uuid}', [DeviceController::class, 'destroy'])->whereUuid('uuid')->name('destroy');
+            });
+
+        // Desktop agent (Kukux Sign Agent). Deliberately NOT in the `web`
+        // group: the agent has no cookies, so CSRF would refuse every POST.
+        // Its trust comes from pairing codes, key proofs and AuthenticateAgent.
+        // Wire contract: digital-signature-agent/docs/protocol.md.
+        Route::prefix('signature/agent')
+            ->middleware([EnsureAgentVersion::class])
+            ->name('signature.agent.')
+            ->group(function () {
+                Route::post('pairings/lookup', [AgentController::class, 'lookup'])
+                    ->middleware('throttle:10,1')->name('pairings.lookup');
+                Route::post('pairings/{pairing}/claim', [AgentController::class, 'claim'])
+                    ->whereUuid('pairing')->middleware('throttle:20,1')->name('pairings.claim');
+                Route::post('pairings/{pairing}/poll', [AgentController::class, 'poll'])
+                    ->whereUuid('pairing')->middleware('throttle:120,1')->name('pairings.poll');
+
+                Route::middleware([AuthenticateAgent::class, 'throttle:120,1'])->group(function () {
+                    Route::get('status', [AgentController::class, 'status'])->name('status');
+                    Route::delete('device', [AgentController::class, 'unpair'])->name('device');
+                    Route::post('jobs/{job}/claim', [AgentController::class, 'claimJob'])->whereUuid('job')->name('jobs.claim');
+                    Route::post('jobs/{job}/complete', [AgentController::class, 'completeJob'])->whereUuid('job')->name('jobs.complete');
+                    Route::post('jobs/{job}/reject', [AgentController::class, 'rejectJob'])->whereUuid('job')->name('jobs.reject');
+                });
+            });
+
+        // The browser waiting on an approval. Session-authenticated.
+        Route::prefix('signature/agent-web')
+            ->middleware(['web', 'throttle:120,1'])
+            ->name('signature.agent.web.')
+            ->group(function () {
+                Route::get('jobs/{uuid}', [AgentWebController::class, 'job'])->whereUuid('uuid')->name('job');
+                Route::post('skip', [AgentWebController::class, 'skip'])->name('skip');
             });
 
         // Signed-URL endpoint that streams signature images from the (typically
