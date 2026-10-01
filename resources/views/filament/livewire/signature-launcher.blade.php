@@ -701,6 +701,18 @@
             >
                 My signatures
             </button>
+
+            <button
+                type="button"
+                role="tab"
+                class="dsig-tab"
+                x-bind:class="tab === 'devices' ? 'dsig-tab--on' : ''"
+                x-bind:aria-selected="(tab === 'devices').toString()"
+                x-on:click="tab = 'devices'"
+                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+            >
+                Devices
+            </button>
         </div>
 
         <div class="dsig-panel__body">
@@ -949,6 +961,19 @@
                             page before registering another.
                         </div>
                     @endif
+                @endif
+            </div>
+
+            {{--
+                Signing devices: this browser, other browsers, and paired
+                computers (Kukux Sign Agent). Its own component, mounted once
+                the drawer has been opened.
+            --}}
+            <div x-show="! viewing && tab === 'devices'" x-cloak>
+                @if (! $this->loaded)
+                    <div class="dsig-skeleton"></div>
+                @else
+                    @livewire('kukux-digital-signature.signing-devices', key('dsig-signing-devices'))
                 @endif
             </div>
         </div>
