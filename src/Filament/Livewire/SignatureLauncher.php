@@ -6,6 +6,7 @@ use Filament\Facades\Filament;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Kukux\DigitalSignature\Filament\Concerns\ActsOnSignatureRequests;
+use Kukux\DigitalSignature\Filament\Concerns\ManagesSignatures;
 use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
@@ -39,6 +40,7 @@ use Throwable;
 class SignatureLauncher extends Component
 {
     use ActsOnSignatureRequests;
+    use ManagesSignatures;
     use RegistersSignatures;
 
     /** Set on first open; until then the slide-over renders its skeleton. */
@@ -162,11 +164,6 @@ class SignatureLauncher extends Component
         return $this->safeUrl(fn () => SignatureInbox::getUrl());
     }
 
-    public function getLibraryUrlProperty(): ?string
-    {
-        return $this->safeUrl(fn () => SignatureResource::getUrl());
-    }
-
     public function getRegisterUrlProperty(): ?string
     {
         return $this->safeUrl(fn () => SignatureResource::getUrl('create'));
@@ -200,6 +197,7 @@ class SignatureLauncher extends Component
             'poll'          => LauncherSettings::pollSeconds(),
             'hideWhenEmpty' => LauncherSettings::hideWhenEmpty(),
             'width'         => LauncherSettings::width(),
+            'manageWidth'   => LauncherSettings::manageWidth(),
             'offsetX'       => LauncherSettings::offsetX(),
             'offsetY'       => LauncherSettings::offsetY(),
             'zIndex'        => LauncherSettings::zIndex(),
