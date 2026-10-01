@@ -18,7 +18,6 @@ use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
 use Kukux\DigitalSignature\Filament\Livewire\SigningDevices;
-use Kukux\DigitalSignature\Filament\Resources\SignatureResource\ViewSignatureResolver;
 use Kukux\DigitalSignature\Http\Controllers\Agent\AgentController;
 use Kukux\DigitalSignature\Http\Controllers\Agent\AgentWebController;
 use Kukux\DigitalSignature\Http\Controllers\DeviceController;
@@ -61,7 +60,6 @@ class SignatureServiceProvider extends ServiceProvider
         // Filament\Support\ComponentResolver and docs/signatory-routing.md §8.
         foreach ([
             ResourceResolver::class,
-            ViewSignatureResolver::class,
             ActionResolver::class,
             HeaderActionResolver::class,
             RequestSignaturesResolver::class,
