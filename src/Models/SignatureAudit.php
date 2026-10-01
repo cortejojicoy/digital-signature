@@ -33,6 +33,10 @@ class SignatureAudit extends Model
 
     public const DELEGATION_REVOKED = 'delegation.revoked';
 
+    public const AGENT_PAIRED = 'agent.paired';
+
+    public const AGENT_APPROVED = 'agent.approved';
+
     protected $table = 'digital_signature_audits';
 
     protected $fillable = [
