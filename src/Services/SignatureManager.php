@@ -215,10 +215,6 @@ class SignatureManager
             );
         }
 
-        // The device this act happens on — not the one the signature was
-        // drawn on, which $source keeps. Both facts matter.
-        $device = $this->devices()->forSigning($signerUserId, $source);
-
         // In a multi-signatory session the document being signed is the
         // session's running PDF, not a fresh render of the record. Hashing the
         // wrong one would break the chain: signature N's document_hash must
@@ -226,6 +222,12 @@ class SignatureManager
         $documentHash = $this->documentIntegrity->hash(
             $sourcePdfPath ?? $signable->getSignablePdfPath()
         );
+
+        // The device this act happens on — not the one the signature was
+        // drawn on, which $source keeps. Both facts matter. With a paired
+        // computer, this is where signing pauses for its approval of exactly
+        // this document (AgentApprovalRequiredException).
+        $device = $this->devices()->forSigning($signerUserId, $source, $documentHash, $signable);
 
         $sig = Signature::create(array_merge([
             'uuid' => (string) Str::uuid(),
@@ -245,6 +247,8 @@ class SignatureManager
         if ($position) {
             SignaturePosition::create(array_merge(['signature_id' => $sig->id], $position));
         }
+
+        $this->devices()->settleApproval($sig);
 
         // Further appearances of this same signature. One row above, one
         // PKCS#7 block, one link in the chain — these only say where else it
