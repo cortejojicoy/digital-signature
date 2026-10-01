@@ -25,7 +25,7 @@ final class DeviceProofVerifier
 {
     public const VERSION = 'v1';
 
-    public static function message(string $purpose, string $nonce, int $userId, string $payloadHash): string
+    public static function message(string $purpose, string $nonce, int|string $userId, string $payloadHash): string
     {
         return implode('|', [self::VERSION, $purpose, $nonce, (string) $userId, $payloadHash]);
     }
