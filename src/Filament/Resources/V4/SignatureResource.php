@@ -53,8 +53,9 @@ class SignatureResource extends Resource
     /**
      * With the floating launcher on, the launcher is the entry point to
      * signatures and this resource stops claiming a sidebar item — it stays
-     * fully routable, and the launcher's footer links to it. Set
-     * signature.launcher.replaces_navigation to false to keep both.
+     * fully routable, and the drawer's "Manage signatures" covers the same
+     * records. Set signature.launcher.replaces_navigation to false to keep
+     * both.
      */
     public static function shouldRegisterNavigation(): bool
     {
@@ -121,7 +122,7 @@ class SignatureResource extends Resource
     }
 
     // -------------------------------------------------------------------------
-    // Infolist — used by the View page
+    // Infolist — used by the list page's View slide-over
     // -------------------------------------------------------------------------
 
     public static function infolist(Schema $infolist): Schema
@@ -311,7 +312,16 @@ class SignatureResource extends Resource
                     ]),
             ])
             ->recordActions([
-                ViewAction::make(),
+                // With no View page, this opens the infolist in a slide-over.
+                ViewAction::make()->slideOver(),
+
+                BaseAction::make('download')
+                    ->label('Download')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->visible(fn (Signature $record): bool => (bool) $record->image_path)
+                    ->url(fn (Signature $record): ?string => $record->getTemporaryImageUrl(60))
+                    ->openUrlInNewTab(),
 
                 BaseAction::make('revoke')
                     ->label('Revoke')
@@ -339,7 +349,9 @@ class SignatureResource extends Resource
         return [
             'index'  => Pages\ListSignatures::route('/'),
             'create' => Pages\CreateSignature::route('/create'),
-            'view'   => Pages\ViewSignature::route('/{record}'),
+            // No View page: a signature is managed in the launcher drawer.
+            // Old /signatures/{record} links redirect there.
+            'open'   => Pages\OpenSignatureInDrawer::route('/{record}'),
         ];
     }
 
