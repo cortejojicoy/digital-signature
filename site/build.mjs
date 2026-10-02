@@ -70,6 +70,7 @@ const NAV = [
             { file: 'on-demand-pdf-signing.md', label: 'On-demand PDF signing' },
             { file: 'pdf-templates.md', label: 'PDF templates' },
             { file: 'signatory-routing.md', label: 'Signatory routing' },
+            { file: 'route-for-signatures.md', label: 'Guide: Route for Signatures' },
         ],
     },
     {
