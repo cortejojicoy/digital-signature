@@ -43,6 +43,8 @@ class SignatureRequestedNotification extends Notification
             ->greeting('Hello '.($notifiable->name ?? '').',')
             ->line(sprintf('You are listed as "%s" on **%s**.', $this->request->role, $title))
             ->line('It is ready for your signature.')
+            ->line('Open the Signatures button in the app; it is waiting under "Awaiting".')
+            ->action('Open '.config('app.name', 'the app'), url('/'))
             ->line('Reference: '.$this->request->uuid);
     }
 
