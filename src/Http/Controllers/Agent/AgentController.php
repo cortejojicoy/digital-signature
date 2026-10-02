@@ -53,9 +53,26 @@ class AgentController extends Controller
         $device = $this->device($request);
         $user = $device->user;
 
+        // Where else this account can sign (multi-app-pairing-plan.md §7.4).
+        $others = SigningDevice::query()
+            ->where('user_id', $device->user_id)
+            ->whereKeyNot($device->id)
+            ->active()
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (SigningDevice $other) => [
+                'uuid'         => $other->uuid,
+                'label'        => $other->displayName(),
+                'device_type'  => $other->deviceType()->value,
+                'last_used_at' => $other->last_used_at?->toIso8601String(),
+            ])
+            ->all();
+
         return response()->json([
-            'device' => ['uuid' => $device->uuid, 'label' => $device->displayName(), 'status' => $device->status],
-            'user'   => ['id' => (string) $device->user_id, 'name' => (string) ($user->name ?? $user->email ?? '')],
+            'device'        => ['uuid' => $device->uuid, 'label' => $device->displayName(), 'status' => $device->status],
+            'user'          => ['id' => (string) $device->user_id, 'name' => (string) ($user->name ?? $user->email ?? '')],
+            'other_devices' => $others,
         ]);
     }
 
