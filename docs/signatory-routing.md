@@ -333,7 +333,9 @@ SignaturePlugin::make()->resolveSignatoriesUsing(
 );
 ```
 
-Events for headless flows: `SigningSessionOpened`, `SignatureRequested`, `SignatureDeclined`, `SignatureAutoAffixed`, `SigningSessionCompleted`, plus the existing `DocumentSigned`.
+Events for headless flows: `SigningSessionOpened`, `SignatureRequested`, `SignatoryTurnReached`, `SignatureDeclined`, `SignatureAutoAffixed`, `SigningSessionCompleted`, plus the existing `DocumentSigned`.
+
+**Who gets notified, and when.** Each signatory gets `SignatureRequestedNotification` once, when they can actually sign. In a sequential session that's the first signatory when the session opens, then each next one as the person before them signs. In a parallel session it's everyone at once. A signatory tagged after the session opened is notified when their turn comes. The package sends it on `SignatoryTurnReached`. `SignatureRequested` still fires for every slot the moment it's routed, if you need that instead. Channels come from `sessions.notification_channels`; set it to `[]` to send nothing.
 
 ---
 

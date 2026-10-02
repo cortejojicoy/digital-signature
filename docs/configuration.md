@@ -331,7 +331,7 @@ mode live there; this is the key reference.
 |---|---|---|---|
 | `sessions.sequence_mode` | `SIGNATURE_SEQUENCE_MODE` | `sequential` | `sequential` honours `SlotDefinition::$order` (Prepared → Attested → Noted); `parallel` lets any assigned signatory act at any time |
 | `sessions.expires_after_days` | `SIGNATURE_SESSION_EXPIRY_DAYS` | `null` | Sessions stop accepting signatures after this many days; null disables expiry |
-| `sessions.notification_channels` | — | `['mail']` | Channels for `SignatureRequestedNotification` |
+| `sessions.notification_channels` | — | `['mail']` | Channels for `SignatureRequestedNotification`, sent to each signatory when it's their turn. `[]` turns it off. |
 
 ### `multi_signature`
 
