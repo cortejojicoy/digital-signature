@@ -1,12 +1,17 @@
 <?php
 
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
 /**
  * MySQL and Postgres require a foreign key's target table to already exist at
  * CREATE TABLE time; SQLite does not. So the package test suite, which runs on
  * SQLite, will happily accept a migration order that fails on the databases
  * most hosts actually use.
  *
- * These tests read the migration files and check the ordering directly.
+ * These tests read the migration source and check the ordering directly, then
+ * run it against the database states a host can be in.
  */
 function migrationFiles(): array
 {
@@ -16,99 +21,144 @@ function migrationFiles(): array
     return $files;
 }
 
+function packageMigration(): Migration
+{
+    return require migrationFiles()[0];
+}
+
+/**
+ * Every Schema::create in the migration, in order, with the source of its
+ * blueprint closure.
+ *
+ * @return array<int, array{table: string, body: string}>
+ */
+function createdTables(): array
+{
+    $source = file_get_contents(migrationFiles()[0]);
+    $parts = preg_split('/Schema::create\(\s*[\'"]([^\'"]+)[\'"]/', $source, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+    $tables = [];
+
+    for ($i = 1; $i < count($parts); $i += 2) {
+        $tables[] = ['table' => $parts[$i], 'body' => $parts[$i + 1]];
+    }
+
+    return $tables;
+}
+
+/** Tables the package owns, as the migration declares them. */
+function packageTables(): array
+{
+    return array_column(createdTables(), 'table');
+}
+
 describe('migration ordering', function () {
 
+    it('ships as one migration, so a host has a single file to run or publish', function () {
+        expect(migrationFiles())->toHaveCount(1);
+    });
+
     it('creates every foreign key target before the table that references it', function () {
-        // Tables the host application already has when the package's
-        // migrations run — Laravel's own `users` table is created by the
-        // framework's default migrations.
+        // Laravel's own `users` table is created by the host's migrations.
         $created = ['users'];
         $problems = [];
 
-        foreach (migrationFiles() as $file) {
-            $source = file_get_contents($file);
-            $name = basename($file);
-
-            preg_match('/Schema::create\(\s*[\'"]([^\'"]+)[\'"]/', $source, $self);
-            $selfTable = $self[1] ?? null;
-
-            // ->constrained('target') and the implicit ->constrained() form,
-            // which infers the table from the column name.
-            preg_match_all('/->constrained\(\s*[\'"]([^\'"]+)[\'"]/', $source, $explicit);
+        foreach (createdTables() as ['table' => $table, 'body' => $body]) {
+            preg_match_all('/->constrained\(\s*[\'"]([^\'"]+)[\'"]/', $body, $explicit);
 
             foreach ($explicit[1] as $target) {
                 // A self-reference is fine — the table exists by then.
-                if ($target === $selfTable) {
-                    continue;
-                }
-
-                if (! in_array($target, $created, true)) {
-                    $problems[] = "{$name} references [{$target}] before it is created";
+                if ($target !== $table && ! in_array($target, $created, true)) {
+                    $problems[] = "[{$table}] references [{$target}] before it is created";
                 }
             }
 
-            if ($selfTable !== null) {
-                $created[] = $selfTable;
-            }
+            $created[] = $table;
         }
 
         expect($problems)->toBe([]);
     });
 
-    it('has no gaps or duplicates in its ordering prefixes', function () {
-        $prefixes = array_map(
-            fn ($f) => (int) substr(basename($f), 11, 6),
-            migrationFiles(),
-        );
+    it('guards every create and every late column, so it is safe on an existing install', function () {
+        $source = file_get_contents(migrationFiles()[0]);
 
-        expect($prefixes)->toBe(range(1, count($prefixes)));
-    });
-
-    it('has no alter-table migrations — schema is declared where the table is created', function () {
-        // An `add_x_to_y` migration is only warranted for schema whose create
-        // migration had already shipped to hosts: editing that create migration
-        // after the fact leaves every existing installation without the column.
-        // Each entry here is one such repair, and nothing new belongs in it.
-        $shipped = [
-            '2024_01_01_000010_add_caption_position_to_signature_positions_table.php',
-            // Not a repair: device_id is new, but both target tables had
-            // already shipped, so a create-migration edit would never reach
-            // existing installs.
-            '2024_01_01_000012_add_device_id_to_signatures_and_audits.php',
-        ];
-
-        $alters = [];
-
-        foreach (migrationFiles() as $file) {
-            if (str_contains(file_get_contents($file), 'Schema::table(')) {
-                $alters[] = basename($file);
-            }
+        foreach (packageTables() as $table) {
+            expect($source)->toContain("if (! Schema::hasTable('{$table}'))");
         }
 
-        expect(array_values(array_diff($alters, $shipped)))->toBe([]);
+        preg_match_all('/Schema::table\(\s*[\'"]([^\'"]+)[\'"]/', $source, $alters);
+
+        foreach ($alters[1] as $table) {
+            expect($source)->toMatch("/Schema::hasColumn\\('{$table}'/");
+        }
+    });
+
+    it('drops every table it creates in down()', function () {
+        $source = file_get_contents(migrationFiles()[0]);
+
+        foreach (packageTables() as $table) {
+            expect($source)->toContain("Schema::dropIfExists('{$table}')");
+        }
     });
 
     it('runs against a database that actually enforces foreign keys', function () {
         // SQLite ignores foreign keys unless asked, so without this the suite
         // would pass on schema that a host app's MySQL would reject.
-        expect(\Illuminate\Support\Facades\DB::select('PRAGMA foreign_keys')[0]->foreign_keys)->toBe(1);
+        expect(DB::select('PRAGMA foreign_keys')[0]->foreign_keys)->toBe(1);
 
-        expect(fn () => \Illuminate\Support\Facades\DB::table('digital_signatures')->insert([
+        expect(fn () => DB::table('digital_signatures')->insert([
             'user_id'    => 99999,
             'image_path' => 'x.png',
             'image_hash' => str_repeat('a', 64),
         ]))->toThrow(\Illuminate\Database\QueryException::class);
     });
+});
 
-    it('drops in its own table in every down()', function () {
-        foreach (migrationFiles() as $file) {
-            $source = file_get_contents($file);
+describe('running on an existing install', function () {
 
-            if (! preg_match('/Schema::create\(\s*[\'"]([^\'"]+)[\'"]/', $source, $m)) {
-                continue;   // data-only migration
-            }
+    it('is a no-op when run a second time', function () {
+        packageMigration()->up();
 
-            expect($source)->toContain("Schema::dropIfExists('{$m[1]}')");
+        foreach (packageTables() as $table) {
+            expect(Schema::hasTable($table))->toBeTrue();
+        }
+    });
+
+    it('adds the columns an older release never got, and keeps the data', function () {
+        makeFakeUser();
+        $signature = makePrimarySignature(1);
+
+        // An install from before caption_position and device existed.
+        Schema::table('signature_positions', fn ($t) => $t->dropColumn('caption_position'));
+        Schema::table('digital_signature_audits', fn ($t) => $t->dropConstrainedForeignId('device_id'));
+        Schema::table('digital_signatures', fn ($t) => $t->dropConstrainedForeignId('device_id'));
+        Schema::drop('digital_signature_agent_jobs');
+
+        packageMigration()->up();
+
+        expect(Schema::hasColumn('signature_positions', 'caption_position'))->toBeTrue()
+            ->and(Schema::hasColumn('digital_signatures', 'device_id'))->toBeTrue()
+            ->and(Schema::hasColumn('digital_signature_audits', 'device_id'))->toBeTrue()
+            ->and(Schema::hasTable('digital_signature_agent_jobs'))->toBeTrue()
+            ->and(DB::table('digital_signatures')->where('id', $signature->id)->exists())->toBeTrue();
+    });
+
+    it('does not drop tables on rollback that the pre-consolidation migrations created', function () {
+        // A published copy of the old create migration, as a host records it.
+        app('migration.repository')->log('2026_03_31_101500_create_digital_signatures_table', 1);
+
+        packageMigration()->down();
+
+        foreach (packageTables() as $table) {
+            expect(Schema::hasTable($table))->toBeTrue();
+        }
+    });
+
+    it('drops its tables on rollback of a fresh install', function () {
+        packageMigration()->down();
+
+        foreach (packageTables() as $table) {
+            expect(Schema::hasTable($table))->toBeFalse();
         }
     });
 });

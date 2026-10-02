@@ -290,6 +290,155 @@ describe('floating launcher component', function () {
     });
 });
 
+describe('managing signatures in the drawer', function () {
+
+    beforeEach(function () {
+        Storage::fake('testing');
+    });
+
+    it('opens manage mode in the drawer instead of linking to the resource', function () {
+        $this->actingAs(makeUser(31, 'Footer Reader'));
+
+        $html = Livewire::test(SignatureLauncher::class)->html();
+
+        expect($html)->toContain('x-on:click="manage()"')
+            ->and($html)->toContain('Manage signatures')
+            ->and($html)->not->toContain('href="'.url('/admin/signatures').'"');
+    });
+
+    it('defers the list until manage mode is first opened', function () {
+        $this->actingAs(makeUser(32, 'Lazy Loader'));
+        makePrimarySignature(32);
+
+        expect((new SignatureLauncher)->getManagedSignaturesProperty())->toHaveCount(0);
+
+        Livewire::test(SignatureLauncher::class)
+            ->assertSet('manageLoaded', false)
+            ->call('manage')
+            ->assertSet('manageLoaded', true)
+            ->assertSet('loaded', true)
+            ->assertSee('Your signature');
+    });
+
+    it('only ever lists and selects the signed-in user’s own signatures', function () {
+        makeUser(33, 'Owner');
+        makeUser(34, 'Stranger');
+        $mine = makePrimarySignature(33);
+        $theirs = makePrimarySignature(34);
+
+        $this->actingAs(TestUser::findOrFail(33));
+
+        $component = Livewire::test(SignatureLauncher::class)->call('manage', $mine->uuid);
+
+        $component->assertSet('managing', $mine->uuid);
+        expect($component->instance()->getManagedSignaturesProperty()->pluck('id')->all())->toBe([$mine->id]);
+
+        // Someone else's uuid, sent straight from the browser, selects nothing.
+        $component->call('manage', $theirs->uuid)
+            ->assertSet('managing', null)
+            ->assertDontSee($theirs->image_hash);
+    });
+
+    it('revokes the user’s own signature and refuses anyone else’s', function () {
+        makeUser(35, 'Revoker');
+        makeUser(36, 'Bystander');
+        $mine = makePrimarySignature(35);
+        $theirs = makePrimarySignature(36);
+
+        $this->actingAs(TestUser::findOrFail(35));
+
+        Livewire::test(SignatureLauncher::class)->call('revokeSignature', $theirs->uuid);
+        expect($theirs->refresh()->isRevoked())->toBeFalse();
+
+        Livewire::test(SignatureLauncher::class)->call('revokeSignature', $mine->uuid);
+        expect($mine->refresh()->isRevoked())->toBeTrue();
+
+        // Revoking again changes nothing, including when it was revoked.
+        $revokedAt = $mine->revoked_at;
+        $this->travel(5)->minutes();
+
+        Livewire::test(SignatureLauncher::class)->call('revokeSignature', $mine->uuid);
+        expect($mine->refresh()->revoked_at->equalTo($revokedAt))->toBeTrue();
+    });
+
+    it('lets the user register a new signature once the old one is revoked', function () {
+        $this->actingAs(makeUser(37, 'Fresh Start'));
+        $signature = makePrimarySignature(37);
+
+        $component = Livewire::test(SignatureLauncher::class)->call('manage', $signature->uuid);
+        expect($component->html())->toContain('You already have an active signature');
+
+        $component->call('revokeSignature', $signature->uuid);
+        expect($component->html())->toContain('dsig-launcher-pad');
+    });
+
+    it('shows everything the View page did for the selected signature', function () {
+        $this->actingAs(makeUser(38, 'Detail Reader'));
+        $signature = makePrimarySignature(38);
+
+        $html = Livewire::test(SignatureLauncher::class)->call('manage', $signature->uuid)->html();
+
+        expect($html)->toContain('Download image')
+            ->and($html)->toContain('Revoke signature')
+            ->and($html)->toContain('Created on')
+            ->and($html)->toContain('Used on')
+            ->and($html)->toContain('Apply this signature')
+            ->and($html)->toContain('Security metadata')
+            ->and($html)->toContain($signature->image_hash);
+    });
+
+    it('keeps Download but drops Revoke for a revoked signature', function () {
+        $this->actingAs(makeUser(39, 'Former Signer'));
+        $signature = makePrimarySignature(39);
+        $signature->update(['status' => 'revoked', 'revoked_at' => now()]);
+
+        $html = Livewire::test(SignatureLauncher::class)->call('manage', $signature->uuid)->html();
+
+        expect($html)->toContain('Download image')
+            ->and($html)->not->toContain('Revoke signature');
+    });
+
+    it('reports how far each template’s placement is set up', function () {
+        arSessionTemplate();
+        registerRoutedTemplate('half-done', [
+            'first'  => ['label' => 'First', 'signatory' => 'preparedBy', 'order' => 1, 'required' => true],
+            'second' => ['label' => 'Second', 'signatory' => 'attestedBy', 'order' => 2, 'required' => true],
+        ], ['renderer' => \Kukux\DigitalSignature\Tests\Support\StubPdfRenderer::class]);
+
+        \Kukux\DigitalSignature\Models\PdfTemplateSlot::create([
+            'template_key' => 'half-done', 'slot_key' => 'first',
+            'page' => 1, 'x' => 10.0, 'y' => 10.0, 'width' => 100.0, 'height' => 40.0,
+        ]);
+
+        $this->actingAs(makeUser(40, 'Template User'));
+        $signature = makePrimarySignature(40);
+
+        $cards = collect((new SignatureLauncher)->templateCardsFor($signature))->keyBy('key');
+
+        expect($cards['accomplishment-report'])->toMatchArray(['slotCount' => 3, 'savedCount' => 3, 'configured' => true])
+            ->and($cards['half-done'])->toMatchArray(['slotCount' => 2, 'savedCount' => 1, 'configured' => false]);
+    });
+
+    it('offers no templates for a signature already used on a document', function () {
+        arSessionTemplate();
+
+        $this->actingAs(makeUser(41, 'Document Signer'));
+        $use = makePrimarySignature(41);
+        $use->forceFill(['signable_type' => 'report', 'signable_id' => 1, 'status' => 'signed'])->save();
+
+        expect((new SignatureLauncher)->templateCardsFor($use))->toBe([]);
+    });
+
+    it('turns library thumbnails into a way into manage mode', function () {
+        $this->actingAs(makeUser(42, 'Thumbnail Clicker'));
+        $signature = makePrimarySignature(42);
+
+        $html = Livewire::test(SignatureLauncher::class)->call('loadRequests')->html();
+
+        expect($html)->toContain("x-on:click=\"manage('{$signature->uuid}')\"");
+    });
+});
+
 describe('launcher placement', function () {
 
     beforeEach(function () {
@@ -325,6 +474,21 @@ describe('launcher placement', function () {
         config()->set('signature.launcher.width', '80rem; position: static');
 
         expect(LauncherSettings::width())->toBe('64rem');
+    });
+
+    it('widens further while managing signatures', function () {
+        config()->set('signature.launcher.manage_width', '90rem');
+
+        expect(LauncherSettings::manageWidth())->toBe('90rem')
+            ->and(Livewire::test(SignatureLauncher::class)->html())->toContain('--dsig-w-manage: 90rem');
+    });
+
+    it('defaults the manage width and refuses one that is not a plain CSS length', function () {
+        expect(LauncherSettings::manageWidth())->toBe('80rem');
+
+        config()->set('signature.launcher.manage_width', '90rem; display: none');
+
+        expect(LauncherSettings::manageWidth())->toBe('80rem');
     });
 
     it('refuses an offset that is not a plain CSS length', function () {
