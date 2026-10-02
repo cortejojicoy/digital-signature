@@ -77,7 +77,14 @@ return new class extends Migration
                 $t->boolean('user_presence')->default(false);  // OS-enforced Touch ID / Hello on use
                 $t->boolean('attested')->default(false);
 
-                $t->string('device_type', 16)->default('unknown'); // desktop | mobile | tablet | unknown
+                // Enums\DeviceType values; browser devices also write their
+                // coarser desktop | mobile | tablet | unknown. detected_* is
+                // what the agent reported, kept for audit and policy;
+                // device_type may be the owner's correction of it.
+                $t->string('device_type', 16)->default('unknown');
+                $t->string('detected_device_type', 16)->nullable();
+                $t->unsignedTinyInteger('chassis_type')->nullable();   // SMBIOS type 3 (Windows agents)
+                $t->boolean('virtual')->default(false);                // firmware reported a VM
                 $t->string('form_factor', 16)->nullable();          // laptop | desktop (agent only)
                 $t->string('platform', 64)->nullable();
                 $t->string('browser', 64)->nullable();
@@ -88,8 +95,13 @@ return new class extends Migration
                 // can be recognised as the same machine; and the key the agent
                 // signs its background API calls with.
                 $t->string('hardware_id_hash', 64)->nullable();
+                // hardware_id_hash while this is an active agent, else null.
+                // Unique: one active pairing per computer for this app
+                // (SigningDevice keeps it in step).
+                $t->string('active_hardware_key', 64)->nullable()->unique('dsd_active_hardware_unique');
                 $t->string('agent_version', 32)->nullable();
                 $t->text('session_public_key')->nullable();
+                $t->timestamp('rebound_at')->nullable();   // re-paired from the same computer
 
                 $t->string('status', 16)->default('active');   // active | pending | revoked
 
@@ -440,6 +452,13 @@ return new class extends Migration
                     ->constrained('digital_signature_devices')
                     ->nullOnDelete();
 
+                // The same user's device on the same computer, which
+                // confirming updates in place instead of adding a device.
+                $t->foreignId('replaces_device_id')
+                    ->nullable()
+                    ->constrained('digital_signature_devices')
+                    ->nullOnDelete();
+
                 $t->timestamp('token_issued_at')->nullable();
                 $t->timestamp('expires_at');
                 $t->timestamps();
@@ -579,6 +598,57 @@ return new class extends Migration
                     ->nullOnDelete();
             });
         }
+
+        if (! Schema::hasColumn('digital_signature_devices', 'detected_device_type')) {
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->string('detected_device_type', 16)->nullable()->after('device_type');
+                $t->unsignedTinyInteger('chassis_type')->nullable()->after('detected_device_type');
+                $t->boolean('virtual')->default(false)->after('chassis_type');
+                $t->timestamp('rebound_at')->nullable()->after('session_public_key');
+            });
+        }
+
+        if (! Schema::hasColumn('digital_signature_devices', 'active_hardware_key')) {
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->string('active_hardware_key', 64)->nullable()->after('hardware_id_hash');
+            });
+
+            $this->backfillActiveHardwareKeys();
+
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->unique('active_hardware_key', 'dsd_active_hardware_unique');
+            });
+        }
+
+        if (! Schema::hasColumn('digital_signature_agent_pairings', 'replaces_device_id')) {
+            Schema::table('digital_signature_agent_pairings', function (Blueprint $t) {
+                $t->foreignId('replaces_device_id')
+                    ->nullable()
+                    ->after('device_id')
+                    ->constrained('digital_signature_devices')
+                    ->nullOnDelete();
+            });
+        }
+    }
+
+    /**
+     * An install from before one-pairing-per-computer may already hold two
+     * active agent devices for one computer. The newest keeps the key; the
+     * rest stay active but unkeyed, so the unique index can be built and no
+     * one loses a working device on upgrade. Pairing checks still see them.
+     */
+    protected function backfillActiveHardwareKeys(): void
+    {
+        DB::table('digital_signature_devices')
+            ->where('kind', 'agent')
+            ->where('status', 'active')
+            ->whereNotNull('hardware_id_hash')
+            ->orderByDesc('id')
+            ->get(['id', 'hardware_id_hash'])
+            ->unique('hardware_id_hash')
+            ->each(fn (object $row) => DB::table('digital_signature_devices')
+                ->where('id', $row->id)
+                ->update(['active_hardware_key' => $row->hardware_id_hash]));
     }
 
     /**
