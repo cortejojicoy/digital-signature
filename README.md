@@ -26,6 +26,7 @@ pages as below, with navigation and search.
 | [Ad-hoc Signing](docs/ad-hoc-signing.md) | Implement document signing outside a package resource |
 | [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
 | [Signatory Routing](docs/signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory documents, Filament version compatibility |
+| [Guide: Route for Signatures](docs/route-for-signatures.md) | Add a "Route for Signatures" button to a generated report |
 | [Security](docs/security.md) | HMAC metadata, machine binding, DB cross-validation, forgery detection |
 | [Device Registration](docs/device-registration.md) | Browser signing keys and how they're verified |
 | [Desktop Agent](docs/desktop-agent.md) | Hardware-bound signing via the Kukux Sign Agent |
