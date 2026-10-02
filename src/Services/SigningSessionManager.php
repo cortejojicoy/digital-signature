@@ -2,6 +2,7 @@
 
 namespace Kukux\DigitalSignature\Services;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -12,6 +13,7 @@ use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Contracts\SupportsIncrementalSigning;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Kukux\DigitalSignature\Events\SignatureDeclined;
+use Kukux\DigitalSignature\Events\SignatoryTurnReached;
 use Kukux\DigitalSignature\Events\SignatureRequested;
 use Kukux\DigitalSignature\Events\SigningSessionCompleted;
 use Kukux\DigitalSignature\Events\SigningSessionOpened;
@@ -103,6 +105,7 @@ class SigningSessionManager
             ]);
 
             $this->createRequests($session, $record);
+            $this->announceTurns($session);
 
             SignatureAudit::record(SignatureAudit::SESSION_OPENED, [
                 'signing_session_id' => $session->id,
@@ -139,6 +142,7 @@ class SigningSessionManager
         $routes = $this->router->routeFor($record, $session->template_key);
 
         $updated = 0;
+        $alreadyUp = $this->requestsUpNow($session)->modelKeys();
 
         foreach ($session->requests as $request) {
             if ($request->state->isTerminal()) {
@@ -168,6 +172,8 @@ class SigningSessionManager
                 event(new SignatureRequested($request->fresh()));
             }
         }
+
+        $this->announceTurns($session, $alreadyUp);
 
         return $updated;
     }
@@ -422,6 +428,8 @@ class SigningSessionManager
         $documentSignature->refresh();
 
         return DB::transaction(function () use ($session, $request, $documentSignature) {
+            $alreadyUp = $this->requestsUpNow($session)->modelKeys();
+
             $session->update([
                 'current_document_path' => $documentSignature->signed_document_path,
                 'current_document_hash' => $documentSignature->signed_document_hash,
@@ -446,6 +454,9 @@ class SigningSessionManager
             ]);
 
             $this->completeIfFinished($session->fresh(['requests']));
+
+            // The next signatory in a sequential session can sign now.
+            $this->announceTurns($session, $alreadyUp);
 
             return $documentSignature;
         });
@@ -636,6 +647,51 @@ class SigningSessionManager
                 'This signing session is %s and no longer accepts signatures.',
                 $session->status,
             ));
+        }
+    }
+
+    /**
+     * Requests whose signatory can sign right now: assigned, not yet decided,
+     * and, in a sequential session, with every earlier required slot signed
+     * (the same rule assertInSequence() enforces).
+     *
+     * @return Collection<int, SignatureRequest>
+     */
+    public function requestsUpNow(SigningSession $session): Collection
+    {
+        if ($session->status !== SigningSession::STATUS_OPEN) {
+            return new Collection;
+        }
+
+        $requests = $session->requests()->orderBy('sequence')->get();
+
+        return $requests->filter(function (SignatureRequest $request) use ($session, $requests): bool {
+            if ($request->user_id === null
+                || ! in_array($request->state, [RouteState::AwaitingConsent, RouteState::Ready], true)) {
+                return false;
+            }
+
+            return ! $session->isSequential() || ! $requests->contains(
+                fn (SignatureRequest $earlier) => $earlier->required
+                    && $earlier->sequence < $request->sequence
+                    && $earlier->state !== RouteState::Signed,
+            );
+        })->values();
+    }
+
+    /**
+     * Fire SignatoryTurnReached for every request that's up now and wasn't
+     * before, so each signatory hears about a document exactly once: when
+     * they can act on it.
+     *
+     * @param  list<int|string>  $alreadyUp  request keys that were up before the change
+     */
+    protected function announceTurns(SigningSession $session, array $alreadyUp = []): void
+    {
+        foreach ($this->requestsUpNow($session) as $request) {
+            if (! in_array($request->getKey(), $alreadyUp, false)) {
+                event(new SignatoryTurnReached($request));
+            }
         }
     }
 
