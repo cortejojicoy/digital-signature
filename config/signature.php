@@ -42,6 +42,10 @@ return [
     'signatures_path'  => 'signatures',   // raw signature images
     'signed_docs_path' => 'signed-docs',  // completed PDFs
 
+    // Minutes a signature image preview link stays valid. Cloud disks sign
+    // their own URLs; `local` falls back to a signed package route.
+    'preview_url_ttl'  => 5,
+
     /*
     |--------------------------------------------------------------------------
     | Verification QR
@@ -518,7 +522,7 @@ return [
     | Each browser (and, later, each desktop agent) holds a non-extractable
     | key pair. The browser proves possession of the private key to the
     | server, and every signature records the device it was created or used
-    | on. See docs/device-registration-plan.md.
+    | on. See docs/device-registration.md.
     |
     | require:
     |   off      — record the device when there is one, never block
