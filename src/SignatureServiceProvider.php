@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Kukux\DigitalSignature\Console\InstallCommand;
+use Kukux\DigitalSignature\Events\SignatoryTurnReached;
+use Kukux\DigitalSignature\Listeners\SendSignatureRequestedNotification;
 use Kukux\DigitalSignature\Console\ReleaseAgentComputer;
 use Kukux\DigitalSignature\Drivers\Certificates\CfsslDriver;
 use Kukux\DigitalSignature\Drivers\Certificates\OpenSslDriver;
@@ -178,6 +180,9 @@ class SignatureServiceProvider extends ServiceProvider
 
             $this->hintInstallAfterPackageDiscovery();
         }
+
+        // Tell each signatory when a document is ready for them.
+        Event::listen(SignatoryTurnReached::class, SendSignatureRequestedNotification::class);
 
         // The floating launcher. Registered here rather than in the plugin so
         // the component resolves on any panel the render hook fires for, and
