@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Kukux\DigitalSignature\Contracts\ConfiguresSigningSession;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Contracts\PlacesSlotsInDocument;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Contracts\SupportsIncrementalSigning;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
@@ -87,7 +88,12 @@ class SigningSessionManager
 
         $basePath = $this->freezeDocument($record, $template);
 
-        return DB::transaction(function () use ($record, $template, $templateKey, $basePath, $actorId) {
+        // Where the slots actually landed in this record's document. A report
+        // that runs to more pages moves its signature block; the designer's
+        // placement only knows the sample.
+        $placements = $template instanceof PlacesSlotsInDocument ? $template->documentPlacements($record) : [];
+
+        return DB::transaction(function () use ($record, $template, $templateKey, $basePath, $actorId, $placements) {
             $session = SigningSession::create([
                 'uuid'                  => (string) Str::uuid(),
                 'signable_type'         => $record->getMorphClass(),
@@ -104,7 +110,7 @@ class SigningSessionManager
                 'expires_at'            => $this->defaultExpiry(),
             ]);
 
-            $this->createRequests($session, $record);
+            $this->createRequests($session, $record, $placements);
             $this->announceTurns($session);
 
             SignatureAudit::record(SignatureAudit::SESSION_OPENED, [
@@ -577,7 +583,10 @@ class SigningSessionManager
         return $relative;
     }
 
-    protected function createRequests(SigningSession $session, Model $record): void
+    /**
+     * @param  array<string, array<string, int|float>>  $placements  slot key => placement found in the document
+     */
+    protected function createRequests(SigningSession $session, Model $record, array $placements = []): void
     {
         $routes = $this->router->routeFor($record, $session->template_key);
 
@@ -586,7 +595,7 @@ class SigningSessionManager
         foreach ($routes as $route) {
             $sequence++;
 
-            $position = $route->position;
+            $position = $placements[$route->key()] ?? $route->position;
 
             $request = SignatureRequest::create([
                 'uuid'               => (string) Str::uuid(),
