@@ -19,6 +19,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
 | [Signatory Routing](signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory PDFs, Filament v3/v4/v5 compatibility |
+| [Guide: Route for Signatures](route-for-signatures.md) | Worked example: add a "Route for Signatures" button to a generated report, with notifications |
 | [Drawer Signing UX](drawer-signing-ux.md) | The drawer signing surface: inbox and signature library in one drawer, inline PDF viewing, drag-to-place signing |
 | [Device Registration](device-registration.md) | Browser signing keys: setup, the attest/register flow, data model, limits |
 | [Desktop Agent](desktop-agent.md) | Hardware-bound keys via the Kukux Sign Agent: pairing, approval, endpoints, proof format |

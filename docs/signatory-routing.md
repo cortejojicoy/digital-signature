@@ -423,6 +423,7 @@ The order matters because MySQL and Postgres require a foreign key's target to e
 
 ## Related
 
+- [Guide: Route for Signatures](route-for-signatures.md): a full worked example, from table to button
 - [PDF Templates](pdf-templates.md): slots, the placement designer, the signer page
 - [Model Setup](model-setup.md): `Signable`, `HasSignatures`
 - [Security](security.md): HMAC metadata, machine binding, forgery detection
