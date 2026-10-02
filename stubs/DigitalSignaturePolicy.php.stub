@@ -1,0 +1,62 @@
+<?php
+
+namespace {{ namespace }};
+
+use Illuminate\Foundation\Auth\User as AuthUser;
+use Kukux\DigitalSignature\Models\Signature;
+
+/**
+ * Who may use a digital signature: its owner, and nobody else.
+ *
+ * Named DigitalSignaturePolicy, not SignaturePolicy, so that Filament Shield's
+ * `shield:generate` doesn't overwrite it. Registered in AppServiceProvider,
+ * because Laravel's policy discovery never looks at vendor models.
+ */
+class DigitalSignaturePolicy
+{
+    public function viewAny(AuthUser $user): bool
+    {
+        return true;
+    }
+
+    public function create(AuthUser $user): bool
+    {
+        return true;
+    }
+
+    public function view(AuthUser $user, Signature $signature): bool
+    {
+        return $this->owns($user, $signature);
+    }
+
+    public function update(AuthUser $user, Signature $signature): bool
+    {
+        return $this->owns($user, $signature);
+    }
+
+    public function delete(AuthUser $user, Signature $signature): bool
+    {
+        return $this->owns($user, $signature);
+    }
+
+    public function restore(AuthUser $user, Signature $signature): bool
+    {
+        return $this->owns($user, $signature);
+    }
+
+    // Deleting signatures in bulk would wipe the history of every document they signed.
+    public function deleteAny(AuthUser $user): bool
+    {
+        return false;
+    }
+
+    public function forceDelete(AuthUser $user, Signature $signature): bool
+    {
+        return false;
+    }
+
+    protected function owns(AuthUser $user, Signature $signature): bool
+    {
+        return (int) $signature->user_id === (int) $user->getAuthIdentifier();
+    }
+}
