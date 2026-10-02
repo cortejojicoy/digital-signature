@@ -107,6 +107,10 @@ SIGNATURE_TSA_URL=
 # you ever rotate APP_KEY, or every paired computer has to pair again.
 SIGNATURE_AGENT_ENABLED=true
 
+# Pairing from a virtual machine is refused by default. Leave this out in
+# production; set it empty on a dev server to test from Parallels or UTM.
+# SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES=
+
 # Resolution of the page previews in the placement designer.
 SIGNATURE_DESIGNER_DPI=144
 ```

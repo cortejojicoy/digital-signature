@@ -141,13 +141,13 @@ Created by `9999_12_31_000000_create_digital_signature_tables.php`.
 | `algorithm` | `ES256` (browser) or `RS256` (Windows Hello agent) |
 | `kind` | `browser` or `agent` |
 | `protection` | `browser`, `software`, `tpm`, `secure_enclave` |
-| `device_type` | `desktop`, `mobile`, `tablet`, `unknown` |
+| `device_type` | Browsers: `desktop`, `mobile`, `tablet`, `unknown`. Agents: a [device type](desktop-agent.md#device-types) like `macbook_pro` or `desktop`. |
 | `platform`, `browser`, `user_agent` | From the UA and client hints. For the label only. |
 | `status` | `active`, `pending`, `revoked` |
 | `registered_ip`, `last_used_ip`, `last_used_at` | |
 | `approved_at`, `revoked_at` | |
 
-The table also has agent-only columns (`user_presence`, `attested`, `form_factor`, `model`, `hardware_id_hash`, `agent_version`, `session_public_key`). Browser devices leave them at their defaults.
+The table also has agent-only columns (`user_presence`, `attested`, `detected_device_type`, `chassis_type`, `virtual`, `form_factor`, `model`, `hardware_id_hash`, `active_hardware_key`, `agent_version`, `session_public_key`, `rebound_at`). Browser devices leave them at their defaults. See [Desktop agent: tables](desktop-agent.md#tables).
 
 ### `device_id` on other tables
 

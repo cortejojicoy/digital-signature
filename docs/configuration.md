@@ -177,9 +177,17 @@ Pairs a computer whose signing key lives in its Secure Enclave or TPM. See [Desk
         'pairing_ttl'      => 600,
         'job_ttl'          => 300,
         'skip_ttl'         => 120,
+
+        // Detected device types refused at pairing. Empty = allow VMs.
+        'blocked_device_types' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES', 'virtual_machine')),
+        ))),
     ],
 ],
 ```
+
+A computer holds one account's signature per app. Re-pairing from the same computer updates the existing device instead of adding one. Free a computer with `php artisan signature:agent-release`. See [Desktop agent: one signature per computer](desktop-agent.md#one-signature-per-computer).
 
 | `approval` | When a user with a paired computer signs a document |
 |---|---|
@@ -265,6 +273,7 @@ SIGNATURE_AGENT_APPROVAL=prefer     # off | prefer | enforce
 SIGNATURE_AGENT_MIN_VERSION=0.1.0   # older agents get HTTP 426
 SIGNATURE_AGENT_SERVER_ID=          # blank = derived from APP_KEY; set before rotating APP_KEY
 SIGNATURE_AGENT_SALT=               # same
+SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES=virtual_machine  # comma-separated; empty = allow VMs
 
 # Routing, sessions and consent
 SIGNATURE_SEQUENCE_MODE=sequential  # sequential | parallel
