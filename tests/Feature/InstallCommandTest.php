@@ -251,6 +251,29 @@ describe('signature:install', function () {
         expect(Schema::hasTable('install_probe'))->toBeTrue();
     });
 
+    it('re-runs the package migration when it is recorded as run but its tables are gone', function () {
+        installApp();
+        Schema::disableForeignKeyConstraints();
+        Schema::drop('digital_signature_requests');
+        Schema::drop('digital_signatures');
+        Schema::enableForeignKeyConstraints();
+
+        $this->artisan('signature:install', ['--no-assets' => true, '--no-panel' => true, '--no-policy' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('these tables are missing')
+            ->expectsOutputToContain('re-ran 9999_12_31_000000_create_digital_signature_tables')
+            ->assertSuccessful();
+
+        expect(Schema::hasTable('digital_signatures'))->toBeTrue()
+            ->and(Schema::hasTable('digital_signature_requests'))->toBeTrue();
+    });
+
+    it('lists every table the migration creates', function () {
+        $source = file_get_contents(dirname(__DIR__, 2).'/database/migrations/9999_12_31_000000_create_digital_signature_tables.php');
+        preg_match_all('/Schema::create\(\s*\'([^\']+)\'/', $source, $m);
+
+        expect(\Kukux\DigitalSignature\Console\Install\Steps\RunMigration::TABLES)->toBe($m[1]);
+    });
+
     it('changes nothing on a dry run', function () {
         $base = installApp();
         $before = snapshot($base);
