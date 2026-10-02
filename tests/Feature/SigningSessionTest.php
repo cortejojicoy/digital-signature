@@ -260,4 +260,78 @@ describe('SigningSessionManager', function () {
             ->and(SignatureAudit::where('event', SignatureAudit::REQUEST_CREATED)->count())->toBe(3)
             ->and(SignatureAudit::where('event', SignatureAudit::REQUEST_SIGNED)->exists())->toBeTrue();
     });
+
+    describe('notifying signatories', function () {
+
+        beforeEach(fn () => \Illuminate\Support\Facades\Notification::fake());
+
+        function notified(): array
+        {
+            $ids = [];
+
+            foreach ([11, 12, 13] as $id) {
+                if (\Illuminate\Support\Facades\Notification::sent(
+                    \Kukux\DigitalSignature\Tests\Support\TestUser::find($id),
+                    \Kukux\DigitalSignature\Notifications\SignatureRequestedNotification::class,
+                )->isNotEmpty()) {
+                    $ids[] = $id;
+                }
+            }
+
+            return $ids;
+        }
+
+        it('tells only the first signatory when a sequential session opens', function () {
+            app(SigningSessionManager::class)->open($this->report);
+
+            expect(notified())->toBe([11]);
+        });
+
+        it('tells the next signatory once the one before them signs', function () {
+            $manager = app(SigningSessionManager::class);
+            $session = $manager->open($this->report);
+
+            $manager->sign($session->requests->firstWhere('slot_key', 'prepared_by'), 11);
+            expect(notified())->toBe([11, 12]);
+
+            $manager->sign($session->requests->firstWhere('slot_key', 'attested_by')->fresh(), 12);
+            expect(notified())->toBe([11, 12, 13]);
+
+            // Each signatory hears about it once, not on every later signature.
+            expect(\Illuminate\Support\Facades\Notification::sent(
+                \Kukux\DigitalSignature\Tests\Support\TestUser::find(12),
+                \Kukux\DigitalSignature\Notifications\SignatureRequestedNotification::class,
+            ))->toHaveCount(1);
+        });
+
+        it('tells everyone at once in a parallel session', function () {
+            config()->set('signature.sessions.sequence_mode', 'parallel');
+            arSessionTemplate();
+
+            app(SigningSessionManager::class)->open($this->report);
+
+            expect(notified())->toBe([11, 12, 13]);
+        });
+
+        it('tells a signatory tagged after the session opened, when it is their turn', function () {
+            $this->report->update(['prepared_by_id' => null]);
+
+            $manager = app(SigningSessionManager::class);
+            $session = $manager->open($this->report->fresh());
+            expect(notified())->toBe([]);
+
+            $this->report->update(['prepared_by_id' => 11]);
+            $manager->refreshAssignments($session->fresh(['requests']));
+
+            expect(notified())->toBe([11]);
+        });
+
+        it('sends nothing when the notification channels are empty', function () {
+            config()->set('signature.sessions.notification_channels', []);
+
+            app(SigningSessionManager::class)->open($this->report);
+
+            expect(notified())->toBe([]);
+        });
+    });
 });
