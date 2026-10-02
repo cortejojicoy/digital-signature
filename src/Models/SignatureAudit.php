@@ -37,6 +37,12 @@ class SignatureAudit extends Model
 
     public const AGENT_APPROVED = 'agent.approved';
 
+    /** The same user re-paired a computer: the existing device got new keys. */
+    public const AGENT_REBOUND = 'agent.rebound';
+
+    /** An admin freed a computer from the account it was paired with. */
+    public const AGENT_RELEASED = 'agent.released';
+
     protected $table = 'digital_signature_audits';
 
     protected $fillable = [

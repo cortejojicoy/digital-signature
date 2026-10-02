@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Kukux\DigitalSignature\Enums\DeviceType;
 
 /**
  * One registered signing key: a browser profile, or a desktop agent install.
@@ -21,8 +22,9 @@ class SigningDevice extends Model
         'uuid', 'user_id', 'label',
         'public_key', 'key_fingerprint', 'algorithm',
         'kind', 'protection', 'user_presence', 'attested',
-        'device_type', 'form_factor', 'platform', 'browser', 'model', 'user_agent',
-        'hardware_id_hash', 'agent_version', 'session_public_key',
+        'device_type', 'detected_device_type', 'chassis_type', 'virtual',
+        'form_factor', 'platform', 'browser', 'model', 'user_agent',
+        'hardware_id_hash', 'agent_version', 'session_public_key', 'rebound_at',
         'status', 'registered_ip', 'last_used_ip',
         'last_used_at', 'approved_at', 'revoked_at',
     ];
@@ -30,12 +32,32 @@ class SigningDevice extends Model
     protected $casts = [
         'user_presence' => 'boolean',
         'attested'      => 'boolean',
+        'virtual'       => 'boolean',
+        'chassis_type'  => 'integer',
+        'rebound_at'    => 'datetime',
         'last_used_at'  => 'datetime',
         'approved_at'   => 'datetime',
         'revoked_at'    => 'datetime',
     ];
 
-    protected $hidden = ['public_key', 'session_public_key', 'hardware_id_hash'];
+    protected $hidden = ['public_key', 'session_public_key', 'hardware_id_hash', 'active_hardware_key'];
+
+    protected static function booted(): void
+    {
+        // active_hardware_key carries the unique index behind "one active
+        // pairing per computer for this app". Recomputed only when what it
+        // depends on changes, so a routine save of an older duplicate (kept
+        // unkeyed on upgrade) never trips the index.
+        static::saving(function (SigningDevice $device): void {
+            if ($device->exists && ! $device->isDirty(['status', 'kind', 'hardware_id_hash'])) {
+                return;
+            }
+
+            $device->active_hardware_key = $device->kind === 'agent' && $device->status === 'active' && $device->hardware_id_hash
+                ? $device->hardware_id_hash
+                : null;
+        });
+    }
 
     public function user(): BelongsTo
     {
@@ -82,6 +104,10 @@ class SigningDevice extends Model
             return $this->model;
         }
 
+        if ($this->kind === 'agent') {
+            return $this->deviceType()->label();
+        }
+
         $browser = $this->browser ? preg_replace('/\s+\d+$/', '', $this->browser) : null;
         $platform = $this->platform ?: null;
 
@@ -116,15 +142,29 @@ class SigningDevice extends Model
         return 'SHA256:'.substr($b64, 0, 8).'…'.substr($b64, -4);
     }
 
+    public function deviceType(): DeviceType
+    {
+        return DeviceType::fromStored($this->device_type);
+    }
+
+    /** What the agent reported, which policy goes by; the shown type may be the owner's correction. */
+    public function detectedDeviceType(): DeviceType
+    {
+        return $this->detected_device_type !== null
+            ? DeviceType::fromStored($this->detected_device_type)
+            : $this->deviceType();
+    }
+
+    public function isVirtualMachine(): bool
+    {
+        return $this->virtual || $this->detectedDeviceType() === DeviceType::VirtualMachine;
+    }
+
     /**
      * Heroicon name for the device's form.
      */
     public function icon(): string
     {
-        return match ($this->device_type) {
-            'mobile' => 'heroicon-o-device-phone-mobile',
-            'tablet' => 'heroicon-o-device-tablet',
-            default  => 'heroicon-o-computer-desktop',
-        };
+        return $this->deviceType()->icon();
     }
 }

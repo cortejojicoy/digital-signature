@@ -14,7 +14,7 @@ class AgentPairing extends Model
 
     protected $fillable = [
         'uuid', 'user_id', 'user_code_hash', 'nonce', 'poll_secret_hash',
-        'status', 'claim', 'device_id', 'token_issued_at', 'expires_at',
+        'status', 'claim', 'device_id', 'replaces_device_id', 'token_issued_at', 'expires_at',
     ];
 
     protected $casts = [
@@ -33,6 +33,11 @@ class AgentPairing extends Model
     public function device(): BelongsTo
     {
         return $this->belongsTo(SigningDevice::class, 'device_id');
+    }
+
+    public function replacesDevice(): BelongsTo
+    {
+        return $this->belongsTo(SigningDevice::class, 'replaces_device_id');
     }
 
     public function isExpired(): bool
