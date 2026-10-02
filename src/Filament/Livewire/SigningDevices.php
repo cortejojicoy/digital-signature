@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Collection;
 use InvalidArgumentException;
 use Kukux\DigitalSignature\Agent\AgentPairingService;
 use Kukux\DigitalSignature\Agent\AgentServer;
+use Kukux\DigitalSignature\Enums\DeviceType;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Models\AgentPairing;
 use Kukux\DigitalSignature\Models\SigningDevice;
@@ -33,6 +34,9 @@ class SigningDevices extends Component
     public ?string $userCode = null;
 
     public ?string $pairLink = null;
+
+    /** The owner's pick in the confirm prompt; starts as what the agent detected. */
+    public ?string $pairDeviceType = null;
 
     public ?string $renaming = null;
 
@@ -76,6 +80,12 @@ class SigningDevices extends Component
             $pairing->update(['status' => 'expired']);
             $this->clearPairing();
             $this->error = 'The pairing code expired. Start again to get a new one.';
+
+            return;
+        }
+
+        if ($pairing->status === 'awaiting_confirmation' && $this->pairDeviceType === null) {
+            $this->pairDeviceType = app(AgentPairingService::class)->describeClaim($pairing)['device_type'] ?? null;
         }
     }
 
@@ -89,7 +99,7 @@ class SigningDevices extends Component
         }
 
         try {
-            $device = $pairings->confirm($pairing, $this->userId());
+            $device = $pairings->confirm($pairing, $this->userId(), $this->pairDeviceType);
         } catch (InvalidArgumentException|UnregisteredDeviceException $e) {
             $this->error = $e->getMessage();
             $this->clearPairing();
@@ -98,7 +108,9 @@ class SigningDevices extends Component
         }
 
         $this->clearPairing();
-        $this->flash = "Paired {$device->displayName()}. Signatures you approve on it will show it as the device.";
+        $this->flash = ! $device->wasRecentlyCreated
+            ? "Re-paired {$device->displayName()} with new keys. Its old keys no longer work."
+            : "Paired {$device->displayName()}. Signatures you approve on it will show it as the device.";
     }
 
     public function rejectPairing(AgentPairingService $pairings): void
@@ -161,6 +173,8 @@ class SigningDevices extends Component
             'agentEnabled' => AgentServer::enabled(),
             'downloadUrl'  => config('signature.devices.agent.download_url'),
             'thisBrowser'  => $key['fingerprint'] ?? null,
+            'deviceTypes'  => DeviceType::grouped(),
+            'vmBlocked'    => AgentPairingService::blocks(DeviceType::VirtualMachine, true),
         ]);
     }
 
@@ -196,6 +210,7 @@ class SigningDevices extends Component
         $this->pairingUuid = null;
         $this->userCode = null;
         $this->pairLink = null;
+        $this->pairDeviceType = null;
     }
 
     protected function resetMessages(): void
