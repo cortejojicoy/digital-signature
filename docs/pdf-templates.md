@@ -1,46 +1,24 @@
 # PDF Templates
 
-A **PDF template** declares to the plugin that the host app produces a particular kind of PDF (DTR, payslip, contract, …) and which named regions on that PDF accept a signature. The plugin uses this declaration to:
+A **PDF template** tells the plugin "my app makes this kind of PDF (DTR, payslip, contract...), and signatures go in these spots."
 
-- list registered templates in the admin UI ("apply this signature to a DTR"),
-- persist per-slot placement coordinates per template (so admins place signature zones once, not per record),
-- render a sample preview for the placement designer.
+You get a placement designer where an admin positions each signature zone once for every record, and a signer page where users drop their signature and get a signed PDF back.
 
-Templates are **additive**. The existing `Signable` flow ([Model Setup](model-setup.md), [Ad-hoc Signing](ad-hoc-signing.md), [On-Demand PDF Signing](on-demand-pdf-signing.md)) continues to work unchanged — templates simply give you a way to register, enumerate, and configure those signables centrally.
+Use one when the same layout repeats across many records. For one-off documents where the signer places the signature each time, plain `Signable` ([Model Setup](model-setup.md), [Ad-hoc Signing](ad-hoc-signing.md)) is enough. To route slots to specific people, see [Signatory Routing](signatory-routing.md).
 
-> **Status.** The contract, registry and persistence, the placement designer, and the end-user signer page with real finalize wiring are all landed.
-> Slot coordinates are now resolved from the database automatically for session-based signing — see [Signatory Routing](signatory-routing.md), which builds on everything here to route each slot to a specific person and carry a document through several signatories.
-
----
-
-## When to use a template
-
-| Scenario | Use `Signable` only | Add a `PdfTemplate` |
-|---|:---:|:---:|
-| One-off, ad-hoc document signing where the signer drags the signature into place each time | ✅ | – |
-| Same PDF layout reused across many records (DTR, payslip, certificate) where the signature always goes in the same place | – | ✅ |
-| You want named "drop zones" (e.g. *Employee* + *In Charge*) the designer can highlight as snap targets | – | ✅ |
-| You want a central "PDF Templates" admin page listing what can be signed | – | ✅ |
-
-A `PdfTemplate` and the underlying `Signable` model are not mutually exclusive — the template's `renderFor($record)` returns a PDF for a record that **already implements `Signable`**. Think of `PdfTemplate` as the *category* and `Signable` as the *instance*.
-
----
-
-## The pieces
-
-| File | What it is |
+| Piece | What it is |
 |---|---|
-| [`Contracts/PdfTemplate`](../src/Contracts/PdfTemplate.php) | Interface the host app implements per kind of PDF |
-| [`Pdf/SlotDefinition`](../src/Pdf/SlotDefinition.php) | Readonly value object describing one named signature zone |
-| [`Models/PdfTemplateSlot`](../src/Models/PdfTemplateSlot.php) | Eloquent model — persisted (template, slot) coordinates |
-| `digital_pdf_template_slots` table | Stores the saved x/y/width/height per slot per template |
-| [`Services/PdfTemplateRegistry`](../src/Services/PdfTemplateRegistry.php) | Container singleton that holds all registered templates |
+| [`Contracts/PdfTemplate`](../src/Contracts/PdfTemplate.php) | Interface, one per kind of PDF |
+| [`Pdf/BladePdfTemplate`](../src/Pdf/BladePdfTemplate.php) | Ready-made implementation built from a config array |
+| [`Pdf/SlotDefinition`](../src/Pdf/SlotDefinition.php) | One named signature zone |
+| [`Models/PdfTemplateSlot`](../src/Models/PdfTemplateSlot.php) | Saved coordinates per (template, slot) in `digital_pdf_template_slots` |
+| [`Services/PdfTemplateRegistry`](../src/Services/PdfTemplateRegistry.php) | Singleton holding every registered template |
 
 ---
 
 ## Registering a template (plug-and-play)
 
-The fastest path: drop an array into `config/signature.php` pointing at a Blade view you already have. No PHP class required.
+Point a config entry at a Blade view you already have. No class needed.
 
 ```php
 // config/signature.php
@@ -51,11 +29,12 @@ The fastest path: drop an array into `config/signature.php` pointing at a Blade 
         'sample_data'   => ['user' => ['name' => 'Sample User']],
         'data_resolver' => fn ($record) => ['record' => $record],
         'slots'         => ['employee', 'in_charge'],
+        'signable'      => \App\Models\Dtr::class,
     ],
 ],
 ```
 
-That's it. The array gets read on boot, instantiated into a `BladePdfTemplate`, and registered automatically. The plugin renders the Blade via `barryvdh/laravel-dompdf` (auto-detected); install it once if you don't have it:
+It renders with DomPDF, so install it if you haven't:
 
 ```bash
 composer require barryvdh/laravel-dompdf
@@ -66,56 +45,55 @@ composer require barryvdh/laravel-dompdf
 > [full class](#implementing-a-template-full-class) and list the class-string
 > in config instead.
 
-### What the keys mean
+If your Blade only needs `$record`, leave `data_resolver` out. The default is `['record' => $record]`, no closure.
 
-| Key | Required | Type | What it does |
-|---|---|---|---|
-| `label` | no | string | Human-readable name shown in the designer / signer UI. Defaults to titlecased key. |
-| `view` | **yes** | string | Blade view name (e.g. `pdf.dtr` for `resources/views/pdf/dtr.blade.php`). |
-| `sample_data` | no | array \| callable | Data passed to the Blade when rendering the sample preview. Use a callable for expensive seed data. |
-| `data_resolver` | no | `fn($record) => array` | Maps a record to the data the Blade needs at sign time. Defaults to `['record' => $record]`. |
-| `slots` | no | array | Slot definitions — see the three accepted shapes below. |
-| `renderer` | no | class-string | Custom `PdfRenderer` class if you don't want DomPDF. |
+| Key | Default | What it does |
+|---|---|---|
+| `view` | required | Blade view name. Missing it throws `InvalidArgumentException`. |
+| `label` | key in Title Case | Name shown in the UI |
+| `slots` | `[]` | Signature zones, see below |
+| `sample_data` | `[]` | Array or callable, used for the designer preview |
+| `data_resolver` | `['record' => $record]` | `fn ($record) => array` for the real render |
+| `signable` | none | Model class the signer page loads for `?signable=ID`. Needed for real signing there. |
+| `renderer` | DomPDF | A custom [`PdfRenderer`](#using-a-different-pdf-renderer) class |
+| `auto_affix` | `signature.auto_affix.mode` | `approval`, `delegated` or `implicit`, see [Signatory Routing](signatory-routing.md) |
+| `sequence_mode` | `signature.sessions.sequence_mode` | `sequential` or `parallel` |
+
+PDFs are cached on `signature.storage_disk` under `generated/{key}/`. The cache key includes the record's `updated_at`, so edits re-render.
 
 ### Slot shapes
 
-Three accepted shapes, mix freely:
+Mix freely:
 
 ```php
-// 1) Bare keys — label auto-derived (Title Case of the key)
+// 1) Bare keys — label is the key in Title Case
 'slots' => ['employee', 'in_charge'],
 
-// 2) Keyed associative entries — full control over each slot
+// 2) Keyed entries
 'slots' => [
     'employee'  => ['label' => 'Employee', 'required' => true],
     'in_charge' => ['label' => 'In Charge', 'required' => true],
 ],
 
-// 3) Numbered list of associative entries — useful when you want a stable order
+// 3) List of entries with a 'key' field
 'slots' => [
     ['key' => 'employee',  'label' => 'Employee',  'required' => true],
     ['key' => 'in_charge', 'label' => 'In Charge', 'required' => true],
 ],
 ```
 
-A slot may also declare `signatory`, `role` and `order` to bind it to a specific person on the record — see [Signatory Routing](signatory-routing.md).
+An entry can also take:
 
-Each slot may also carry an initial placement (`page`, `x`, `y`, `width`, `height` in PDF points) — they seed the placement designer the first time a slot is opened. Once an admin saves coordinates via the designer, the persisted row wins.
+- `page`, `x`, `y`, `width`, `height`: starting position for the designer. A saved position wins.
+- `signatory`, `role`, `order`: bind the slot to a person. See [Signatory Routing](signatory-routing.md).
 
-### Verifying it worked
+Bare keys get `order` 1, 2, ... from their position. The other shapes only have one if you set it.
 
-After editing config and running `php artisan config:clear`:
-
-```php
-app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class)->all();
-// → ['dtr' => Kukux\DigitalSignature\Pdf\BladePdfTemplate { … }]
-```
-
-Then open **Manage signatures** in the launcher drawer and pick a signature. The registered templates now appear as cards under **Apply this signature**.
+To check it worked, run `php artisan config:clear`, then `app(PdfTemplateRegistry::class)->all()` should list `'dtr'`. The template also shows up as a card under **Apply this signature** in the launcher drawer's **Manage signatures**.
 
 ### Using a different PDF renderer
 
-DomPDF is the default. To use Browsershot, Snappy, or anything else, implement [`PdfRenderer`](../src/Pdf/Renderers/PdfRenderer.php) once and reference it in the template config:
+For Browsershot, Snappy or anything else, implement [`PdfRenderer`](../src/Pdf/Renderers/PdfRenderer.php) and point the template at it:
 
 ```php
 // app/Pdf/BrowsershotRenderer.php
@@ -181,7 +159,7 @@ so the signed copy looks the same as the one people already print.
 
 ## Implementing a template (full class)
 
-When you need more than the config form gives you — conditional slots, complex data resolution, multi-source sample data — implement the contract directly. Example for a DTR (Daily Time Record):
+Use a class for conditional slots, complex data, or `config:cache`. `renderSample()` and `renderFor()` both return an absolute file path.
 
 ```php
 namespace App\Pdf;
@@ -194,6 +172,7 @@ use Kukux\DigitalSignature\Pdf\SlotDefinition;
 
 class DtrTemplate implements PdfTemplate
 {
+    // Stored as template_key. Don't change it once rows exist.
     public function key(): string
     {
         return 'dtr';
@@ -204,11 +183,6 @@ class DtrTemplate implements PdfTemplate
         return 'Daily Time Record';
     }
 
-    /**
-     * Named regions on the DTR PDF that can accept a signature.
-     * Defaults are starting suggestions only — admins override via
-     * the placement designer (or by writing to digital_pdf_template_slots).
-     */
     public function slots(): array
     {
         return [
@@ -235,10 +209,7 @@ class DtrTemplate implements PdfTemplate
         ];
     }
 
-    /**
-     * Sample PDF used to preview the layout in the designer.
-     * Should be deterministic so the rasterized preview can be cached.
-     */
+    // Designer preview. Keep it deterministic so page images cache.
     public function renderSample(): string
     {
         $disk = Storage::disk(config('signature.storage_disk'));
@@ -251,11 +222,7 @@ class DtrTemplate implements PdfTemplate
         return $disk->path($rel);
     }
 
-    /**
-     * Render the production PDF for a specific record at sign time.
-     * Same contract as Signable::getSignablePdfPath() — return an
-     * absolute filesystem path the signer driver can read.
-     */
+    // The real PDF for one record, at sign time.
     public function renderFor(Model $record): string
     {
         assert($record instanceof Dtr);
@@ -272,159 +239,73 @@ class DtrTemplate implements PdfTemplate
 }
 ```
 
+`SlotDefinition` also takes `signatory`, `role` and `order`.
+
+> **Gotcha:** the signer page's `?signable=ID` flow only works for config templates with a `signable` key. A full-class template returns a 422 there. Sign it through a [signing session](signatory-routing.md) or `SignatureManager` instead.
+
 ### Slot coordinates
 
-- **Units are PDF points** (1 pt = 1/72 inch). US Letter landscape is 792 × 612 pt; A4 landscape is 842 × 595 pt.
-- **`y` is measured from the bottom of the page**, not the top. This is PDF-native and the same convention the existing `signature_positions` table uses. A signature line near the bottom of the page typically sits around `y = 60`–`120`.
-- **Defaults are seeds, not law.** They're only used when no row exists in `digital_pdf_template_slots` for that (template, slot) yet. Once an admin saves coordinates via the designer (step 4), the saved values win.
+- Units are **PDF points** (1/72 inch). US Letter landscape is 792 × 612, A4 landscape is 842 × 595.
+- **`y` counts up from the bottom.** A signature line near the bottom sits around `y = 60`–`120`.
+- Defaults only apply until an admin saves the slot in the designer.
 
 ---
 
 ## Registration paths
 
-Three places to register, all merge into the same registry. Each accepts the **plug-and-play array form**, **class strings**, or **PdfTemplate instances** — mix as you like.
-
-### 1. Eager — via config
+All three feed the same registry and take the array form, a class-string or an instance. Registering a key again replaces it.
 
 ```php
-// config/signature.php
-
+// 1. config/signature.php — every panel and the CLI
 'templates' => [
-    // Plug-and-play (array form)
-    'dtr' => [
-        'view'  => 'pdf.dtr',
-        'slots' => ['employee', 'in_charge'],
-    ],
-
-    // Full class (class-string form)
+    'dtr' => ['view' => 'pdf.dtr', 'slots' => ['employee', 'in_charge']],
     \App\Pdf\PayslipTemplate::class,
 ],
+
+// 2. A Filament panel — when panels should see different templates
+\Kukux\DigitalSignature\SignaturePlugin::make()
+    ->templates([
+        'dtr' => ['view' => 'pdf.dtr', 'slots' => ['employee', 'in_charge']],
+        \App\Pdf\PayslipTemplate::class,
+    ]),
+
+// 3. Any service provider's boot()
+$registry = app(\Kukux\DigitalSignature\Services\PdfTemplateRegistry::class);
+$registry->registerBlade('dtr', ['view' => 'pdf.dtr', 'slots' => ['employee', 'in_charge']]);
+$registry->register(\App\Pdf\PayslipTemplate::class);
+// or $registry->registerMany([...]) with the same mixed list as config
 ```
-
-Loaded by [`SignatureServiceProvider::boot()`](../src/SignatureServiceProvider.php). Survives across panels and CLI.
-
-### 2. Fluent — on the Filament panel
-
-```php
-// app/Providers/Filament/AdminPanelProvider.php
-
-->plugins([
-    \Kukux\DigitalSignature\SignaturePlugin::make()
-        ->templates([
-            'dtr' => [
-                'view'  => 'pdf.dtr',
-                'slots' => ['employee', 'in_charge'],
-            ],
-            \App\Pdf\PayslipTemplate::class,
-        ]),
-])
-```
-
-Useful when registration should differ between panels (e.g. an HR panel only sees DTRs).
-
-### 3. Runtime — from any service provider
-
-```php
-use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
-
-public function boot(): void
-{
-    $registry = app(PdfTemplateRegistry::class);
-
-    // Array form via dedicated helper
-    $registry->registerBlade('dtr', [
-        'view'  => 'pdf.dtr',
-        'slots' => ['employee', 'in_charge'],
-    ]);
-
-    // Class or instance
-    $registry->register(\App\Pdf\PayslipTemplate::class);
-}
-```
-
-Good for package integrations or conditional registration.
-
-> Registration is **idempotent and keyed by the template key**. Registering the same key twice replaces, doesn't duplicate.
-
----
 
 ## Reading the registry
 
 ```php
-use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
-
-$registry = app(PdfTemplateRegistry::class);
-
-$registry->has('dtr');                 // bool
-$registry->find('dtr');                // ?PdfTemplate (null if missing)
-$registry->get('dtr');                 // PdfTemplate (throws if missing)
-$registry->all();                      // array<string, PdfTemplate>
+$registry->has('dtr');   // bool
+$registry->find('dtr');  // ?PdfTemplate — use for user input
+$registry->get('dtr');   // PdfTemplate, throws RuntimeException if missing
+$registry->all();        // array<string, PdfTemplate>
 ```
-
-`get()` is the version to use when the key came from a trusted source (e.g. a `template_key` row from `digital_pdf_template_slots`). `find()` is for user input / nullable lookups.
 
 ---
 
 ## The placement designer
 
-The plugin ships an interactive designer that renders the template's sample PDF and lets an admin drag/resize each slot onto the page. Saves are persisted to `digital_pdf_template_slots`, so once you've placed a slot it sticks for every future record of that template.
+The designer shows the sample PDF and lets an admin drag and resize each slot. Saves upsert a `digital_pdf_template_slots` row by `(template_key, slot_key)`, always in PDF points.
 
-### Opening the designer
-
-The Filament page is registered automatically by `SignaturePlugin` when the plugin is added to a panel. The slug pattern is:
-
-```
-/<panel-path>/signature-templates/{templateKey}/design
-```
-
-For a panel mounted at `/admin` and a template with `key() === 'dtr'`, that's:
-
-```
-/admin/signature-templates/dtr/design
-```
-
-The page is **not** added to the sidebar — link to it from your own UI. Typical entry points:
-
-- A "Design layout" header action on the host app's `DtrResource`
-- A link inside the signature library card that opens this designer for the related template
+It lives at `/<panel-path>/signature-templates/{templateKey}/design`. It's not in the sidebar, so link to it:
 
 ```php
 use Filament\Actions\Action;
+use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
 
 Action::make('design_layout')
     ->label('Design layout')
     ->icon('heroicon-o-rectangle-group')
-    ->url(fn () => route('filament.admin.pages.signature-templates.{template-key}.design', [
-        'templateKey' => 'dtr',
-    ]))
-    ->openUrlInNewTab(false);
+    ->url(fn () => PdfTemplateDesigner::getUrl(['templateKey' => 'dtr']));
 ```
 
-### How it works under the hood
+### No Imagick? Supply your own page images
 
-```
-Browser                                                     Backend
-┌────────────────────────────────────┐                     ┌──────────────────────────┐
-│ PdfDesignerIsland (React)          │   GET /meta         │ DesignerController::meta │
-│  ├─ fetches meta + saved slots ────┼────────────────────►│  - reads PdfTemplate     │
-│  ├─ renders <img src=page/1>       │   GET /pages/1      │  - reads PdfTemplateSlot │
-│  ├─ overlays SlotBox per slot      │◄────────────────────┤  - returns PDF point     │
-│  ├─ user drags / resizes / nudges  │   PNG               │    dimensions per page   │
-│  └─ Save → POST /slots/{slot} ─────┼────────────────────►│ DesignerController::page │
-└────────────────────────────────────┘                     │  - rasterizes via Imagick│
-                                                           │    (or RendersSample…)   │
-                                                           ├──────────────────────────┤
-                                                           │ DesignerController::save │
-                                                           │  - upsert by             │
-                                                           │    (template_key, slot)  │
-                                                           └──────────────────────────┘
-```
-
-The React island handles the CSS-pixel ↔ PDF-point math (including the y-axis flip) so your slot definitions and saved rows are always in PDF coordinates ready for the signer driver.
-
-### Imagick prerequisite (or an alternative)
-
-By default the designer rasterizes the sample PDF via **Imagick + Ghostscript**. If your host doesn't have those, implement [`RendersSamplePageImage`](../src/Contracts/RendersSamplePageImage.php) on your template:
+Previews need **Imagick + Ghostscript**. Without them, implement [`RendersSamplePageImage`](../src/Contracts/RendersSamplePageImage.php):
 
 ```php
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
@@ -436,8 +317,7 @@ class DtrTemplate implements PdfTemplate, RendersSamplePageImage
 
     public function renderSampleAsImage(int $page): string
     {
-        // Return an absolute path to a PNG/JPEG of $page.
-        // For DomPDF / Spatie Browsershot / Snappy users: render directly to PNG.
+        // Absolute path to a PNG/JPEG of $page (1-indexed).
         return app(DtrPdfRenderer::class)->renderPageAsPng(page: $page);
     }
 
@@ -448,15 +328,9 @@ class DtrTemplate implements PdfTemplate, RendersSamplePageImage
 }
 ```
 
-When a template implements `RendersSamplePageImage`, the controller skips the rasterizer and uses your image directly. **Note**: in that mode the plugin assumes image pixel dimensions equal PDF point dimensions, so render at 72 DPI for accurate placement (or stick with the Imagick path).
+**Render at 72 DPI.** In this mode 1 image pixel counts as 1 PDF point, so any other DPI misplaces slots.
 
 ### Designer DPI
-
-The Imagick render DPI is configurable:
-
-```bash
-SIGNATURE_DESIGNER_DPI=144   # default; raise to 200+ for crisp big monitors
-```
 
 ```php
 // config/signature.php
@@ -465,11 +339,9 @@ SIGNATURE_DESIGNER_DPI=144   # default; raise to 200+ for crisp big monitors
 ],
 ```
 
-Higher DPI = sharper preview but slower first render and larger cache files. The cache is keyed by `(pdf path, mtime, dpi)` so changing DPI invalidates cleanly.
+Raise it (200+) for sharper previews at the cost of speed and cache size. Changing it just re-renders.
 
 ### Seeding slots without the designer
-
-You can still write coordinates directly from a seeder or Tinker:
 
 ```php
 use Kukux\DigitalSignature\Models\PdfTemplateSlot;
@@ -480,61 +352,37 @@ PdfTemplateSlot::updateOrCreate(
 );
 ```
 
-The `SlotDefinition::$defaultX/Y/...` fields still serve as the initial position the designer seeds when no saved row exists yet.
-
 ---
 
 ## The signer page
 
-In addition to the admin designer, the plugin ships an end-user **signer page** — the SignFlow-style view where a user drops their signature onto a target PDF and clicks "Finish & Save".
-
-### URL pattern
+Users drop a signature on the PDF and click **Finish & Save**. It lives at:
 
 ```
 /<panel-path>/signature-templates/{templateKey}/sign/{signatureUuid}
 ```
 
-The route is built for you by the template cards in the drawer's **Manage signatures** view (`partials/manage-signatures.blade.php`). Clicking a card's preview or its **Sign document** link opens the signer with that signature's UUID already in the URL.
+The template cards in **Manage signatures** link here. The page shows one chip per slot, plus the active signature and up to 12 of your other primary signatures to swap between.
 
-### What the page does
+It uses `signature.pdf-templates.signer.meta` (GET) and `signature.pdf-templates.signer.finalize` (POST).
 
-```
-PdfSigningIsland (React)
-├─ Top bar:   Template label    [Cancel]  [Finish & Save]
-├─ Canvas:    Rasterized PDF page with SlotBox overlays
-│             ├─ Active signature image is rendered inside each placed slot
-│             └─ Page selector when the template has > 1 page
-├─ Slot picker (chips below the canvas):
-│             ├─ "+ Employee", "+ In Charge", … one chip per declared slot
-│             └─ Click adds the slot at the canvas center; click again removes
-└─ Bottom strip: Your stored signatures
-              ├─ Active signature highlighted with primary ring
-              └─ Up to 12 other primary signatures (chip = click to swap)
-```
+### What Finish & Save does
 
-The frontend talks to two endpoints, both prefixed by signer/:
+| URL has | Result |
+|---|---|
+| nothing | Validates and echoes the placements with `status: 'ack'`. Nothing is signed. Handy for calibrating. |
+| `?signable=ID` | Signs that record for real (below). |
+| `?request=ID` | Signs a slot in a signing session. The inbox adds this for you. See [Signatory Routing](signatory-routing.md). |
 
-| Method | Route name | Purpose |
-|---|---|---|
-| GET  | `signature.pdf-templates.signer.meta`      | Bootstrap: template + page dims + saved slots + user's signature library |
-| POST | `signature.pdf-templates.signer.finalize`  | Submit chosen placements + finalize signing |
+With `?signable=ID` it:
 
-### Finalize: two modes
+1. Loads the record via the template's `signable` class. No `signable` key or a non-`Signable` model gives a 422, a missing record a 404.
+2. Calls `SignatureManager::storeForDocument()` with the placement, then `embedAndFinalize()` to stamp, embed PKCS#7 + DocMDP and write the signed PDF.
+3. Returns `{ status: 'signed', signature_uuid, signed_document_path, signed_at }`.
 
-The `finalize` endpoint has two response paths depending on whether the URL carries a `?signable=ID` query param.
+The certificate password comes from the stored signature, so the user isn't asked. If none is stored you get a 422, and the signature has to be re-created with a password.
 
-**Acknowledgement mode** (no `?signable`). Validates the placements and echoes them back. Useful when you want to exercise the UI without producing a real PDF — convenient while calibrating slot positions or testing the rendering pipeline.
-
-**Production mode** (with `?signable=ID`). Runs the real signing pipeline:
-
-1. Resolves the host model via the template's `signable` config: `($template->getSignableClass())::find($id)`.
-2. Asserts the model implements [`Signable`](../src/Contracts/Signable.php). Use the [`HasPdfTemplate`](../src/Concerns/HasPdfTemplate.php) trait to satisfy that in two lines.
-3. Renders the production PDF via `$template->renderFor($record)`.
-4. Calls `SignatureManager::storeForDocument()` — creates the `digital_signatures` child row + `signature_positions` row from the placement.
-5. Calls `SignatureManager::embedAndFinalize()` — stamps the signature image, embeds PKCS#7 + DocMDP, writes the signed PDF, returns the disk-relative path.
-6. Returns `{ status: 'signed', signature_uuid, signed_document_path, signed_at }` so the UI can offer a download.
-
-The certificate password is read from the source signature row (stored encrypted at registration time), so the signer doesn't have to enter it again at sign time.
+**One placement per call.** Sending more returns a 422. For several signatures on one document, use a signing session ([Signatory Routing](signatory-routing.md)).
 
 ### Making your model signable in 2 lines
 
@@ -547,17 +395,13 @@ class Dtr extends Model implements Signable
 {
     use HasPdfTemplate;
 
-    protected string $signaturePdfTemplate = 'dtr';   // matches the config key
+    protected string $signaturePdfTemplate = 'dtr';   // matches the template key
 }
 ```
 
-That's all that's needed. The trait implements `getSignableTitle()`, `getSignablePdfPath()`, and `getSignableId()` for you — `getSignablePdfPath()` calls back into the registered template's `renderFor($this)`. Override any of the three methods if you need different behavior.
+The trait implements `getSignableTitle()` (`"Dtr #<id>"`), `getSignablePdfPath()` (the template's `renderFor($this)`), `getSignableId()` and `signatureTemplateKey()`. Override any you like. Forgetting `$signaturePdfTemplate` throws a `LogicException`.
 
-### Linking to the signer from your own resource
-
-The signer page slug is `signature-templates/{templateKey}/sign/{signatureUuid}`. The target record is passed via `?signable=ID`.
-
-A typical Filament resource header action looks like this:
+### Link to the signer from your resource
 
 ```php
 use Filament\Actions\Action;
@@ -582,41 +426,7 @@ Action::make('sign_with_my_signature')
     });
 ```
 
-The user lands on the signer page with their signature pre-selected, the DTR record loaded, and a "Finish & Save" button that produces a real signed PDF.
-
-### Multi-slot signing
-
-A single `finalize` call still applies **one** placement: the free-form signer
-path signs the record's own PDF, so calling it N times would produce N separate
-signed copies rather than one document with N stamps.
-
-Documents that genuinely need several signatures go through a **signing
-session** instead, which freezes the PDF once and chains each signature onto
-the previous one's output. The signer page participates in that flow by passing
-`?request=<id>` (the inbox links it for you); `finalize` then routes through
-`SigningSessionManager`, which enforces the slot ownership and sequencing rules.
-
-See [Signatory Routing](signatory-routing.md) for the full picture, including
-what `progressive` and `incremental` signing modes each guarantee.
-
-## What's still ahead
-
-- **Multi-stamp in a single cryptographic pass** — true PAdES incremental
-  signing, so one PDF carries N independently verifiable signer certificates.
-  The session machinery is in place; it needs a signer driver implementing
-  [`SupportsIncrementalSigning`](../src/Contracts/SupportsIncrementalSigning.php),
-  which neither bundled driver can (FPDI rewrites the document). See
-  [Signatory Routing → Signing modes](signatory-routing.md#signing-modes--read-this-before-choosing).
-
-You can use the full system today to:
-
-- declare templates and slot definitions (array form or full class),
-- open the designer for any registered template and place slots visually,
-- open the signer page for any registered template + owned signature,
-- sign a real document end-to-end via `?signable=ID` and `HasPdfTemplate`,
-- route each slot to a person and take a document through several signatories
-  ([Signatory Routing](signatory-routing.md)),
-- read coordinates from your own code to drive `SignatureManager::store(...)` directly.
+Not built yet: true PAdES incremental signing (several independently verifiable certificates in one PDF). It needs a driver implementing [`SupportsIncrementalSigning`](../src/Contracts/SupportsIncrementalSigning.php), and neither bundled driver does. See [Signing modes](signatory-routing.md#signing-modes--read-this-before-choosing).
 
 ---
 

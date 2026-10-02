@@ -356,7 +356,7 @@ The browser fingerprint in §6–7 is a value the browser *asserts*. A device ke
 - Agent requests need both the bearer token and a session-key proof over the exact request (`AuthenticateAgent`). A leaked token alone is useless.
 - Revoking an agent device revokes its tokens, and its next call is a 401, on which the agent deletes its keys.
 
-**Limits.** The key belongs to a browser profile, not to hardware. Clearing site data creates a new device. See [device-registration-plan.md §9](device-registration-plan.md#9--security-analysis--limitations). For hardware-bound keys (Secure Enclave / TPM), see [desktop-agent-plan.md](desktop-agent-plan.md).
+**Limits.** The key belongs to a browser profile, not to hardware. Clearing site data creates a new device. See [Device registration: limits](device-registration.md#limits). For hardware-bound keys (Secure Enclave / TPM), see [Desktop agent](desktop-agent.md).
 
 ---
 

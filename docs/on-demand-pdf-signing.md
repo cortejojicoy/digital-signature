@@ -1,72 +1,37 @@
 # Signing On-Demand (DomPDF / Generated PDFs)
 
-Use this guide when your signable model **does not have a stored PDF** — instead it generates one on the fly (e.g. a Filament resource that renders a DomPDF preview from a Blade view).
+Use this when your model has no stored PDF and you render one on the fly, like a DomPDF preview from a Blade view.
 
-The package signs **files on disk**, because a PKCS#7 signature is computed over the exact bytes of a PDF. A stream regenerated on every request can't be signed: the bytes change between renders (timestamps, font subsets, etc.), so the hash recorded on the `Signature` row would never match a later download.
+The package only signs files on disk, because a re-render never has exactly the same bytes. So you render the PDF once on first sign, save it, and the package takes it from there.
 
-The pattern below renders the PDF **once, lazily, on first sign**, persists it to the signature disk, and then lets the package take over normally.
+> Fixed-layout document? A [PDF template](pdf-templates.md#making-your-model-signable-in-2-lines) with the `HasPdfTemplate` trait does all of this for you.
 
----
+## How it works
 
-## Workflow
+1. The user clicks **Sign Document**.
+2. The package calls `$record->getSignablePdfPath()`. Your model renders and saves the PDF if it isn't on disk yet.
+3. The PDF driver (`signature.pdf_driver`, `fpdi` or `tcpdf`) stamps the signature, embeds a PKCS#7 signature and saves the signed copy.
+4. Your "View PDF" action serves the signed copy once it exists.
 
-```
-User clicks "Sign Document" in Filament
-        │
-        ▼
-SignDocumentAction calls $signable->getSignablePdfPath()
-        │
-        ▼
-Model checks disk for a cached source PDF
-        │
-        ├── exists  ──► return relative path
-        │
-        └── missing ──► render via your PdfService → put() on disk → return path
-        │
-        ▼
-FpdiDriver opens the file, stamps the picked signature image,
-embeds a PKCS#7 signature, writes the signed copy to signed_docs_path.
-        │
-        ▼
-"View PDF" action checks for signatures()->signed_document_path
-and serves the signed copy when present.
-```
+The saved PDF is the frozen version of the document. Editing the record afterwards doesn't change what was signed.
 
-The source PDF on disk becomes the **canonical, frozen** version of the document. After signing, editing the underlying record will not change what was signed — which is exactly what you want for an audit-grade signature.
+## Step 1 — Return raw PDF bytes
 
----
-
-## Step 1 — Expose a binary renderer on your PDF service
-
-Whatever service currently streams the PDF inline almost certainly already has a private `renderBinary()` method that returns the raw PDF bytes. Make it `public` so the model can call it.
+Your PDF service needs a public method that returns the PDF as a string. The preview route and signing can then share it.
 
 ```php
 // app/Services/RequisitionIssueSlipPdfService.php
-
 public function renderBinary(RequisitionIssueSlip $slip): string
 {
     // ... existing logic ...
     return $pdf->output();
 }
-
-public function streamInline(RequisitionIssueSlip $slip): StreamedResponse
-{
-    $pdfBinary = $this->renderBinary($slip);
-    // ... existing streaming response ...
-}
 ```
 
-Both the inline preview route and the signing flow now share one renderer.
-
----
-
-## Step 2 — Implement `Signable` with lazy persistence
-
-The contract requires `getSignablePdfPath()` to return a string path **relative to the disk configured in `signature.storage_disk`**. The package resolves it via `$disk->path($pdfPath)`.
+## Step 2 — Implement `Signable` and save the PDF lazily
 
 ```php
 // app/Models/RequisitionIssueSlip.php
-
 use App\Services\RequisitionIssueSlipPdfService;
 use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Contracts\Signable;
@@ -92,10 +57,7 @@ class RequisitionIssueSlip extends Model implements Signable
         $path = "ris/{$this->getKey()}.pdf";
 
         if (! $disk->exists($path)) {
-            $disk->put(
-                $path,
-                app(RequisitionIssueSlipPdfService::class)->renderBinary($this),
-            );
+            $disk->put($path, app(RequisitionIssueSlipPdfService::class)->renderBinary($this));
         }
 
         return $path;
@@ -103,17 +65,18 @@ class RequisitionIssueSlip extends Model implements Signable
 }
 ```
 
-### Path conventions
+Path rules:
 
-- **Always relative to the signature disk.** Do not return `storage_path(...)` or an absolute path — the signer driver calls `$disk->path($pdfPath)` and expects a disk-relative string.
-- **Stable filename per record.** Use the model's primary key so the cache key is deterministic. Avoid timestamps, slugs, or any value that can change.
-- **Keep cached source PDFs out of the public disk.** Use `private` (or `s3`) for `signature.storage_disk` so unsigned source PDFs aren't directly accessible.
+- **Return a path relative to `signature.storage_disk`** (env `SIGNATURE_DISK`, default `local`). Not `storage_path(...)`: the drivers and the hash read it through `Storage::disk()`.
+- **Use a stable name**, like the primary key. No timestamps or slugs.
+- **Keep the disk private** (`local`, `private`, `s3`) so unsigned PDFs aren't public.
+- **Throw on failure.** The return type is `string`; returning `null` gives a `Return value must be of type string, null returned` TypeError. Exceptions show up as a "Signing failed" notification.
 
-### Invalidation
+### Clearing the cached PDF
 
-Once a record has been signed, the cached source PDF should be considered **frozen** — re-rendering it would invalidate the `document_hash` recorded on the signature row, breaking verification.
+Never re-render after signing. The new file won't match the signature's `document_hash`, so verification fails.
 
-If your record can still be edited *before* signing, invalidate the cache when the record changes:
+If the record can change before signing, delete the cached file on update:
 
 ```php
 protected static function booted(): void
@@ -123,42 +86,33 @@ protected static function booted(): void
             return; // never invalidate after signing
         }
 
-        Storage::disk(config('signature.storage_disk'))
-            ->delete("ris/{$slip->getKey()}.pdf");
+        Storage::disk(config('signature.storage_disk'))->delete("ris/{$slip->getKey()}.pdf");
     });
 }
 ```
 
-`isSigned()` is provided by the [`HasSignatures` trait](model-setup.md#hassignatures-trait-methods).
+`isSigned()` comes from the [`HasSignatures` trait](model-setup.md#hassignatures-trait-methods) and is true once any signature on the record has status `signed`.
 
-### Errors must throw
+## Step 3 — Show the signed copy in "View PDF"
 
-Return type is `string`, never `null`. If the PDF can't be produced (missing dependency, render failure, etc.), let the exception propagate — `SignDocumentAction` surfaces it as a Filament danger notification. Returning `''` or `null` produces the cryptic `Return value must be of type string, null returned` TypeError that brought you to this page.
-
----
-
-## Step 3 — Prefer the signed copy in your "View PDF" action
-
-After signing, `SignatureManager` writes the signed PDF and stores its relative path on the `Signature` row as `signed_document_path`. Your existing preview action should serve the signed copy whenever one exists:
+The signed PDF lands in `signature.signed_docs_path` (default `signed-docs`) as `<name>_signed_<timestamp>.pdf`. Its path is saved on the `Signature` row as `signed_document_path`.
 
 ```php
 // app/Filament/Resources/.../Pages/ViewRequisitionIssueSlip.php
-
 use Filament\Actions\Action;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\URL;
+use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction; // resolves to the right Filament version
 
 protected function getHeaderActions(): array
 {
     return [
-        EditAction::make(),
-
         SignDocumentAction::make()
             ->stampAt(page: 1, x: 100, y: 650, w: 200, h: 80),
 
         Action::make('generate_pdf')
             ->label('View PDF')
             ->icon(Heroicon::OutlinedDocumentArrowDown)
-            ->color('gray')
             ->url(function (): string {
                 $record = $this->getRecord();
 
@@ -168,25 +122,24 @@ protected function getHeaderActions(): array
                     ->value('signed_document_path');
 
                 return $signedPath
-                    ? route('requisition-issue-slips.pdf.signed', ['path' => $signedPath])
+                    ? URL::temporarySignedRoute('requisition-issue-slips.pdf.signed', now()->addMinutes(30), ['path' => $signedPath])
                     : route('requisition-issue-slips.pdf.preview', ['requisitionIssueSlip' => $record]);
-            }, shouldOpenInNewTab: true)
-            ->disabled(fn (): bool => ! app(RequisitionIssueSlipPdfService::class)->isDompdfInstalled()),
+            }, shouldOpenInNewTab: true),
     ];
 }
 ```
 
-You'll need a small route + controller that authorizes the request and streams the signed file from the disk:
+`stampAt()` uses PDF points, with `y` measured from the bottom of the page. Leave it off to let the signer place the signature.
+
+Then add a route and controller that stream the file:
 
 ```php
 // routes/web.php
 Route::get('/ris/signed/{path}', [SignedPdfController::class, 'show'])
     ->where('path', '.*')
     ->name('requisition-issue-slips.pdf.signed')
-    ->middleware(['auth', 'signed']); // or your own authorization
-```
+    ->middleware(['auth', 'signed']);
 
-```php
 // app/Http/Controllers/SignedPdfController.php
 public function show(string $path)
 {
@@ -194,29 +147,22 @@ public function show(string $path)
 
     abort_unless($disk->exists($path), 404);
 
-    // authorize: ensure the current user can view this slip
-    // e.g. look up the Signature row by signed_document_path and check policy
+    // authorize: look up the Signature by signed_document_path and check your policy
 
     return $disk->response($path, headers: ['Content-Type' => 'application/pdf']);
 }
 ```
 
----
+The `signed` middleware returns 403 for plain `route()` URLs. Use a signed URL as above, or drop `signed` and rely on your own authorization.
 
-## Why not just stamp the image at render time?
+## Gotchas
 
-A "stamp the signature image inside the Blade template at render time" approach is tempting — no files on disk, no caching, simple. But it's a **visual stamp, not a signature**:
-
-- No PKCS#7 / PAdES envelope → PDF readers won't show "Signed by …"
-- No `document_hash` over fixed bytes → tamper detection is impossible
-- Anyone with edit access to the record changes what every future render shows
-
-If those guarantees don't matter for your use case, you don't need this package — a `signed_at` column on the model is equivalent. Use this on-demand pattern when you do want the cryptographic guarantees on a record whose canonical form is generated, not uploaded.
-
----
+- **One signer per PDF.** `SignDocumentAction` always signs the original source PDF, so two signers give you two separate signed copies. For several signatures on one PDF, use [Signatory Routing](signatory-routing.md).
+- **Don't just draw the image in your Blade view.** That's a visual stamp: no "Signed by" in PDF readers and no tamper detection. If that's all you need, a `signed_at` column is enough.
 
 ## Related
 
 - [Model Setup](model-setup.md) — `Signable` contract and `HasSignatures` trait reference
 - [Signing Workflow](signing-workflow.md) — full lifecycle, what `SignatureManager` does
+- [PDF Templates](pdf-templates.md) — fixed-layout documents with `HasPdfTemplate`
 - [Security](security.md) — PKCS#7, DocMDP, document integrity hashing

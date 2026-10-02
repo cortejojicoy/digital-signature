@@ -67,6 +67,7 @@ When `ca_cert_path` and `ca_key_path` point to valid files, certificates are CA-
 'certs_path'       => 'certs',         // PFX certificate files
 'signatures_path'  => 'signatures',    // raw signature images
 'signed_docs_path' => 'signed-docs',   // completed signed PDFs
+'preview_url_ttl'  => 5,               // minutes a signature preview link stays valid
 ```
 
 All paths are relative to the disk root. Any Laravel disk driver works (`local`, `s3`, etc.).
@@ -135,7 +136,7 @@ Every stored signature PNG receives HMAC-signed `tEXt` chunks and XMP metadata. 
 
 ## Registered signing devices
 
-Each browser holds a non-extractable P-256 key in IndexedDB and proves to the server that it holds the key. Every signature then records the device it was created on or used on. See [security.md §10](security.md#10-registered-signing-devices) and [device-registration-plan.md](device-registration-plan.md).
+Each browser holds a non-extractable P-256 key in IndexedDB and proves to the server that it holds the key. Every signature then records the device it was created on or used on. See [security.md §10](security.md#10-registered-signing-devices) and [Device registration](device-registration.md).
 
 ```php
 'devices' => [
@@ -160,7 +161,7 @@ A **revoked** device is refused in every mode.
 
 ### Desktop agent (Kukux Sign Agent)
 
-Pairs a computer whose signing key lives in its Secure Enclave or TPM. See [desktop-agent-plan.md §15](desktop-agent-plan.md#15--what-was-built-package-side).
+Pairs a computer whose signing key lives in its Secure Enclave or TPM. See [Desktop agent](desktop-agent.md).
 
 ```php
 'devices' => [

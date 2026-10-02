@@ -4,9 +4,7 @@
 
 ## SignaturePlugin — panel plugin
 
-Registers the Signatures resource on your Filament panel.
-
-### Basic registration
+Add the plugin to every panel that should use the package. It registers the Signatures resource, the inbox page and the floating launcher for you, so don't discover the resource from `vendor` yourself.
 
 ```php
 // app/Providers/Filament/AdminPanelProvider.php
@@ -18,94 +16,60 @@ use Kukux\DigitalSignature\SignaturePlugin;
 ])
 ```
 
-Register the plugin on each panel that should use the package. Avoid manually discovering the package resource from `vendor`; the plugin registers it for you.
-
-### Fluent configuration
+### Fluent options
 
 ```php
 SignaturePlugin::make()
-    ->navigationIcon('heroicon-o-pencil-square')   // sidebar icon  (default: heroicon-o-pencil-square)
-    ->navigationGroup('Documents')                  // sidebar group (default: none)
-    ->navigationSort(10)                            // sort position (default: none)
-    ->navigationLabel('Document Signatures')        // sidebar label (default: "Signatures")
+    ->navigationIcon('heroicon-o-pencil-square')   // default: heroicon-o-pencil-square
+    ->navigationGroup('Documents')                  // default: none
+    ->navigationSort(10)                            // default: none
+    ->navigationLabel('Document Signatures')        // default: "Signatures"
 ```
 
-### Disabling parts
+These override the `signature.resource.*` config values.
 
-```php
-// Hide the Signatures resource (bring your own resource):
-SignaturePlugin::make()->withoutResource()
+### Turning parts off
 
-// Disable the resource via env (useful for non-admin panels):
-// SIGNATURE_RESOURCE_ENABLED=false
-
-// Keep the floating launcher off this panel (restores the sidebar items):
-SignaturePlugin::make()->withoutFloatingLauncher()
-```
+| You want to... | Use |
+|---|---|
+| Hide the Signatures resource (bring your own) | `->withoutResource()` or `SIGNATURE_RESOURCE_ENABLED=false` |
+| Hide the inbox page on this panel | `->withoutInbox()` |
+| Turn off the floating launcher on this panel | `->withoutFloatingLauncher()` |
+| Turn the launcher on conditionally | `->withFloatingLauncher($panel->getId() === 'staff')` |
 
 ---
 
-## Floating launcher — the default entry point
+## Floating launcher
 
-Registering the plugin mounts a floating button on every page of the panel, via
-a `PanelsRenderHook::BODY_END` render hook. Clicking it opens a slide-over with
-the documents waiting on the signed-in user, each with Sign and Decline, plus
-links to the full inbox and their signature library.
+The plugin adds a floating button to every page of the panel (via the `PanelsRenderHook::BODY_END` render hook). It's on by default, so you don't need to register anything.
 
-It exists because signing is an interruption, not a destination. A signatory is
-somewhere else in the app when a document reaches them, and making them leave
-that page, find a sidebar item under whatever navigation group the host app
-chose, act, and navigate back is most of the friction in a signing flow.
+Clicking it opens a drawer with these tabs:
 
-```php
-// On by default — nothing to register.
-SignaturePlugin::make()
+| Tab | What's in it |
+|---|---|
+| **Awaiting** | Documents waiting on the signed-in user, each with **View & sign** and **Decline** |
+| **Signed** | Documents the user has already signed |
+| **My signatures** | The user's signature library, plus a form to add one |
+| **Devices** | Browsers and paired computers that can sign as this user |
 
-// Off for this panel; the inbox page and Signatures resource return to the sidebar.
-SignaturePlugin::make()->withoutFloatingLauncher()
+The drawer footer has a **Manage signatures** link. See [Managing a signature](#managing-a-signature) below.
 
-// Conditionally, e.g. staff panel only.
-SignaturePlugin::make()->withFloatingLauncher($panel->getId() === 'staff')
-```
+### It replaces the sidebar items
 
-Appearance and behaviour are config — position, icon, label, brand colour,
-badge poll interval — see [Configuration](configuration.md#launcher).
+While the launcher is on, the inbox page and the Signatures resource drop out of the navigation. Both stay routable.
 
-**It takes navigation with it.** While the launcher is on, the inbox page and
-the Signatures resource stop registering navigation items; both stay routable
-and the slide-over links to them. Set
-`signature.launcher.replaces_navigation` to `false` to keep both.
+- Want both the launcher and the sidebar items? Set `signature.launcher.replaces_navigation` to `false`.
+- Turn the launcher off with `->withoutFloatingLauncher()` and the sidebar items come back automatically.
 
-The slide-over shares `ActsOnSignatureRequests` with the full-page inbox, so
-the two surfaces cannot disagree about what a signatory may do: same query,
-same ownership checks, same exception handling, and the signature is still
-produced inside that user's own authenticated request with their own
-certificate.
+### Position and look
 
-### It gets out of the host app's way
+Position, icon, label, colour, badge polling and drawer width are all config. See [Configuration](configuration.md#launcher).
 
-A plugin does not own the corner it is dropped into. Before settling, the
-button measures what the host app already has pinned there — its own FAB, a
-chat widget, a cookie bar — and stacks itself clear of it, re-measuring on
-resize, on `livewire:navigated`, and when a widget mounts late.
+The button automatically moves out of the way of other things pinned in the same corner (your own FAB, a chat widget, a cookie bar). If it guesses wrong, use `launcher.avoid` / `launcher.ignore` to override specific selectors, or set `avoid_overlap => false` and place it with `launcher.offset`. See [Not landing on the host app's own floating button](configuration.md#not-landing-on-the-host-apps-own-floating-button).
 
-Tall fixed elements (sidebars, drawers, backdrops) are treated as layout and
-floated over rather than stacked above; `pointer-events: none` decoration such
-as a toast rail is ignored; and a hopelessly crowded corner is left alone
-rather than drifting the button into mid-page. Two config lists,
-`launcher.avoid` and `launcher.ignore`, override the detector per selector, and
-`launcher.offset` + `avoid_overlap => false` place the button by hand when you
-already know where it belongs. See
-[Configuration](configuration.md#not-landing-on-the-host-apps-own-floating-button).
+### Mounting it yourself
 
-The algorithm is covered by `npm run test:js`, which runs the shipped code —
-extracted from this view at run time — against a simulated DOM.
-
-Two things it does *not* need: a build step (the styles are namespaced and
-inline, so no host Tailwind utility can go missing under it) and its own JS
-bundle (Alpine handles open/close and placement, Livewire handles data).
-
-Mounting it yourself — outside a panel, or in a custom layout:
+Outside a panel, or in a custom layout:
 
 ```blade
 <livewire:kukux-digital-signature.launcher />
@@ -115,50 +79,42 @@ Mounting it yourself — outside a panel, or in a custom layout:
 
 ## SignatureResource — admin resource
 
-Registered automatically by `SignaturePlugin`. Provides a full admin interface for managing signature records.
+The plugin registers this for you. It has a list page and a create page. There is no View page anymore.
 
 ### List page
 
-- Table with signature thumbnail, signer name + email, status badge, capture method, and dates
-- Per-row **View** (a slide-over with the signature's details), **Download** and **Revoke** actions
-- Header **Add Signature** action for registering a reusable signature
-- Header **Sign Document** action for signing with a registered signature
-- Filters for status and capture method
+- Columns: signature thumbnail, signer name and email, status badge, capture method, signed and created dates
+- Filters: status and capture method
+- Row actions: **View** (details in a slide-over), **Download**, **Revoke**
+- Header actions: **Signing devices** (when `signature.devices.enabled` is on) and **Add Signature**
 
 ### Managing a signature
 
-There is no View page. **Manage signatures**, in the launcher drawer's footer,
-widens the drawer and lists the user's signatures beside the selected one's
-details. Clicking a thumbnail in the **My signatures** tab opens the same view
-with that signature selected. For the selected signature it shows:
+You manage signatures in the launcher drawer. Click **Manage signatures** in the drawer footer, or click a thumbnail in the **My signatures** tab.
 
-- The signature image, **Download image** and **Revoke** (with an inline confirmation)
+The drawer widens and shows your signatures next to the selected one's details:
+
+- The image, **Download image** and **Revoke** (with an inline confirmation)
 - Signer, status, capture method, device, signed and registered dates
 - **Used on**: the documents this signature has been applied to
-- **Apply this signature**: one card per registered PDF template, with its setup state and links to the signer and the designer
-- Collapsible **Security metadata**: record id, image hash, device fingerprint, device key, certificate fingerprint (each copyable)
+- **Apply this signature**: one card per registered PDF template, with links to the signer and the designer
+- **Security metadata** (collapsible): record id, image hash, device fingerprint, device key, certificate fingerprint, each copyable
 
-Old `/signatures/{record}` links redirect to the list with the drawer open on
-that signature (`?dsig=manage:{uuid}`). Anyone who doesn't own the signature
-gets a 404.
+Old `/signatures/{record}` links still work. They redirect to the list with the drawer open on that signature (`?dsig=manage:{uuid}`). Anyone who doesn't own the signature gets a 404.
 
-### Using with your own resource
-
-If you only want the resource's components without the built-in pages, disable it and build your own:
+### Using your own resource instead
 
 ```php
 SignaturePlugin::make()->withoutResource()
 ```
 
-Then add `SignDocumentAction` and `SignatureColumn` to your own resource as described below.
+Then add `SignDocumentAction` and `SignatureColumn` (below) to your own resource.
 
 ---
 
 ## SignaturePad — form field
 
-Renders a signature capture widget inside any Filament form. Supports a **draw** tab (canvas with brush controls) and an **upload** tab (file input). Fully dark-mode compatible.
-
-### Basic usage
+A signature capture field for any Filament form. It has a **draw** tab (canvas) and an **upload** tab, and works in dark mode.
 
 ```php
 use Kukux\DigitalSignature\Filament\Fields\SignaturePad;
@@ -167,139 +123,112 @@ SignaturePad::make('signature_data')
     ->label('Your Signature')
 ```
 
-### All options
+### Options
 
 ```php
 SignaturePad::make('signature_data')
-    ->canvasWidth(600)          // drawing area width  (default: 600 px)
-    ->canvasHeight(200)         // drawing area height (default: 200 px)
-    ->penColor('#1a1a1a')       // initial stroke colour (default: #1a1a1a)
-    ->penWidth(0.5, 2.5)        // min / max stroke width (default: 0.5, 2.5)
-    ->confirmLabel('Accept')    // confirm button label   (default: "Confirm")
-    ->withoutUploadTab()        // hide the upload tab
-    ->withoutDrawTab()          // hide the draw tab (upload-only mode)
-    ->withoutClearBtn()         // hide the clear button
-    ->withoutUndoBtn()          // hide the undo button
+    ->canvasWidth(600)          // default: 600 px
+    ->canvasHeight(200)         // default: 200 px
+    ->penColor('#000000')       // default: #000000
+    ->penWidth(0.5, 2.5)        // min / max stroke width, default: 0.5, 2.5
+    ->confirmLabel('Accept')    // default: "Confirm"
+    ->withoutUploadTab()        // draw only
+    ->withoutDrawTab()          // upload only
+    ->withoutClearBtn()
+    ->withoutUndoBtn()
 ```
 
-### Draw-only mode (recommended for strict authenticity)
+For stricter authenticity, use draw-only:
 
 ```php
 SignaturePad::make('signature_data')->withoutUploadTab()
 ```
 
-### State
-
-The field stores a base64 PNG data URI (`data:image/png;base64,...`) or `null` when empty.
+**State:** a base64 PNG data URI (`data:image/png;base64,...`), or `null` when empty.
 
 ---
 
 ## SignatureColumn — table column
 
-Displays a signature thumbnail and status badge in a Filament table. Adapts to dark mode via CSS invert.
-
-### Basic usage
+Shows a signature thumbnail and status badge in a table. Use it on resources whose rows are `Signable` models (e.g. a `ContractResource`), not on signature records themselves.
 
 ```php
 use Kukux\DigitalSignature\Filament\Columns\SignatureColumn;
 
 SignatureColumn::make('signature')
+    ->thumbSize(120, 48)    // width, height in px (default: 80 × 32)
 ```
 
-### Custom thumbnail size
+How it finds the image:
 
-```php
-SignatureColumn::make('signature')
-    ->thumbSize(120, 48)    // width, height in pixels (default: 80 × 32)
-```
-
-### How it resolves the image
-
-The column calls `latestSignature()` on the row model if that method exists, or falls back to `$record->signature`. It reads `image_path` and resolves the URL through the configured storage disk.
-
-For disks that support temporary URLs (S3, etc.) the URL expires after 5 minutes.
-
-> **Note:** `SignatureColumn` is designed for use in resources where the row model implements `Signable` (e.g. `ContractResource`). For the built-in `SignatureResource` where the row IS the signature, the resource uses `ImageColumn` directly.
+- It calls `latestSignature()` on the row model if that method exists, otherwise uses `$record->signature`.
+- It builds a temporary URL from `image_path` on the configured storage disk. The URL expires after 5 minutes (`signature.preview_url_ttl`). Disks without temporary URLs (like `local`) get a signed route instead.
 
 ---
 
 ## SignDocumentAction — action
 
-A Filament action that opens a modal where the current user selects one of their registered signatures, enters a certificate password when needed, and signs the document when submitted.
+Opens a modal where the user picks one of their registered signatures, then signs the record's PDF.
 
-Before using this action, the signer must have a stored signature record. Users can create one from the built-in **Signatures** resource, or you can create one yourself with `SignatureManager::store()`.
+Before you use it:
 
-### In a resource header
-
-```php
-use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;
-
-protected function getHeaderActions(): array
-{
-    return [
-        SignDocumentAction::make(),
-    ];
-}
-```
-
-Use header actions only when the page can provide a `Signable` record to the action. For document-specific signing, table row actions are usually the clearest integration.
+- The record must implement `Signable`.
+- The user needs a registered signature. They can add one from the launcher, the Signatures resource, or you can call `SignatureManager::store()`.
+- That signature needs a stored certificate password. The modal doesn't ask for one. If it's missing, the user has to re-create the signature.
 
 ### In a table row
 
 ```php
+use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;
+
 ->actions([
     SignDocumentAction::make()
         ->stampAt(page: 1, x: 100, y: 650, w: 200, h: 80),
 ])
 ```
 
-### Placing the signature stamp on the PDF
-
-`stampAt()` controls where the signature image is drawn on the signed PDF. Coordinates are in PDF units from the bottom-left origin.
+### In a page header
 
 ```php
-SignDocumentAction::make()
-    ->stampAt(
-        page: 1,
-        x:    100.0,
-        y:    650.0,
-        w:    200.0,
-        h:    80.0,
-    )
+use Kukux\DigitalSignature\Filament\Actions\SignDocumentHeaderAction;
+
+protected function getHeaderActions(): array
+{
+    return [
+        SignDocumentHeaderAction::make(),
+    ];
+}
 ```
 
-### Synchronous vs queued signing
+On Filament v3 you must use `SignDocumentHeaderAction` in headers. On v4/v5 either class works, so the header name is the portable choice. Only use it on pages that have a `Signable` record.
 
-By default the action calls `embedAndFinalize()` directly (synchronous — no queue worker needed):
+### Options
 
-```php
-SignDocumentAction::make()             // synchronous (default)
-SignDocumentAction::make()->queued()   // dispatches EmbedSignatureJob to queue
-```
-
-### What happens internally
-
-1. Reads `signature_id` and `password` from the submitted form
-2. Validates the selected signature belongs to the authenticated user
-3. Rejects revoked signatures
-4. Copies the selected signature image into a new document-specific `Signature` record linked to the current `Signable` record
-5. Applies the `stampAt()` position when one is configured
-6. Uses the stored certificate password, or the submitted password when no stored password exists
-7. Calls `embedAndFinalize()` or queues `EmbedSignatureJob`:
-   - CRL check (if enabled)
-   - PKCS#7 PDF signing
-   - Captures signed-document hash
-
-### Built-in exception handling
-
-`SignDocumentAction` catches and surfaces these as Filament danger notifications automatically — no extra code needed in your resource:
-
-| Exception | Notification title |
+| Method | What it does |
 |---|---|
-| `ForgedSignatureException` | "Invalid signature image" |
+| `stampAt(page, x, y, w, h)` | Fixed stamp position in PDF points, measured from the bottom-left of the page. Leave it out to let the signer place the signature. |
+| `queued()` | Dispatch `EmbedSignatureJob` to the queue. Without it, the action calls `embedAndFinalize()` directly and no worker is needed. |
+
+On submit, the action copies the chosen signature into a new document-specific `Signature` linked to the record, then signs the PDF (CRL check if enabled, PKCS#7 signing, document hash).
+
+### Errors
+
+Errors show up as danger notifications and the modal stays open. You don't need to handle them yourself.
+
+| Problem | Notification title |
+|---|---|
+| `ForgedSignatureException` | "Signature rejected" |
+| `UnregisteredDeviceException` / `MachineBindingException` | "Device not allowed to sign" |
+| Signature not owned by the user | "Signature not yours" |
+| Revoked signature | "Signature revoked" |
+| No stored certificate password | "Certificate password missing" |
+| Record isn't `Signable` | "No document selected" |
+| Anything else | "Signing failed" |
+
+If the desktop agent needs to approve the signing, the modal stays open and re-submits once the user approves on their computer.
 
 ---
 
 ## Ad-hoc signing
 
-For custom resources, controllers, or pages that need to sign documents outside the built-in resource, see [Ad-hoc Signing](ad-hoc-signing.md).
+To sign documents from custom pages, controllers or resources, see [Ad-hoc Signing](ad-hoc-signing.md).

@@ -1,15 +1,8 @@
 # Signatory Routing & Multi-Signatory Documents
 
-Some documents are signed by *roles*, not by whoever happens to open them. An
-Accomplishment Report has a **Prepared by**, an **Attested by** and a **Noted
-by**; each is a person tagged on the record, and each signs in their own right.
+Some documents are signed by *roles*: an Accomplishment Report has a **Prepared by**, an **Attested by** and a **Noted by**, each a person tagged on the record. This page shows how the package finds those people, sends them the document, and combines their signatures into one PDF.
 
-This page covers how the package finds those people, brings the document to
-them, and combines their signatures into one PDF — and exactly what each
-consent model does and does not permit.
-
-> **New to the package?** Read [PDF Templates](pdf-templates.md) first. Routing
-> builds directly on slots, the placement designer, and the `Signable` contract.
+> **New to the package?** Read [PDF Templates](pdf-templates.md) first. Routing builds on slots, the placement designer and the `Signable` contract.
 
 ---
 
@@ -32,7 +25,7 @@ consent model does and does not permit.
 ```
 
 ```php
-// 2. The model — two traits, plus the relations the app already has
+// 2. The model — two traits, plus the relations you already have
 class AccomplishmentReport extends Model implements Signable
 {
     use HasPdfTemplate, HasSignatories;
@@ -46,24 +39,20 @@ class AccomplishmentReport extends Model implements Signable
 ```
 
 ```php
-// 3. The resource — one entry, one action
+// 3. The resource — one infolist entry, one action
 SignatoryPanel::make('signatories');
 RequestSignaturesAction::make();
 ```
 
-4. Open `/admin/signature-templates/accomplishment-report/design` once and drag
-   the three slots onto the signature lines.
+4. Open `/admin/signature-templates/accomplishment-report/design` once and drag the three slots onto the signature lines.
 
-That's the whole integration. Each signatory registers their signature once in
-their own panel; from then on, being tagged on a record is enough for the
-document to find them.
+That's it. Once each signatory has registered a signature in their own panel, being tagged on a record is enough for the document to find them.
 
 ---
 
 ## How a slot gains a signatory
 
-A slot used to be a named rectangle. It now answers a second question — *whose*
-rectangle is it?
+A slot can say *whose* rectangle it is:
 
 ```php
 new SlotDefinition(
@@ -71,42 +60,31 @@ new SlotDefinition(
     label:     'Attested by',
     required:  true,
     signatory: 'attestedBy',   // who fills it
-    role:      'attester',     // optional: scope for grants and policies
+    role:      'attester',     // optional: scope for grants and policies (defaults to the slot key)
     order:     2,              // optional: signing sequence
 );
 ```
 
+In config, use the same keys: `signatory`, `role`, `order`, `required`.
+
 ### Four ways to bind a signatory
 
-| Form | Example | When |
+| Form | Example | Use it when |
 |---|---|---|
 | Relation name | `'attestedBy'` | The record has a `belongsTo`. The common case. |
-| Foreign key | `'attested_by_id'` | The record stores only an id, no relation. |
-| Closure | `fn ($record) => $record->department->head` | Derived from something other than a direct column. |
-| Invokable class | `\App\Signatories\DepartmentHead::class` | Reusable across templates; unit-testable on its own. |
+| Foreign key | `'attested_by_id'` | The record stores only an id. |
+| Closure | `fn ($record) => $record->department->head` | The person comes from somewhere other than a direct column. |
+| Invokable class | `\App\Signatories\DepartmentHead::class` | You want it reusable across templates and testable. |
 
-An invokable class may implement [`SignatoryResolver`](../src/Contracts/SignatoryResolver.php)
-for the richer `resolve($record, $slot)` signature, or just define `__invoke`.
+An invokable class can implement [`SignatoryResolver`](../src/Contracts/SignatoryResolver.php) to get `resolve($record, $slot)`, or just define `__invoke`.
 
-A slot with no `signatory` is **unrouted** — nobody in particular owns it, and
-whoever opens the signer page places their own signature. That is the original
-behaviour, unchanged.
-
-### A binding that can't resolve is not an error
-
-If `attested_by_id` is null, or the relation's parent has been deleted, routing
-reports the slot as `unassigned` rather than throwing. A half-filled record is
-a normal state in a workflow, and the UI needs to be able to say *which* role
-is missing.
+A slot with no `signatory` is **unrouted**: whoever opens the signer page places their own signature. A binding that can't resolve (null foreign key, deleted parent) doesn't throw; the slot just shows as `unassigned`.
 
 ---
 
 ## Reading the routing
 
-[`SignatoryRouter`](../src/Services/SignatoryRouter.php) joins four things that
-are otherwise independent: the template's slots, the designer's saved
-coordinates, the people tagged on the record, and each person's signature
-library.
+[`SignatoryRouter`](../src/Services/SignatoryRouter.php) combines the slots, the saved coordinates, the tagged people and their signatures. The panel, inbox and signing pipeline all read its output.
 
 ```php
 $routes = app(SignatoryRouter::class)->routeFor($report);
@@ -120,29 +98,21 @@ $routes['attested_by']->state;          // RouteState::AwaitingConsent
 $routes['attested_by']->blockerMessage();
 ```
 
-Every UI surface and the signing pipeline read this same structure, so the
-panel and the signer can never disagree about who is blocking a document.
-
 ### Slot states
 
-| State | Meaning | What fixes it |
+| State | Meaning | How to fix it |
 |---|---|---|
 | `unassigned` | Nobody is tagged for this role | Tag someone on the record |
 | `awaiting_registration` | The tagged person has never registered a signature | They register one in their own panel |
-| `awaiting_consent` | Everything is ready; waiting on them to sign | They sign (or a grant signs for them) |
+| `awaiting_consent` | Ready; waiting on them to sign | They sign (or a grant signs for them) |
 | `ready` | Signable right now | — |
 | `blocked` | Waiting on an earlier slot in a sequential session | The earlier signatory signs |
-| `signed` | Done, embedded in the document | — |
+| `signed` | Done and embedded in the document | — |
 | `declined` | The signatory refused | Reassign the role, or cancel |
 
-`awaiting_registration` is the useful one: the AR can't be finalised because
-*Dr. Reyes has never uploaded a signature*, and the UI says exactly that
-instead of rendering a blank line.
+`blocked` never hides `unassigned` or `awaiting_registration`; those always show.
 
-`blocked` never replaces `unassigned` or `awaiting_registration` — those name a
-problem somebody has to fix, and "waiting on an earlier signatory" would hide it.
-
-### Useful shortcuts
+### Shortcuts on `HasSignatories`
 
 ```php
 $report->signatureBlockers();      // ['noted_by' => 'Dr Reyes has not registered a signature yet.']
@@ -150,30 +120,26 @@ $report->isReadyForSignatures();   // false — opening a session now would stal
 $report->isFullySigned();
 $report->signedDocumentPath();
 $report->pendingSignatureRequestFor(auth()->id());
+$report->currentSigningSession();
+$report->latestSigningSession();
 ```
 
 ---
 
 ## Signing sessions
 
-A multi-signatory document needs an owner. `SigningSession` is it.
+A `SigningSession` owns a multi-signatory document from start to finish.
 
 ```php
 $session = $report->openSigningSession();
 ```
 
-Opening a session does two things that matter:
+Opening a session:
 
-**It freezes the PDF.** The document is rendered once into
-`base_document_path` and never re-rendered. Without that, the second signatory
-would sign a fresh render and erase the first signatory's stamp.
+- **Freezes the PDF.** It's rendered once into `base_document_path` and never re-rendered, so later signers stamp on top of earlier ones.
+- **Creates one `SignatureRequest` per slot**, with the placement copied in. Moving a slot in the designer afterwards doesn't affect open requests.
 
-**It creates one `SignatureRequest` per slot**, copying the placement in. A
-later edit in the placement designer cannot retroactively move a signature
-somebody has already been asked to apply.
-
-Opening is idempotent — calling it again returns the existing open session with
-assignments refreshed.
+Calling it again just returns the open session, with assignments refreshed.
 
 ### Sequential vs parallel
 
@@ -181,26 +147,24 @@ assignments refreshed.
 'sessions' => ['sequence_mode' => 'sequential'],   // default
 ```
 
-Sequential honours `SlotDefinition::$order`: the Dean cannot sign before the
-Department Head. A signature out of turn raises `OutOfSequenceException`.
-Parallel lets any assigned signatory act at any time. Set it per template with
-`'sequence_mode' => 'parallel'` in the template config.
+- `sequential` follows the slots' `order`. Signing out of turn throws `OutOfSequenceException`.
+- `parallel` lets any assigned signatory sign at any time.
+
+Override per template with `'sequence_mode' => 'parallel'`.
 
 ### Late assignment
 
-A session can open before every role is filled. When the record is tagged
-later:
+A session can open before every role is filled. After tagging someone later, run:
 
 ```php
 app(SigningSessionManager::class)->refreshAssignments($session);
 ```
 
-Requests that already reached a decision are never touched — a signature that
-happened, happened.
+Requests that are already signed or declined are left alone.
 
 ### The signature chain
 
-Each signature is chained to the one before it:
+Each signature links to the one before it:
 
 ```
 base.pdf ──sig#1(Juan)──▶ signed-1.pdf ──sig#2(Maria)──▶ signed-2.pdf ──sig#3──▶ final.pdf
@@ -209,10 +173,7 @@ base.pdf ──sig#1(Juan)──▶ signed-1.pdf ──sig#2(Maria)──▶ sig
    signed_document_hash = H(signed-1)         parent_signature_id = sig#1
 ```
 
-Signature N's `document_hash` equals signature N-1's `signed_document_hash`, and
-`parent_signature_id` records the link. The progression is verifiable from the
-database regardless of what the PDF file itself can carry — which matters, as
-the next section explains.
+Signature N's `document_hash` equals N-1's `signed_document_hash`, and `parent_signature_id` stores the link, so the chain is verifiable from the database alone.
 
 ---
 
@@ -222,98 +183,57 @@ the next section explains.
 'multi_signature' => ['mode' => 'progressive'],   // default
 ```
 
-### `progressive` (default)
+| | `progressive` (default) | `incremental` |
+|---|---|---|
+| How it works | Each signature is stamped onto the previous output and re-signed with that signer's certificate | Each signature is appended as an ISO 32000 incremental update (true PAdES) |
+| Visible signatures in the PDF | All of them | All of them |
+| Cryptographic signatures in the PDF | **Only the last one** | One per signer, all valid |
+| Per-signer DB row, certificate fingerprint, timestamp, hash chain | Yes | Yes |
+| Works with bundled drivers | Yes | **No** |
 
-Each signature is stamped onto the previous signatory's output and the document
-is re-signed with **that signatory's** certificate.
+`incremental` needs a driver implementing [`SupportsIncrementalSigning`](../src/Contracts/SupportsIncrementalSigning.php). The bundled FPDI and TCPDF drivers rewrite the whole file, so they can't; you'd need something like SetaPDF-Signer. Without one, signing throws `IncrementalSigningUnsupportedException` rather than silently falling back.
 
-- ✅ The finished PDF shows every visible signature.
-- ✅ Every signature has its own `digital_signatures` row, its own certificate
-  fingerprint, its own timestamp, and a verifiable hash chain.
-- ⚠️ **Only the most recent PKCS#7 block survives inside the PDF.** FPDI and
-  TCPDF rebuild the file on every pass, which necessarily discards the previous
-  signature block. A PDF reader will show one cryptographic signature, not N.
-
-### `incremental`
-
-True PAdES: each signature is appended as an ISO 32000 incremental update, and
-every earlier signature stays cryptographically valid — a reader shows N
-distinct signers with N certificates.
-
-This requires a driver implementing
-[`SupportsIncrementalSigning`](../src/Contracts/SupportsIncrementalSigning.php).
-**Neither bundled driver can do it**, and that is a property of FPDI rather
-than an oversight: FPDI re-imports and rewrites the document, which invalidates
-any existing signature. Writing incremental updates in PHP needs a library
-built for it (e.g. SetaPDF-Signer).
-
-Setting `incremental` without such a driver raises
-`IncrementalSigningUnsupportedException` at sign time. That is deliberate: the
-alternative is a document that silently claims three signatures and carries one.
-
-### Choosing
-
-| Your requirement | Mode |
-|---|---|
-| A visible signature block, tamper-evidence, and a full audit trail | `progressive` |
-| N independently verifiable signer certificates in the PDF itself | `incremental` + a capable driver |
-
-If the answer is legal rather than technical, get it confirmed before building
-on `progressive`.
+Use `progressive` if a visible signature block, tamper-evidence and an audit trail are enough. Use `incremental` if each signer's certificate must verify inside the PDF itself. If that's a legal requirement, confirm it before building on `progressive`.
 
 ---
 
 ## Consent: who may sign, and when
 
-**Automation can remove the effort of signing. It must never remove the
-consent.** Everything below exists to keep those two apart.
+Automation can save signers effort, but it must never sign without their consent. Pick a mode:
 
 ```php
 'auto_affix' => ['mode' => 'approval'],   // default
 ```
 
-### `approval` — the default
+| Mode | What happens |
+|---|---|
+| `approval` (default) | Never auto-signs. The document lands in the signer's inbox with the placement filled in, and they sign it with one click in their own request, with their own certificate. |
+| `delegated` | The signer opts in once with a standing grant. Matching documents are then signed for them automatically. |
+| `implicit` | Being tagged on a record counts as consent. **Unsafe**: anyone who can edit the record can make that person's certificate sign it. Off unless you also set `allow_implicit`. |
 
-Never auto-signs. Routing finds the right person, the placement is pre-filled,
-and the document appears in their inbox — but the PKCS#7 block is produced in
-**their own authenticated request, with their own certificate**.
+### `delegated` grants
 
-The automation is real: nobody hunts for the document, nobody re-draws a
-signature, nobody types coordinates. What remains is one click by the person
-whose name is on the line. No new trust assumptions over single-signer signing.
-
-### `delegated` — standing authorisation
-
-The signatory opts in once, from their own account:
-
-> ☑ Auto-apply my signature when I am tagged as **Attested by** on an
-> **Accomplishment Report** — until 2027-01-01.
+The signer creates the grant from their own account:
 
 ```php
 app(AutoAffixService::class)->grant(
     grantorId:   auth()->id(),
     signature:   $mySignature,
     templateKey: 'accomplishment-report',
-    role:        'attested_by',
-    expiresAt:   now()->addYear(),
-    maxUses:     null,      // or a cap
-    signable:    null,      // or one specific record
+    role:        'attested_by',      // optional
+    expiresAt:   now()->addYear(),   // defaults to auto_affix.default_grant_days
+    maxUses:     null,               // or a cap
+    signable:    null,               // or one specific record
 );
 ```
 
-A grant is scoped, expiring, revocable, and **can only be created by the
-grantor in their own session** — an administrator cannot consent on someone
-else's behalf (`DelegationNotPermittedException`).
+Revoke it with `app(AutoAffixService::class)->revokeGrant($delegation)`.
 
-Understand what you are enabling: a standing grant means the server can produce
-that user's signature for the grant's lifetime. That is a deliberate trade, not
-a detail.
+Only the grantor can create or revoke a grant, in their own session. Anyone else (an admin included) gets `DelegationNotPermittedException`, as does a grant for a signature that isn't the grantor's or is revoked.
 
-### `implicit` — unsafe, off by default
+Keep in mind: while a grant is live, the server can produce that user's signature.
 
-Treats being tagged on a record as consent to sign it. Anyone who can edit the
-record can then cause that person's certificate to sign it — signature forgery
-with extra steps. It requires a second, separate acknowledgement:
+### `implicit` needs a second switch
 
 ```php
 'auto_affix' => ['mode' => 'implicit', 'allow_implicit' => true],
@@ -331,19 +251,13 @@ Without `allow_implicit`, the service refuses and explains why.
 
 ### What holds in every mode
 
-1. **Every auto-affix is audited** — who was signed for, who triggered it,
-   which grant authorised it, IP, user agent, timestamp
-   ([`SignatureAudit`](../src/Models/SignatureAudit.php)).
-2. **Grants are created only by their grantor**, in their own session.
-3. **Revoking a signature or a grant takes effect immediately.**
-4. **Auto-affixed signatures are marked `source = 'auto'`**, distinct from
-   `draw` and `upload`.
-5. **The signatory is notified about every auto-affix**, not just the grant.
-   Silent signing is not acceptable even with consent.
-6. **Machine fingerprints are never fabricated.** The signer wasn't at a
-   keyboard, so the originating signature's fingerprint is carried forward and
-   the event is marked server-originated. Inventing one would corrupt the
-   machine-binding check that protects ordinary signing.
+- Every auto-affix is audited in [`SignatureAudit`](../src/Models/SignatureAudit.php): who was signed for, who triggered it, which grant allowed it, IP, user agent and time.
+- Revoking a signature or a grant takes effect immediately.
+- Auto-affixed signatures get `source = 'auto'`, separate from `draw` and `upload`.
+- The signer is notified about every auto-affix, not just the grant (`auto_affix.notify`).
+- Machine fingerprints are never faked. The original signature's fingerprint is carried forward and the event is marked as server-originated.
+
+The reasoning behind these rules is in [Concept: Signatory Routing](concepts/signatory-routing.md).
 
 ---
 
@@ -373,11 +287,12 @@ public static function infolist(Infolist $infolist): Infolist
 }
 ```
 
-Renders each role, who fills it, their state, and the blocker when there is one.
+It shows each role, who fills it, its state, and the blocker if there is one.
 
 ```php
-SignatoryPanel::make()->only(['attested_by']);   // one role in context
+SignatoryPanel::make()->only(['attested_by']);   // show just these roles
 SignatoryPanel::make()->showPlacement();         // page + coordinates, for calibration
+SignatoryPanel::make()->showAvatars();           // signer avatars (bool or closure)
 SignatoryPanel::make()->template('custom-key');  // override the record's template
 ```
 
@@ -387,56 +302,44 @@ SignatoryPanel::make()->template('custom-key');  // override the record's templa
 use Kukux\DigitalSignature\Filament\Actions\RequestSignaturesAction;
 
 RequestSignaturesAction::make()
-    ->autoAffix()            // apply any standing grants immediately (default)
+    ->autoAffix()            // apply standing grants right after opening (default)
     ->template('custom-key');
 ```
 
-Refuses to open a session whose required roles cannot be filled, and names the
-blockers instead. A session that stalls on "the Dean has no signature" is worse
-than no session — the document looks in-flight when nothing can happen.
+It refuses to open a session while required roles can't be filled, and lists the blockers. `autoAffix()` only does something if the template's consent mode allows it. On Filament v3, table rows need `RequestSignaturesTableAction` (see [Filament version compatibility](#filament-version-compatibility)).
 
-On Filament v3 a table row needs `RequestSignaturesTableAction` instead; see
-[Filament version compatibility](#filament-version-compatibility).
+### The inbox and the floating launcher
 
-### The inbox, and the launcher that fronts it
+- **Floating launcher** (default): a button on every panel page that opens a slide-over of what's waiting, with Sign and Decline on each row.
+- **Awaiting my signature** page: the full-page view.
 
-Two surfaces onto one queue:
+While the launcher is on, the inbox page and Signatures resource leave the sidebar but stay routable; the slide-over links to both.
 
-- A **floating launcher** — a button pinned to every panel page whose
-  slide-over lists what is waiting, with Sign and Decline on each row. This is
-  the default entry point, because a signatory is always in the middle of
-  something else when a document reaches them.
-- An **Awaiting my signature** page, for the full view.
+| You want to | Do this |
+|---|---|
+| Keep the sidebar items too | `signature.launcher.replaces_navigation = false` |
+| Turn the launcher off for a panel | `SignaturePlugin::make()->withoutFloatingLauncher()` |
+| Turn the launcher off everywhere | `signature.launcher.enabled = false` |
+| Turn the inbox page off | `->withoutInbox()` or `signature.inbox.enabled = false` |
 
-While the launcher is on it takes the navigation items with it: the inbox page
-and the Signatures resource stay routable but stop claiming sidebar slots, and
-the slide-over links to both. Keep both with
-`signature.launcher.replaces_navigation = false`; turn the launcher off per
-panel with `SignaturePlugin::make()->withoutFloatingLauncher()`, or the page
-with `->withoutInbox()` / `signature.inbox.enabled`.
-
-Either way each Sign click produces the signature in that user's own request,
-because both surfaces run the same `ActsOnSignatureRequests` code.
+Both run the same `ActsOnSignatureRequests` code, so every Sign click signs in that user's own request.
 
 ### Escape hatches
 
 ```php
-// Global signatory override — return null to defer to the slot's own binding
+// Global signatory override — return null to fall back to the slot's own binding
 SignaturePlugin::make()->resolveSignatoriesUsing(
     fn ($record, $slot) => app(OrgChart::class)->holderOf($slot->role(), $record),
 );
 ```
 
-Events, for headless flows: `SigningSessionOpened`, `SignatureRequested`,
-`SignatureDeclined`, `SignatureAutoAffixed`, `SigningSessionCompleted` —
-alongside the existing `DocumentSigned`.
+Events for headless flows: `SigningSessionOpened`, `SignatureRequested`, `SignatureDeclined`, `SignatureAutoAffixed`, `SigningSessionCompleted`, plus the existing `DocumentSigned`.
 
 ---
 
 ## Filament version compatibility
 
-The package supports Filament 3, 4 and 5 from one codebase. Two things moved
-between majors and cannot be papered over:
+One codebase supports Filament 3, 4 and 5. These changed between majors:
 
 | What | v3 | v4 / v5 |
 |---|---|---|
@@ -444,19 +347,14 @@ between majors and cannot be papered over:
 | `Page::$view` | **static** property | **instance** property |
 | Forms / infolists | `Forms\Form`, `Infolists\Infolist` | `Schemas\Schema` |
 
-Declaring the wrong `$view` kind is a hard PHP fatal, not a graceful failure.
-So each affected class is split into `V3\` and `V4\` implementations with the
-behaviour in a shared trait, and the service provider aliases the canonical
-name at register time. **Host apps import one stable name regardless of
-version**:
+You don't need to care: import the same class name on every version and the service provider aliases the right implementation.
 
 ```php
 use Kukux\DigitalSignature\Filament\Actions\SignDocumentAction;      // works on 3, 4, 5
 use Kukux\DigitalSignature\Filament\Components\SignatoryPanel;
 ```
 
-The one place v3 needs a different name is the table/header action split, which
-v3 enforces and v4 removed:
+The one exception is v3's split between table and header actions:
 
 | Placement | v3 | v4 / v5 |
 |---|---|---|
@@ -465,7 +363,7 @@ v3 enforces and v4 removed:
 | Table row (request) | `RequestSignaturesTableAction` | either |
 | Page header (request) | `RequestSignaturesAction` | either |
 
-Using the header-suffixed names everywhere is portable across all three.
+The header-suffixed names work as header actions on all three versions.
 
 ### Version detection
 
@@ -474,50 +372,36 @@ FilamentVersion::major();       // 3 | 4 | 5
 FilamentVersion::usesSchemas(); // bool
 ```
 
-Detection reads Composer's installed-versions manifest, because a class probe
-cannot tell v4 from v5 — both have `Filament\Schemas\Schema`. Override with
-`signature.filament_version` when testing a branch the installed version
-wouldn't reach.
+Detection reads Composer's installed-versions data. To force a branch (for example in tests), set `signature.filament_version` / `SIGNATURE_FILAMENT_VERSION`.
 
-`.github/workflows/tests.yml` runs the suite across all three majors. Without
-that matrix, `^3.0 || ^4.0 || ^5.0` would be an aspiration rather than a
-guarantee.
-
-Two things that job does beyond running Pest, both learned the hard way:
-
-- **It requires the summary line.** A fatal inside PHPUnit's output buffer —
-  TCPDF calling `die()`, or a `TypeError` from a GD call — kills the runner,
-  discards the buffered message, and still exits 0, silently skipping every
-  later test file. The job greps for `Tests:` and compares the number of test
-  files reported against the number on disk.
-- **It runs `composer audit`.** This is a signing package; shipping against a
-  dependency with a live advisory is not acceptable, and the audit makes that
-  a build failure rather than a footnote.
+CI (`.github/workflows/tests.yml`) runs the suite on all three majors, fails if Pest's `Tests:` summary is missing or incomplete, and runs `composer audit`.
 
 ---
 
 ## Configuration reference
 
-| Key | Default | Purpose |
-|---|---|---|
-| `sessions.sequence_mode` | `sequential` | `sequential` honours slot order; `parallel` doesn't |
-| `sessions.expires_after_days` | `null` | Sessions stop accepting signatures after this |
-| `multi_signature.mode` | `progressive` | `progressive` or `incremental` — see above |
-| `auto_affix.mode` | `approval` | `approval`, `delegated`, or `implicit` |
-| `auto_affix.allow_implicit` | `false` | Second acknowledgement required for implicit mode |
-| `auto_affix.notify` | `true` | Notify the signatory on every auto-affix. Leave on. |
-| `auto_affix.default_grant_days` | `365` | Default grant lifetime |
-| `inbox.enabled` | `true` | Register the inbox page |
-| `filament_version` | auto | Force a Filament branch |
+| Key | Env var | Default | Purpose |
+|---|---|---|---|
+| `sessions.sequence_mode` | `SIGNATURE_SEQUENCE_MODE` | `sequential` | `sequential` follows slot order; `parallel` doesn't |
+| `sessions.expires_after_days` | `SIGNATURE_SESSION_EXPIRY_DAYS` | `null` | Sessions stop accepting signatures after this many days |
+| `multi_signature.mode` | `SIGNATURE_MULTI_MODE` | `progressive` | `progressive` or `incremental` |
+| `auto_affix.mode` | `SIGNATURE_AUTO_AFFIX_MODE` | `approval` | `approval`, `delegated` or `implicit` |
+| `auto_affix.allow_implicit` | `SIGNATURE_ALLOW_IMPLICIT_AFFIX` | `false` | Second switch required for `implicit` |
+| `auto_affix.notify` | `SIGNATURE_AUTO_AFFIX_NOTIFY` | `true` | Notify the signer on every auto-affix. Leave it on. |
+| `auto_affix.default_grant_days` | `SIGNATURE_GRANT_DAYS` | `365` | Default grant lifetime |
+| `inbox.enabled` | `SIGNATURE_INBOX_ENABLED` | `true` | Register the inbox page |
+| `inbox.navigation` | `SIGNATURE_INBOX_NAV` | `true` | Show the inbox in the sidebar (page stays routable either way) |
+| `launcher.enabled` | `SIGNATURE_LAUNCHER_ENABLED` | `true` | Show the floating launcher |
+| `launcher.replaces_navigation` | `SIGNATURE_LAUNCHER_REPLACES_NAV` | `true` | Hide inbox/resource sidebar items while the launcher is on |
+| `filament_version` | `SIGNATURE_FILAMENT_VERSION` | auto | Force a Filament branch (3, 4 or 5) |
+
+Per-template overrides: `sequence_mode` and `auto_affix` inside a `templates.<key>` entry. The launcher's look and placement options are documented in `config/signature.php`.
 
 ---
 
 ## Schema
 
-All tables are created by a single migration,
-`9999_12_31_000000_create_digital_signature_tables.php`, in dependency order:
-every foreign key's target table is created before the table that references
-it. These are the tables this page relies on:
+All tables are created by a single migration, `9999_12_31_000000_create_digital_signature_tables.php`, in dependency order: every foreign key's target table is created before the table that references it. These are the tables this page relies on:
 
 | Table | Holds |
 |---|---|
@@ -531,35 +415,14 @@ it. These are the tables this page relies on:
 | `digital_signature_audits` | Append-only log of every consequential act |
 | `digital_pdf_template_slots` | Designer-saved coordinates per (template, slot) |
 
-The order matters because MySQL and Postgres require a foreign key's target
-to exist at `CREATE TABLE` time, even though SQLite would accept either order.
-Every create is guarded by `Schema::hasTable` and every column added in a
-later release by `Schema::hasColumn`. That makes the migration safe to run on
-databases created by earlier releases.
-
----|---|---|
-| 1 | `digital_user_certificates` | Per-user X.509 certificate + encrypted key |
-| 2 | `digital_signing_sessions` | One document's journey: frozen base PDF, running document, status, mode |
-| 3 | `digital_signatures` | Every signature, including `signing_session_id` / `slot_key` / `sequence` / `parent_signature_id` for the multi-signatory chain |
-| 4 | `signature_positions` | Where a given signature was stamped |
-| 5 | `digital_signature_requests` | One (session, slot): assignee, frozen placement, decision |
-| 6 | `digital_signature_delegations` | Standing consent: user, signature, template, role, expiry, uses |
-| 7 | `digital_signature_audits` | Append-only log of every consequential act |
-| 8 | `digital_pdf_template_slots` | Designer-saved coordinates per (template, slot) |
-
-The session columns are declared in `digital_signatures`' own create migration
-rather than added by a later `Schema::table()` — an `add_x_to_y` migration is
-only warranted for schema that has already shipped. This is also why
-`digital_signing_sessions` is created *before* `digital_signatures`: MySQL and
-Postgres require a foreign key's target to exist at `CREATE TABLE` time, even
-though SQLite would accept either order.
+The order matters because MySQL and Postgres require a foreign key's target to exist at `CREATE TABLE` time, even though SQLite would accept either order. Every create is guarded by `Schema::hasTable` and every column added in a later release by `Schema::hasColumn`. That makes the migration safe to run on databases created by earlier releases.
 
 ---
 
 ## Related
 
-- [PDF Templates](pdf-templates.md) — slots, the placement designer, the signer page
-- [Model Setup](model-setup.md) — `Signable`, `HasSignatures`
-- [Security](security.md) — HMAC metadata, machine binding, forgery detection
-- [Signing Workflow](signing-workflow.md) — `SignatureManager`, events, statuses
-- [Concept: Signatory Routing](concepts/signatory-routing.md) — the original design discussion
+- [PDF Templates](pdf-templates.md): slots, the placement designer, the signer page
+- [Model Setup](model-setup.md): `Signable`, `HasSignatures`
+- [Security](security.md): HMAC metadata, machine binding, forgery detection
+- [Signing Workflow](signing-workflow.md): `SignatureManager`, events, statuses
+- [Concept: Signatory Routing](concepts/signatory-routing.md): the design reasoning behind routing and consent
