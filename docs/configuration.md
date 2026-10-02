@@ -2,6 +2,12 @@
 
 After publishing, the config file lives at `config/signature.php`.
 
+Your copy is merged with the package defaults one level deep. A top-level block
+you delete falls back to the default. A block you keep replaces the default
+**whole**, along with the env variables inside it. Keep blocks complete, or
+remove them and use `.env`. See
+[Keep your published config current](installation.md#keep-your-published-config-current).
+
 ---
 
 ## Certificate driver
@@ -256,6 +262,19 @@ SIGNATURE_DEVICES_NOTIFY=true       # mail the owner when a new device registers
 SIGNATURE_AGENT_ENABLED=false       # desktop agent pairing + approval
 SIGNATURE_AGENT_APPROVAL=prefer     # off | prefer | enforce
 SIGNATURE_AGENT_MIN_VERSION=0.1.0   # older agents get HTTP 426
+SIGNATURE_AGENT_SERVER_ID=          # blank = derived from APP_KEY; set before rotating APP_KEY
+SIGNATURE_AGENT_SALT=               # same
+
+# Routing, sessions and consent
+SIGNATURE_SEQUENCE_MODE=sequential  # sequential | parallel
+SIGNATURE_MULTI_MODE=progressive    # progressive | incremental
+SIGNATURE_SESSION_EXPIRY_DAYS=      # blank = sessions never expire
+SIGNATURE_AUTO_AFFIX_MODE=approval  # approval | delegated | implicit
+SIGNATURE_ALLOW_IMPLICIT_AFFIX=false
+SIGNATURE_AUTO_AFFIX_NOTIFY=true
+
+# Placement designer
+SIGNATURE_DESIGNER_DPI=144          # page preview sharpness
 
 # Queue
 SIGNATURE_QUEUE=default

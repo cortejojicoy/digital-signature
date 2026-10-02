@@ -61,6 +61,11 @@ That's it. The array gets read on boot, instantiated into a `BladePdfTemplate`, 
 composer require barryvdh/laravel-dompdf
 ```
 
+> **Heads up:** the closure in `data_resolver` breaks `php artisan config:cache`.
+> That's fine for local tinkering. For production, move the template into a
+> [full class](#implementing-a-template-full-class) and list the class-string
+> in config instead.
+
 ### What the keys mean
 
 | Key | Required | Type | What it does |
@@ -139,6 +144,38 @@ class BrowsershotRenderer implements PdfRenderer
     ],
 ],
 ```
+
+### Pin the paper size
+
+Slots are stored as absolute PDF points, so the page size has to stay put.
+The stock DomPDF renderer uses whatever `dompdf.default_paper_size` is. Publish
+`config/dompdf.php` with `letter` someday, and every calibrated signature
+moves. A tiny renderer fixes the size in your template instead:
+
+```php
+class A4Renderer implements PdfRenderer
+{
+    public function render(string $view, array $data, string $destinationPath): string
+    {
+        @mkdir(dirname($destinationPath), 0775, true);
+
+        file_put_contents(
+            $destinationPath,
+            \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data)->setPaper('a4')->output(),
+        );
+
+        return $destinationPath;
+    }
+
+    public static function isAvailable(): bool
+    {
+        return class_exists(\Barryvdh\DomPDF\Facade\Pdf::class);
+    }
+}
+```
+
+Use the same paper size as any non-signing preview or download of the document,
+so the signed copy looks the same as the one people already print.
 
 ---
 

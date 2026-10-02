@@ -29,7 +29,6 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 ```bash
 composer require kukux/digital-signature
-php artisan vendor:publish --tag=signature-migrations
 php artisan vendor:publish --tag=signature-config
 php artisan migrate
 php artisan filament:assets

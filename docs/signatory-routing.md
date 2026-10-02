@@ -514,11 +514,30 @@ Two things that job does beyond running Pest, both learned the hard way:
 
 ## Schema
 
-Migrations run in dependency order — every foreign key's target table is
-created before the table that references it:
+All tables are created by a single migration,
+`9999_12_31_000000_create_digital_signature_tables.php`, in dependency order:
+every foreign key's target table is created before the table that references
+it. These are the tables this page relies on:
 
-| # | Table | Holds |
-|---|---|---|
+| Table | Holds |
+|---|---|
+| `digital_user_certificates` | Per-user X.509 certificate + encrypted key |
+| `digital_signature_devices` | Registered signing keys (browser or desktop agent) |
+| `digital_signing_sessions` | One document's journey: frozen base PDF, running document, status, mode |
+| `digital_signatures` | Every signature, including `signing_session_id` / `slot_key` / `sequence` / `parent_signature_id` for the multi-signatory chain |
+| `signature_positions` | Where a given signature was stamped |
+| `digital_signature_requests` | One (session, slot): assignee, frozen placement, decision |
+| `digital_signature_delegations` | Standing consent: user, signature, template, role, expiry, uses |
+| `digital_signature_audits` | Append-only log of every consequential act |
+| `digital_pdf_template_slots` | Designer-saved coordinates per (template, slot) |
+
+The order matters because MySQL and Postgres require a foreign key's target
+to exist at `CREATE TABLE` time, even though SQLite would accept either order.
+Every create is guarded by `Schema::hasTable` and every column added in a
+later release by `Schema::hasColumn`. That makes the migration safe to run on
+databases created by earlier releases.
+
+---|---|---|
 | 1 | `digital_user_certificates` | Per-user X.509 certificate + encrypted key |
 | 2 | `digital_signing_sessions` | One document's journey: frozen base PDF, running document, status, mode |
 | 3 | `digital_signatures` | Every signature, including `signing_session_id` / `slot_key` / `sequence` / `parent_signature_id` for the multi-signatory chain |
