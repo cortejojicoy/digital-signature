@@ -2,9 +2,12 @@
 
 namespace Kukux\DigitalSignature\Agent;
 
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Kukux\DigitalSignature\Enums\DeviceType;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Models\AgentPairing;
 use Kukux\DigitalSignature\Models\AgentToken;
@@ -25,6 +28,11 @@ use Kukux\DigitalSignature\Security\DeviceRegistry;
  * So a stolen session cannot pair a machine without the code reaching it,
  * and a code typed into the wrong machine still needs the owner's click.
  * Wire contract: digital-signature-agent/docs/protocol.md "Pairing".
+ *
+ * One signature per computer for this app (multi-app-pairing-plan.md §7.2):
+ * a computer is its salted hardware id. While one account's agent device is
+ * active on it, another account's claim is refused; the same account pairing
+ * again updates that device in place ("rebind") rather than adding one.
  */
 class AgentPairingService
 {
@@ -75,77 +83,153 @@ class AgentPairingService
     }
 
     /**
-     * Create the device from the agent's claim.
+     * Create the device from the agent's claim, or, when this user's agent
+     * already holds this computer, give that device the new keys.
      *
-     * @throws InvalidArgumentException  when the pairing is not awaiting this user.
+     * @param  string|null  $deviceType  the owner's correction of the detected type (Enums\DeviceType value).
+     *
+     * @throws InvalidArgumentException  when the pairing is not awaiting this user, or another
+     *                                   account holds this computer, or its type is blocked.
      * @throws UnregisteredDeviceException  at max_per_user.
      */
-    public function confirm(AgentPairing $pairing, int $userId): SigningDevice
+    public function confirm(AgentPairing $pairing, int $userId, ?string $deviceType = null): SigningDevice
     {
-        return DB::transaction(function () use ($pairing, $userId) {
-            $pairing = AgentPairing::query()->lockForUpdate()->findOrFail($pairing->id);
+        try {
+            return DB::transaction(fn () => $this->confirmLocked($pairing, $userId, $deviceType));
+        } catch (UniqueConstraintViolationException) {
+            // Another pairing for this computer committed first.
+            throw new InvalidArgumentException(self::MACHINE_TAKEN);
+        }
+    }
 
-            if ((int) $pairing->user_id !== $userId || $pairing->status !== 'awaiting_confirmation' || $pairing->isExpired()) {
-                throw new InvalidArgumentException('This pairing is no longer waiting for confirmation.');
-            }
+    private const MACHINE_TAKEN = 'This computer is already paired with another account on this app. '
+        .'They can remove it from their signing devices, or an admin can release it.';
 
+    private function confirmLocked(AgentPairing $pairing, int $userId, ?string $deviceType): SigningDevice
+    {
+        $pairing = AgentPairing::query()->lockForUpdate()->findOrFail($pairing->id);
+
+        if ((int) $pairing->user_id !== $userId || $pairing->status !== 'awaiting_confirmation' || $pairing->isExpired()) {
+            throw new InvalidArgumentException('This pairing is no longer waiting for confirmation.');
+        }
+
+        $claim = $pairing->claim;
+        $identity = DeviceProofVerifier::parsePublicKey($claim['identity_public_key']);
+        $session = DeviceProofVerifier::parsePublicKey($claim['session_public_key']);
+        $device = $claim['device'];
+
+        $detected = DeviceType::fromAgent($device['device_type'] ?? null, $device['form_factor'] ?? null);
+        $virtual = (bool) ($device['virtual'] ?? false);
+
+        // The policy may have changed since the claim.
+        if (self::blocks($detected, $virtual)) {
+            throw new InvalidArgumentException(self::blockedMessage($detected, $virtual));
+        }
+
+        // Checked again under the lock: another pairing may have taken this
+        // computer since the claim.
+        $hardware = ($device['hardware_id_hash'] ?? '') ?: null;
+        $holders = $this->activeAgentsOn($hardware, lock: true);
+
+        if ($holders->contains(fn (SigningDevice $d) => (int) $d->user_id !== $userId)) {
+            throw new InvalidArgumentException(self::MACHINE_TAKEN);
+        }
+
+        // Newest first. Duplicates from before this rule (kept on upgrade)
+        // are retired now that the computer has one pairing again.
+        $existing = $holders->first();
+        $holders->skip(1)->each(fn (SigningDevice $old) => $this->registry->revoke($old));
+
+        $shown = $this->chooseType($detected, $deviceType);
+
+        $attributes = [
+            'public_key'           => $identity['pem'],
+            'key_fingerprint'      => $identity['fingerprint'],
+            'algorithm'            => $identity['algorithm'],
+            'kind'                 => 'agent',
+            'protection'           => $claim['protection'],
+            'user_presence'        => (bool) $claim['user_presence'],
+            // Phase 5: verify $claim['attestation'] against the Microsoft
+            // TPM roots. Until then nothing is marked attested.
+            'attested'             => false,
+            'device_type'          => $shown->value,
+            'detected_device_type' => $detected->value,
+            'chassis_type'         => $device['chassis_type'] ?? null,
+            'virtual'              => $virtual,
+            'form_factor'          => $device['form_factor'],
+            'platform'             => $device['platform'],
+            'model'                => $device['model'],
+            'user_agent'           => sprintf('Kukux Sign Agent %s (%s %s)', $claim['agent_version'], $device['platform'], $device['os_version']),
+            'hardware_id_hash'     => $hardware,
+            'agent_version'        => $claim['agent_version'],
+            'session_public_key'   => $session['pem'],
+            'status'               => 'active',
+            'approved_at'          => now(),
+        ];
+
+        if ($existing !== null) {
+            // Rebind: same row, uuid and label, so signature history and
+            // "Used on" stay intact. The old keys and token stop working.
+            $existing->update($attributes + ['rebound_at' => now(), 'revoked_at' => null]);
+
+            AgentToken::query()
+                ->where('device_id', $existing->id)
+                ->whereNull('revoked_at')
+                ->update(['revoked_at' => now()]);
+
+            $row = $existing;
+            $event = SignatureAudit::AGENT_REBOUND;
+        } else {
             $this->registry->assertCapacity($userId);
 
-            $claim = $pairing->claim;
-            $identity = DeviceProofVerifier::parsePublicKey($claim['identity_public_key']);
-            $session = DeviceProofVerifier::parsePublicKey($claim['session_public_key']);
-            $device = $claim['device'];
-
-            // The same machine paired again (say, after a reinstall): its old
-            // keys are gone, so its old device row should be too.
-            if (! empty($device['hardware_id_hash'])) {
-                SigningDevice::query()
-                    ->where('user_id', $userId)
-                    ->where('kind', 'agent')
-                    ->where('hardware_id_hash', $device['hardware_id_hash'])
-                    ->active()
-                    ->get()
-                    ->each(fn (SigningDevice $old) => $this->registry->revoke($old));
-            }
-
-            $row = SigningDevice::create([
-                'uuid'               => (string) Str::uuid(),
-                'user_id'            => $userId,
-                'label'              => $device['label'] ?: ($device['model'] ?: 'Computer'),
-                'public_key'         => $identity['pem'],
-                'key_fingerprint'    => $identity['fingerprint'],
-                'algorithm'          => $identity['algorithm'],
-                'kind'               => 'agent',
-                'protection'         => $claim['protection'],
-                'user_presence'      => (bool) $claim['user_presence'],
-                // Phase 5: verify $claim['attestation'] against the Microsoft
-                // TPM roots. Until then nothing is marked attested.
-                'attested'           => false,
-                'device_type'        => 'desktop',
-                'form_factor'        => $device['form_factor'],
-                'platform'           => $device['platform'],
-                'model'              => $device['model'],
-                'user_agent'         => sprintf('Kukux Sign Agent %s (%s %s)', $claim['agent_version'], $device['platform'], $device['os_version']),
-                'hardware_id_hash'   => $device['hardware_id_hash'] ?: null,
-                'agent_version'      => $claim['agent_version'],
-                'session_public_key' => $session['pem'],
-                'status'             => 'active',
-                'registered_ip'      => $claim['ip'] ?? null,
-                'approved_at'        => now(),
+            $row = SigningDevice::create($attributes + [
+                'uuid'          => (string) Str::uuid(),
+                'user_id'       => $userId,
+                'label'         => $device['label'] ?: ($device['model'] ?: 'Computer'),
+                'registered_ip' => $claim['ip'] ?? null,
             ]);
+            $event = SignatureAudit::AGENT_PAIRED;
+        }
 
-            $pairing->update(['status' => 'confirmed', 'device_id' => $row->id]);
+        $pairing->update([
+            'status'             => 'confirmed',
+            'device_id'          => $row->id,
+            'replaces_device_id' => $existing?->id,
+        ]);
 
-            SignatureAudit::record(SignatureAudit::AGENT_PAIRED, [
-                'subject_user_id' => $userId,
-                'device_id'       => $row->id,
-                'context'         => ['pairing' => $pairing->uuid, 'protection' => $row->protection],
+        SignatureAudit::record($event, [
+            'subject_user_id' => $userId,
+            'device_id'       => $row->id,
+            'context'         => ['pairing' => $pairing->uuid, 'protection' => $row->protection, 'device_type' => $row->device_type],
+        ]);
+
+        // New keys either way, so the owner hears about it either way.
+        $this->registry->announce($row);
+
+        return $row;
+    }
+
+    /**
+     * An admin frees a computer from the account it's paired with, say when
+     * the owner left, or unpaired while the server was unreachable.
+     */
+    public function release(SigningDevice $device, ?int $actorId = null): void
+    {
+        if ($device->kind !== 'agent') {
+            throw new InvalidArgumentException('Only desktop agent devices hold a computer.');
+        }
+
+        $wasActive = $device->isActive();
+        $this->registry->revoke($device);
+
+        if ($wasActive) {
+            SignatureAudit::record(SignatureAudit::AGENT_RELEASED, [
+                'subject_user_id' => $device->user_id,
+                'actor_user_id'   => $actorId,
+                'device_id'       => $device->id,
+                'context'         => ['label' => $device->displayName()],
             ]);
-
-            $this->registry->announce($row);
-
-            return $row;
-        });
+        }
     }
 
     public function reject(AgentPairing $pairing, int $userId): void
@@ -170,26 +254,40 @@ class AgentPairingService
         }
 
         $device = $claim['device'];
+        $detected = DeviceType::fromAgent($device['device_type'] ?? null, $device['form_factor'] ?? null);
 
-        $replaces = empty($device['hardware_id_hash']) ? null : SigningDevice::query()
+        // This user's device on this computer, which confirming updates.
+        $replaces = $this->activeAgentsOn(($device['hardware_id_hash'] ?? '') ?: null)
+            ->first(fn (SigningDevice $d) => (int) $d->user_id === (int) $pairing->user_id);
+
+        // Where else the account can sign, so the owner sees it before adding a computer.
+        $others = SigningDevice::query()
             ->where('user_id', $pairing->user_id)
-            ->where('kind', 'agent')
-            ->where('hardware_id_hash', $device['hardware_id_hash'])
             ->active()
-            ->first();
+            ->when($replaces, fn ($q) => $q->whereKeyNot($replaces->id))
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (SigningDevice $d) => $d->displayName().' ('.$d->deviceType()->label().')')
+            ->all();
 
         return [
-            'label'      => $device['label'] ?: $device['model'],
-            'model'      => $device['model'],
-            'platform'   => trim($device['platform'].' '.$device['os_version']),
-            'protection' => match ($claim['protection']) {
+            'label'           => $device['label'] ?: $device['model'],
+            'model'           => $device['model'],
+            'platform'        => trim($device['platform'].' '.$device['os_version']),
+            'protection'      => match ($claim['protection']) {
                 'secure_enclave' => 'Secure Enclave',
                 'tpm'            => 'TPM',
                 default          => 'Software key',
             },
-            'presence'   => (bool) $claim['user_presence'],
-            'version'    => $claim['agent_version'],
-            'replaces'   => $replaces?->displayName(),
+            'presence'        => (bool) $claim['user_presence'],
+            'version'         => $claim['agent_version'],
+            'replaces'        => $replaces?->displayName(),
+            'device_type'     => $detected->value,
+            // The owner may correct the type, but not away from a VM (policy goes by detection).
+            'type_locked'     => $detected === DeviceType::VirtualMachine,
+            'identified'      => ! empty($device['hardware_id_hash']),
+            'other_devices'   => $others,
         ];
     }
 
@@ -224,8 +322,9 @@ class AgentPairingService
                 'origin' => AgentServer::origin(),
                 'salt'   => AgentServer::salt(),
             ],
-            'require_presence' => (bool) config('signature.devices.agent.require_presence', true),
-            'expires_at'       => $pairing->expires_at->toIso8601String(),
+            'require_presence'     => (bool) config('signature.devices.agent.require_presence', true),
+            'blocked_device_types' => self::blockedTypes(),
+            'expires_at'           => $pairing->expires_at->toIso8601String(),
         ];
     }
 
@@ -288,13 +387,33 @@ class AgentPairingService
             $text = fn (string $key, int $max): string => Str::limit(trim(strip_tags((string) ($device[$key] ?? ''))), $max, '');
             $protection = in_array($input['protection'] ?? null, self::PROTECTIONS, true) ? $input['protection'] : 'software';
             $hardware = (string) ($device['hardware_id_hash'] ?? '');
+            $hardware = preg_match('/^[0-9a-f]{64}$/', $hardware) ? $hardware : '';
+            $formFactor = in_array($device['form_factor'] ?? null, ['laptop', 'desktop'], true) ? $device['form_factor'] : 'unknown';
+            $detected = DeviceType::fromAgent($device['device_type'] ?? null, $formFactor);
+            $virtual = ($device['virtual'] ?? false) === true;
+            $chassis = $device['chassis_type'] ?? null;
+            $chassis = is_int($chassis) && $chassis >= 1 && $chassis <= 127 ? $chassis : null;
 
+            if (self::blocks($detected, $virtual)) {
+                throw new AgentApiException(422, 'device_type_not_allowed', self::blockedMessage($detected, $virtual));
+            }
+
+            // One signature per computer for this app. The message never
+            // says whose: that would let anyone probe who owns a computer.
+            $holders = $this->activeAgentsOn($hardware ?: null);
+
+            if ($holders->contains(fn (SigningDevice $d) => (int) $d->user_id !== (int) $pairing->user_id)) {
+                throw new AgentApiException(409, 'machine_already_paired', 'This computer is already paired with another account on this app.');
+            }
+
+            $existing = $holders->first();
             $pollSecret = AgentServer::token();
 
             $pairing->update([
-                'status'           => 'awaiting_confirmation',
-                'poll_secret_hash' => hash('sha256', $pollSecret),
-                'claim'            => [
+                'status'             => 'awaiting_confirmation',
+                'poll_secret_hash'   => hash('sha256', $pollSecret),
+                'replaces_device_id' => $existing?->id,
+                'claim'              => [
                     'identity_public_key' => (string) $input['identity_public_key'],
                     'session_public_key'  => (string) $input['session_public_key'],
                     'algorithm'           => $algorithm,
@@ -311,15 +430,26 @@ class AgentPairingService
                         'os_version'       => $text('os_version', 32),
                         'model'            => $text('model', 120),
                         'model_identifier' => $text('model_identifier', 64),
-                        'form_factor'      => in_array($device['form_factor'] ?? null, ['laptop', 'desktop'], true) ? $device['form_factor'] : 'unknown',
+                        'form_factor'      => $formFactor,
                         'label'            => $text('label', 120),
-                        'hardware_id_hash' => preg_match('/^[0-9a-f]{64}$/', $hardware) ? $hardware : '',
+                        'hardware_id_hash' => $hardware,
+                        'device_type'      => $detected->value,
+                        'chassis_type'     => $chassis,
+                        'virtual'          => $virtual,
                     ],
                     'ip'                  => $ip,
                 ],
             ]);
 
-            return ['status' => 'awaiting_confirmation', 'poll_secret' => $pollSecret];
+            return [
+                'status'          => 'awaiting_confirmation',
+                'poll_secret'     => $pollSecret,
+                'existing_device' => $existing === null ? null : [
+                    'uuid'        => $existing->uuid,
+                    'label'       => $existing->displayName(),
+                    'device_type' => $existing->deviceType()->value,
+                ],
+            ];
         });
     }
 
@@ -349,9 +479,14 @@ class AgentPairingService
                 $device = $pairing->device;
 
                 return [
-                    'status' => 'confirmed',
-                    'device' => ['uuid' => $device->uuid, 'label' => $device->displayName()],
-                    'token'  => $token,
+                    'status'  => 'confirmed',
+                    'device'  => [
+                        'uuid'        => $device->uuid,
+                        'label'       => $device->displayName(),
+                        'device_type' => $device->deviceType()->value,
+                    ],
+                    'token'   => $token,
+                    'rebound' => $pairing->replaces_device_id !== null,
                 ];
             }
 
@@ -361,6 +496,68 @@ class AgentPairingService
 
             return ['status' => $pairing->status];
         });
+    }
+
+    /**
+     * Active agent devices on this computer for this app, newest first.
+     * Normally at most one; older installs may hold duplicates.
+     *
+     * @return Collection<int, SigningDevice>
+     */
+    private function activeAgentsOn(?string $hardwareIdHash, bool $lock = false): Collection
+    {
+        if ($hardwareIdHash === null || $hardwareIdHash === '') {
+            return new Collection;
+        }
+
+        return SigningDevice::query()
+            ->where('kind', 'agent')
+            ->where('hardware_id_hash', $hardwareIdHash)
+            ->active()
+            ->when($lock, fn ($q) => $q->lockForUpdate())
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    /** The owner's correction wins, except over a detected VM. */
+    private function chooseType(DeviceType $detected, ?string $override): DeviceType
+    {
+        if ($detected === DeviceType::VirtualMachine || $override === null) {
+            return $detected;
+        }
+
+        return DeviceType::tryFrom($override) ?? $detected;
+    }
+
+    /**
+     * signature.devices.agent.blocked_device_types, as catalogue values.
+     *
+     * @return list<string>
+     */
+    public static function blockedTypes(): array
+    {
+        $configured = config('signature.devices.agent.blocked_device_types', ['virtual_machine']);
+
+        return array_values(array_filter(
+            is_array($configured) ? $configured : explode(',', (string) $configured),
+            fn ($type) => is_string($type) && DeviceType::tryFrom(trim($type)) !== null,
+        ));
+    }
+
+    /** A VM is blocked when either the type or the firmware flag says so. */
+    public static function blocks(DeviceType $detected, bool $virtual): bool
+    {
+        $blocked = self::blockedTypes();
+
+        return in_array($detected->value, $blocked, true)
+            || ($virtual && in_array(DeviceType::VirtualMachine->value, $blocked, true));
+    }
+
+    private static function blockedMessage(DeviceType $detected, bool $virtual): string
+    {
+        return $virtual || $detected === DeviceType::VirtualMachine
+            ? "Pairing from a virtual machine isn't allowed on this app. Install the agent on the computer itself."
+            : "This app doesn't allow pairing from this kind of device ({$detected->label()}).";
     }
 
     private function hashCode(string $code): string
