@@ -1,5 +1,5 @@
 {
-  "description": "Shared test vectors for the canonical proof message (desktop-agent-plan.md \u00a78, \u00a712). Consumed by the agent's canonical.ts tests and the package's Pest tests; both sides must build byte-identical messages.",
+  "description": "Shared test vectors for the canonical proof message (docs/desktop-agent.md, Canonical proof message). Consumed by the agent's canonical.ts tests and the package's Pest tests; both sides must build byte-identical messages.",
   "messages": [
     {
       "purpose": "register_agent",
