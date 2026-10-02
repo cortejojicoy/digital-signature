@@ -6,7 +6,7 @@
 
 A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, and embedding cryptographically signed stamps into PDF documents.
 
-**Supports:** Filament v3, v4 and v5 — Laravel 12 — PHP 8.2+
+**Supports:** Filament v3, v4 and v5 — Laravel 12 and 13 — PHP 8.2+ (8.3+ on Laravel 13)
 
 ---
 
@@ -36,7 +36,7 @@ pages as below, with navigation and search.
 ## Requirements
 
 - PHP 8.2+ with `ext-openssl` and `ext-gd`
-- Laravel 12
+- Laravel 12 or 13 (Laravel 13 needs PHP 8.3+)
 - Filament 3, 4, or 5
 
 ---
