@@ -276,6 +276,42 @@ describe('signature:install', function () {
             ->and(file_get_contents("{$base}/app/Providers/AppServiceProvider.php"))->toBe(APP_SERVICE_PROVIDER);
     });
 
+    it('writes a registered policy class that has gone missing, instead of crashing', function () {
+        $base = installApp();
+        \Illuminate\Support\Facades\Gate::policy(\Kukux\DigitalSignature\Models\Signature::class, 'App\\Policies\\MissingSignaturePolicy');
+
+        $this->artisan('signature:install', ['--no-assets' => true, '--no-panel' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('that class doesn\'t exist')
+            ->expectsOutputToContain('app/Policies/MissingSignaturePolicy.php')
+            ->assertSuccessful();
+
+        $path = "{$base}/app/Policies/MissingSignaturePolicy.php";
+        expect(file_get_contents($path))->toContain('class MissingSignaturePolicy')
+            ->and(lintsOk($path))->toBeTrue()
+            // Already registered, so AppServiceProvider is left alone.
+            ->and(file_get_contents("{$base}/app/Providers/AppServiceProvider.php"))->toBe(APP_SERVICE_PROVIDER);
+    });
+
+    it('asks for dump-autoload when a registered policy file exists but is not autoloaded', function () {
+        $base = installApp();
+        mkdir("{$base}/app/Policies", 0755, true);
+        file_put_contents("{$base}/app/Policies/StaleSignaturePolicy.php", "<?php\n");
+        \Illuminate\Support\Facades\Gate::policy(\Kukux\DigitalSignature\Models\Signature::class, 'App\\Policies\\StaleSignaturePolicy');
+
+        $this->artisan('signature:install', ['--no-assets' => true, '--no-panel' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('composer dump-autoload')
+            ->assertSuccessful();
+    });
+
+    it('skips the policy when a working one is registered', function () {
+        installApp();
+        \Illuminate\Support\Facades\Gate::policy(\Kukux\DigitalSignature\Models\Signature::class, \Kukux\DigitalSignature\Console\Install\StepResult::class);
+
+        $this->artisan('signature:install', ['--no-assets' => true, '--no-panel' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('a policy is already registered')
+            ->assertSuccessful();
+    });
+
     it('pins the agent server id and salt with --agent', function () {
         $base = installApp();
 
