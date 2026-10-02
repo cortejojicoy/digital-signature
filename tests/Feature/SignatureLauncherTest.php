@@ -419,6 +419,43 @@ describe('managing signatures in the drawer', function () {
             ->and($cards['half-done'])->toMatchArray(['slotCount' => 2, 'savedCount' => 1, 'configured' => false]);
     });
 
+    it('opens a template in the drawer instead of linking to the signer or designer', function () {
+        arSessionTemplate();
+
+        $this->actingAs(makeUser(42, 'Previewer'));
+        $card = (new SignatureLauncher)->templateCardsFor(makePrimarySignature(42))[0];
+
+        expect($card['previewMetaUrl'])->toBe(route('signature.pdf-templates.preview.meta', ['template' => 'accomplishment-report']))
+            ->and($card)->not->toHaveKey('signerUrl')
+            ->and($card)->not->toHaveKey('designerUrl');
+    });
+
+    it('serves a template preview read-only, to signed-in users only', function () {
+        Storage::fake('testing');
+        arSessionTemplate();
+
+        $this->getJson(route('signature.pdf-templates.preview.meta', ['template' => 'accomplishment-report']))
+            ->assertForbidden();
+
+        $this->actingAs(makeUser(43, 'Viewer'));
+
+        $this->getJson(route('signature.pdf-templates.preview.meta', ['template' => 'accomplishment-report']))
+            ->assertOk()
+            ->assertJson([
+                'readOnly' => true,
+                'requests' => [],
+                'signatures' => [],
+                'back' => 'Manage signatures',
+                'document' => ['url' => route('signature.pdf-templates.preview.document', ['template' => 'accomplishment-report'])],
+            ]);
+
+        $this->get(route('signature.pdf-templates.preview.document', ['template' => 'accomplishment-report']))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf');
+
+        $this->getJson(route('signature.pdf-templates.preview.meta', ['template' => 'nope']))->assertNotFound();
+    });
+
     it('offers no templates for a signature already used on a document', function () {
         arSessionTemplate();
 

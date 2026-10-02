@@ -84,6 +84,20 @@ describe('SigningSessionManager', function () {
             ->and($session->base_document_hash)->not->toBeNull();
     });
 
+    it('places a slot where the document says it landed, not where the sample had it', function () {
+        arSessionTemplate(['renderer' => \Kukux\DigitalSignature\Tests\Support\AnchoringStubRenderer::class]);
+
+        $session = app(SigningSessionManager::class)->open($this->report);
+        $requests = $session->requests->keyBy('slot_key');
+
+        // Found in the rendered document: page 7, wherever the designer had it.
+        expect($requests['noted_by']->only(['page', 'x', 'y', 'width', 'height']))
+            ->toBe(['page' => 7, 'x' => 380.5, 'y' => 212.25, 'width' => 150.0, 'height' => 42.0])
+            // Not marked in the document: the designer's placement, as before.
+            ->and($requests['prepared_by']->page)->toBe(1)
+            ->and($requests['prepared_by']->x)->toBe(100.0);
+    });
+
     it('copies the placement onto each request so a later designer edit cannot move it', function () {
         $session = app(SigningSessionManager::class)->open($this->report);
 
