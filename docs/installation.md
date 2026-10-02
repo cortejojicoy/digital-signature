@@ -17,6 +17,60 @@
 
 ---
 
+## Quick install
+
+```bash
+composer require kukux/digital-signature
+php artisan signature:install
+```
+
+At the end of `composer require` you'll see a reminder to run the installer. It lists what it's about to do, asks once, then logs each step:
+
+```
+  Checking requirements ................................. DONE
+  Publishing config ..................................... DONE
+  Updating .env ......................................... DONE
+  Publishing assets ..................................... DONE
+  Checking storage ...................................... DONE
+  Running migration ..................................... DONE
+  Registering plugin .................................... DONE
+  Registering policy .................................... DONE
+
+   INFO  Digital Signature is installed.
+```
+
+| Step | What it does |
+|---|---|
+| Requirements | Checks PHP, `ext-openssl`, `ext-gd` and Filament. Warns if DomPDF or Imagick is missing. |
+| Config | Publishes `config/signature.php`. If you already have one, it leaves it alone and lists any keys it's missing ([why that matters](#keep-your-published-config-current)). |
+| `.env` | Adds the [starter settings](#starter-env) to `.env` and `.env.example`. It only adds missing keys and never changes a value. |
+| Assets | Runs `filament:assets`. |
+| Storage | Stops the install if `SIGNATURE_DISK` is a public disk. |
+| Migration | Lists what will run, then runs it. |
+| Plugin | Adds `SignaturePlugin::make()` to the panel providers you pick. |
+| Policy | Writes `app/Policies/DigitalSignaturePolicy.php` and registers it in `AppServiceProvider` ([details](#authorization)). |
+
+Before editing a panel provider or `AppServiceProvider`, it shows the lines it will add and asks. If the edited file doesn't pass `php -l`, it puts the original back. If a file isn't laid out the way it expects, it prints the snippet for you to paste and marks the step `MANUAL`.
+
+Run it again any time. It only does what's missing and marks the rest `SKIPPED`.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Show what each step would do, change nothing. A good first run on an existing app. |
+| `-n` | No questions, for CI. Code edits become `MANUAL` unless you add `--force`. |
+| `--force` | Replace the published config, migrate in production, and edit code without asking. |
+| `--no-migrate` | Skip the migration, e.g. when deploys run it. |
+| `--no-assets` / `--no-panel` / `--no-policy` | Skip that step. |
+| `--panel=admin` | Register the plugin on this panel id only. |
+| `--publish-migrations` | Publish the migration to `database/migrations` and run that copy. |
+| `--agent` | Turn on the [desktop agent](desktop-agent.md) and pin its server ID and salt, so rotating `APP_KEY` later doesn't break pairings. |
+
+In production the installer won't migrate without `--force`. It never changes an existing `.env` value or touches `APP_KEY`.
+
+The rest of this page is what the installer does, step by step, if you'd rather do it by hand.
+
+---
+
 ## 1. Install via Composer
 
 ```bash

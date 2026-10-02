@@ -30,12 +30,10 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 
 ```bash
 composer require kukux/digital-signature
-php artisan vendor:publish --tag=signature-config
-php artisan migrate
-php artisan filament:assets
+php artisan signature:install
 ```
 
-Register the plugin:
+The installer registers the plugin for you. To do it by hand, or to customise it:
 
 ```php
 // app/Providers/Filament/AdminPanelProvider.php

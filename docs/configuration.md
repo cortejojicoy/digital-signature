@@ -271,7 +271,7 @@ SIGNATURE_DEVICES_NOTIFY=true       # mail the owner when a new device registers
 SIGNATURE_AGENT_ENABLED=false       # desktop agent pairing + approval
 SIGNATURE_AGENT_APPROVAL=prefer     # off | prefer | enforce
 SIGNATURE_AGENT_MIN_VERSION=0.1.0   # older agents get HTTP 426
-SIGNATURE_AGENT_SERVER_ID=          # blank = derived from APP_KEY; set before rotating APP_KEY
+SIGNATURE_AGENT_SERVER_ID=          # blank = derived from APP_KEY; `signature:install --agent` pins it
 SIGNATURE_AGENT_SALT=               # same
 SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES=virtual_machine  # comma-separated; empty = allow VMs
 
