@@ -526,7 +526,7 @@ function PdfViewerIsland({ el }) {
         <div className="dsig-viewer">
             <div className="dsig-viewer__bar">
                 <button type="button" className="dsig-btn dsig-btn--ghost" onClick={close}>
-                    ← Queue
+                    ← {meta.back ?? 'Queue'}
                 </button>
                 <span className="dsig-viewer__title">{meta.document.title}</span>
 
