@@ -52,7 +52,6 @@ const NAV = [
         items: [
             { file: 'index.md', label: 'Overview' },
             { file: 'installation.md', label: 'Installation' },
-            { file: 'implementation-plan.md', label: 'Implementation plan' },
         ],
     },
     {
@@ -77,13 +76,15 @@ const NAV = [
         title: 'In the panel',
         items: [
             { file: 'filament-components.md', label: 'Filament components' },
-            { file: 'drawer-signing-ux-plan.md', label: 'Drawer signing UX' },
+            { file: 'drawer-signing-ux.md', label: 'Drawer signing UX' },
         ],
     },
     {
         title: 'Reference',
         items: [
             { file: 'security.md', label: 'Security' },
+            { file: 'device-registration.md', label: 'Device registration' },
+            { file: 'desktop-agent.md', label: 'Desktop agent' },
             { file: 'concepts/signatory-routing.md', label: 'Design: signatory routing' },
         ],
     },
