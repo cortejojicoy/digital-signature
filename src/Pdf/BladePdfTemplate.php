@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Kukux\DigitalSignature\Contracts\ConfiguresSigningSession;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Contracts\PlacesSlotsInDocument;
 use Kukux\DigitalSignature\Pdf\Renderers\DomPdfRenderer;
 use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
 
@@ -34,7 +35,7 @@ use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
  *     'renderer'      => MyRenderer::class,   // optional override
  *   ]
  */
-class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession
+class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesSlotsInDocument
 {
     /**
      * @param  list<SlotDefinition>          $slots
@@ -188,11 +189,31 @@ class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession
         $relPath = "generated/{$this->key}/{$cacheKey}.pdf";
         $absPath = $disk->path($relPath);
 
-        if (! $disk->exists($relPath)) {
+        // A PDF cached before slot anchors existed has no sidecar; render it
+        // again so it gets one.
+        if (! $disk->exists($relPath) || ! is_file(SlotAnchors::sidecar($absPath))) {
             $this->renderer()->render($this->view, $data, $absPath);
+
+            // A renderer that doesn't record anchors leaves none: mark it, so
+            // the designer's placements are used without re-rendering each time.
+            if (! is_file(SlotAnchors::sidecar($absPath))) {
+                SlotAnchors::write($absPath, []);
+            }
         }
 
         return $absPath;
+    }
+
+    /**
+     * Where this record's slots landed in its rendered PDF, from elements the
+     * Blade marks with `data-signature-slot`. Empty when the view marks none
+     * or the renderer doesn't record them.
+     */
+    public function documentPlacements(Model $record): array
+    {
+        $keys = array_map(fn (SlotDefinition $slot) => $slot->key, $this->slots());
+
+        return array_intersect_key(SlotAnchors::read($this->renderFor($record)), array_flip($keys));
     }
 
     /**
