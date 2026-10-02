@@ -4,6 +4,7 @@ namespace Kukux\DigitalSignature;
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Kukux\DigitalSignature\Console\ReleaseAgentComputer;
 use Kukux\DigitalSignature\Drivers\Certificates\CfsslDriver;
 use Kukux\DigitalSignature\Drivers\Certificates\OpenSslDriver;
 use Kukux\DigitalSignature\Drivers\PdfSigners\FpdiDriver;
@@ -167,6 +168,10 @@ class SignatureServiceProvider extends ServiceProvider
         }
 
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'signature');
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([ReleaseAgentComputer::class]);
+        }
 
         // The floating launcher. Registered here rather than in the plugin so
         // the component resolves on any panel the render hook fires for, and
