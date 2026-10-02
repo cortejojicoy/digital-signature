@@ -4,8 +4,6 @@ namespace Kukux\DigitalSignature\Filament\Concerns;
 
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Collection;
-use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
-use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner;
 use Kukux\DigitalSignature\Models\PdfTemplateSlot;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
@@ -127,20 +125,16 @@ trait ManagesSignatures
 
             $requiredKeys = $slots->filter(fn ($slot) => $slot->required)->pluck('key')->all();
 
-            // Either page can be missing from the panel, and getUrl() throws
-            // when it is. A missing link hides a button, nothing more.
+            // Clicking a card opens previewMetaUrl in the drawer's own viewer,
+            // read-only; nothing here leaves the drawer.
             $cards[] = [
-                'key'         => $template->key(),
-                'label'       => $template->label(),
-                'previewUrl'  => route('signature.pdf-templates.page', ['template' => $template->key(), 'page' => 1]),
-                'signerUrl'   => $signature->isRevoked() ? null : $this->safeUrl(fn () => PdfTemplateSigner::getUrl([
-                    'templateKey'   => $template->key(),
-                    'signatureUuid' => $signature->uuid,
-                ])),
-                'designerUrl' => $this->safeUrl(fn () => PdfTemplateDesigner::getUrl(['templateKey' => $template->key()])),
-                'slotCount'   => $slots->count(),
-                'savedCount'  => count($savedKeys),
-                'configured'  => array_diff($requiredKeys, $savedKeys) === [],
+                'key'            => $template->key(),
+                'label'          => $template->label(),
+                'previewUrl'     => route('signature.pdf-templates.page', ['template' => $template->key(), 'page' => 1]),
+                'previewMetaUrl' => route('signature.pdf-templates.preview.meta', ['template' => $template->key()]),
+                'slotCount'      => $slots->count(),
+                'savedCount'     => count($savedKeys),
+                'configured'     => array_diff($requiredKeys, $savedKeys) === [],
             ];
         }
 
@@ -157,6 +151,4 @@ trait ManagesSignatures
     }
 
     abstract protected function currentUserId(): int|string|null;
-
-    abstract protected function safeUrl(callable $resolver): ?string;
 }
