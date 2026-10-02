@@ -55,6 +55,8 @@
             tab: 'queue',
             // Id of the request whose document is open, or null for the list.
             viewing: null,
+            // Set while the viewer shows a template preview rather than a request.
+            previewMeta: null,
             // 'tabs' | 'manage'. Manage mode widens the drawer and replaces the
             // tabs with the signature list and the selected signature's
             // details — what the View Signature page used to be.
@@ -75,7 +77,10 @@
                 // rather than reaching into Livewire: closing is this
                 // component's business, and refreshing the queue is the
                 // server's.
-                this.onViewerClose = () => { this.viewing = null }
+                this.onViewerClose = () => {
+                    this.viewing = null
+                    this.previewMeta = null
+                }
                 this.onSigned = (e) => {
                     this.viewing = null
                     // The document leaves the queue the moment it is signed,
@@ -198,7 +203,17 @@
              */
             view(requestId) {
                 this.mode = 'tabs'
+                this.previewMeta = null
                 this.viewing = requestId
+            },
+
+            /**
+             * A template's sample, read-only, from Manage signatures. Stays in
+             * manage mode, so closing the viewer lands back on the template list.
+             */
+            preview(metaUrl) {
+                this.previewMeta = metaUrl
+                this.viewing = 'preview'
             },
 
             url(template, requestId) {
@@ -752,11 +767,12 @@
         .dark .dsig-template__head { border-color: rgb(255 255 255 / 0.1); }
         .dsig-template__label { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .dsig-template__key { font-size: .6875rem; opacity: .6; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .dsig-template__preview { display: block; height: 6rem; padding: .25rem; background: rgb(0 0 0 / 0.03); }
+        .dsig-template__preview { display: block; width: 100%; height: 6rem; padding: .25rem; border: 0; cursor: zoom-in;
+                                  background: rgb(0 0 0 / 0.03); }
+        .dsig-template__preview:hover { background: rgb(0 0 0 / 0.06); }
+        .dsig-template__preview:focus-visible { outline: 2px solid var(--dsig-accent, currentColor); outline-offset: -2px; }
         .dsig-template__preview img { width: 100%; height: 100%; object-fit: contain; }
         .dsig-template__foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem .75rem; font-size: .6875rem; }
-        .dsig-template__links { display: flex; gap: .75rem; padding: 0 .75rem .6rem; font-size: .75rem; }
-        .dsig-template__links a { color: inherit; font-weight: 600; }
 
         @media (max-width: 640px) {
             .dsig-panel, .dsig-panel--wide { width: 100vw; }
@@ -915,7 +931,7 @@
                         data-dsig-pdf-viewer
                         style="height: 100%"
                         x-bind:data-request-id="viewing"
-                        x-bind:data-meta-url="url(viewer.metaUrlTemplate, viewing)"
+                        x-bind:data-meta-url="previewMeta ?? url(viewer.metaUrlTemplate, viewing)"
                         x-bind:data-sign-url="url(viewer.signUrlTemplate, viewing)"
                         x-bind:data-bundle-src="viewer.bundleSrc"
                         x-bind:data-worker-src="viewer.workerSrc"
