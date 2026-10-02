@@ -2,6 +2,8 @@
 
 namespace Kukux\DigitalSignature\Pdf\Renderers;
 
+use Kukux\DigitalSignature\Pdf\SlotAnchors;
+
 /**
  * Default renderer for plug-and-play templates.
  *
@@ -31,7 +33,12 @@ class DomPdfRenderer implements PdfRenderer
         // way the plugin still loads in apps that don't have dompdf.
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data);
 
+        // Record where any `data-signature-slot` elements land, so a
+        // document that flows across pages still gets signed in the right place.
+        $anchors = SlotAnchors::record($pdf->getDomPDF());
+
         file_put_contents($destinationPath, $pdf->output());
+        SlotAnchors::write($destinationPath, $anchors());
 
         return $destinationPath;
     }
