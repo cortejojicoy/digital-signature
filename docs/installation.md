@@ -3,7 +3,7 @@
 ## Requirements
 
 - PHP 8.2+ with `ext-openssl` and `ext-gd`
-- Laravel 12
+- Laravel 12 or 13 (Laravel 13 needs PHP 8.3+)
 - Filament 3, 4, or 5
 
 > **Laravel 11 is not supported.** Every 11.x release, up to and including the
