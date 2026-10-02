@@ -548,6 +548,24 @@
             border: 1px solid rgb(0 0 0 / 0.1); border-radius: .625rem; overflow: hidden;
         }
         .dark .dsig-pad { border-color: rgb(255 255 255 / 0.12); }
+        .dsig-drop {
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            min-height: 218px; box-sizing: border-box; padding: 1rem; cursor: pointer;
+            border: 2px dashed rgb(0 0 0 / 0.15); border-radius: .625rem;
+            background: rgb(0 0 0 / 0.02); transition: border-color .15s ease;
+        }
+        .dsig-form label.dsig-drop { font-weight: 400; }
+        .dsig-drop > span, .dsig-drop > span > span { display: block; }
+        .dsig-drop:hover, .dsig-drop--on { border-color: var(--dsig-accent, #18181b); }
+        .dark .dsig-drop { border-color: rgb(255 255 255 / 0.18); background: rgb(255 255 255 / 0.03); }
+        .dark .dsig-drop:hover, .dark .dsig-drop--on { border-color: var(--dsig-accent, #f4f4f5); }
+        .dsig-drop__icon { width: 1.75rem; height: 1.75rem; margin: 0 auto .5rem; opacity: .45; }
+        .dsig-drop__title { font-size: .875rem; font-weight: 600; }
+        .dsig-drop__hint { font-size: .75rem; opacity: .6; margin-top: .25rem; }
+        .dsig-drop__preview {
+            max-width: 100%; max-height: 8rem; object-fit: contain; margin: 0 auto;
+            border-radius: .5rem; background: #fff; padding: .25rem;
+        }
 
         /*
             ── Document pane ──────────────────────────────────────────────
@@ -1117,16 +1135,108 @@
                     @endif
 
                     @if ($this->canRegisterSignature())
-                        <div class="dsig-form">
+                        {{--
+                            Draw or upload, as the Signatures resource's field
+                            offers. Both end up in newSignature as a PNG data
+                            URL; the upload is normalised to PNG in the browser
+                            exactly as signatureField.js does it, so the server
+                            sees one format either way.
+                        --}}
+                        <div
+                            class="dsig-form"
+                            x-data="{
+                                method: 'draw',
+                                uploadPreview: null,
+                                uploadError: null,
+                                uploadLoading: false,
+                                dragging: false,
+                                maxKb: @js((int) config('signature.image.max_kb', 512)),
+
+                                switchMethod(method) {
+                                    if (this.method === method) return
+                                    this.method = method
+                                    this.uploadPreview = null
+                                    this.uploadError = null
+                                    window.dispatchEvent(new CustomEvent('sig:clear', { detail: { fieldId: 'dsig-launcher-pad' } }))
+                                    this.$wire.set('newSignature', null)
+                                },
+
+                                readFile(file) {
+                                    if (! file) return
+                                    this.uploadError = null
+
+                                    if (! ['image/png', 'image/jpeg'].includes(file.type)) {
+                                        this.uploadError = 'Only PNG and JPG files are allowed.'
+                                        return
+                                    }
+                                    if (file.size > this.maxKb * 1024) {
+                                        this.uploadError = `File must be smaller than ${this.maxKb} KB.`
+                                        return
+                                    }
+
+                                    this.uploadLoading = true
+                                    const reader = new FileReader()
+                                    reader.onerror = () => {
+                                        this.uploadError = 'Failed to read file.'
+                                        this.uploadLoading = false
+                                    }
+                                    reader.onload = (e) => {
+                                        const img = new Image()
+                                        img.onerror = () => {
+                                            this.uploadError = 'Could not load image. Try another file.'
+                                            this.uploadLoading = false
+                                        }
+                                        img.onload = () => {
+                                            const canvas = document.createElement('canvas')
+                                            canvas.width = img.naturalWidth || 600
+                                            canvas.height = img.naturalHeight || 200
+                                            canvas.getContext('2d').drawImage(img, 0, 0)
+                                            const png = canvas.toDataURL('image/png')
+
+                                            this.uploadPreview = png
+                                            this.uploadLoading = false
+                                            this.$wire.set('newSignature', png)
+                                        }
+                                        img.src = e.target.result
+                                    }
+                                    reader.readAsDataURL(file)
+                                },
+                            }"
+                            {{-- A successful save clears newSignature; the preview goes with it. --}}
+                            x-effect="if (! $wire.newSignature) uploadPreview = null"
+                        >
                             <label for="dsig-launcher-cert">Add a signature</label>
+
+                            <div class="dsig-chips" role="tablist" aria-label="Signature input method" style="margin-bottom: 0">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    class="dsig-filter"
+                                    x-bind:class="method === 'draw' ? 'dsig-filter--on' : ''"
+                                    x-bind:aria-selected="(method === 'draw').toString()"
+                                    x-on:click="switchMethod('draw')"
+                                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                >Draw</button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    class="dsig-filter"
+                                    x-bind:class="method === 'upload' ? 'dsig-filter--on' : ''"
+                                    x-bind:aria-selected="(method === 'upload').toString()"
+                                    x-on:click="switchMethod('upload')"
+                                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                >Upload</button>
+                            </div>
 
                             {{--
                                 The same React pad the Filament field mounts —
                                 same island, same export event — so the drawer
                                 cannot drift from the resource page's capture.
                                 wire:ignore for the same reason as the viewer.
+                                Hidden rather than removed on Upload, so React
+                                is not torn down and remounted on every switch.
                             --}}
-                            <div class="dsig-pad" wire:ignore>
+                            <div class="dsig-pad" wire:ignore x-show="method === 'draw'">
                                 <div
                                     data-signature-canvas
                                     data-field-id="dsig-launcher-pad"
@@ -1135,6 +1245,45 @@
                                     data-confirm-label="Use this signature"
                                     style="height: 218px;"
                                 ></div>
+                            </div>
+
+                            <div x-show="method === 'upload'" x-cloak>
+                                <label
+                                    class="dsig-drop"
+                                    x-bind:class="{ 'dsig-drop--on': dragging || uploadPreview }"
+                                    x-on:dragover.prevent="dragging = true"
+                                    x-on:dragleave.prevent="dragging = false"
+                                    x-on:drop.prevent="dragging = false; readFile($event.dataTransfer.files?.[0])"
+                                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                >
+                                    <template x-if="uploadLoading">
+                                        <span class="dsig-drop__hint">Processing…</span>
+                                    </template>
+
+                                    <template x-if="! uploadPreview && ! uploadLoading">
+                                        <span>
+                                            <x-filament::icon icon="heroicon-o-arrow-up-tray" class="dsig-drop__icon" />
+                                            <span class="dsig-drop__title">Click or drop an image</span>
+                                            <span class="dsig-drop__hint">PNG or JPG — max {{ (int) config('signature.image.max_kb', 512) }} KB</span>
+                                        </span>
+                                    </template>
+
+                                    <template x-if="uploadPreview && ! uploadLoading">
+                                        <span>
+                                            <img class="dsig-drop__preview" x-bind:src="uploadPreview" alt="Uploaded signature" />
+                                            <span class="dsig-drop__hint">Click to change</span>
+                                        </span>
+                                    </template>
+
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg"
+                                        hidden
+                                        x-on:change="readFile($event.target.files?.[0]); $event.target.value = ''"
+                                    />
+                                </label>
+
+                                <p class="dsig-card__warn" x-show="uploadError" x-text="uploadError" x-cloak></p>
                             </div>
 
                             <p class="dsig-card__meta" x-show="$wire.newSignature" x-cloak>
