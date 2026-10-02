@@ -18,8 +18,7 @@ pages as below, with navigation and search.
 
 | Doc | Description |
 |---|---|
-| [Implementation Plan](docs/implementation-plan.md) | **Start here.** Phase-by-phase plan for integrating the package into your app |
-| [Installation](docs/installation.md) | Composer, migrations, plugin registration, admin resource |
+| [Installation](docs/installation.md) | **Start here.** Composer, migrations, plugin registration, admin resource |
 | [Configuration](docs/configuration.md) | All config keys and env variables |
 | [Model Setup](docs/model-setup.md) | Signable interface and HasSignatures trait |
 | [Filament Components](docs/filament-components.md) | SignaturePad, SignatureColumn, SignatureResource, SignDocumentAction |
@@ -28,6 +27,8 @@ pages as below, with navigation and search.
 | [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
 | [Signatory Routing](docs/signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory documents, Filament version compatibility |
 | [Security](docs/security.md) | HMAC metadata, machine binding, DB cross-validation, forgery detection |
+| [Device Registration](docs/device-registration.md) | Browser signing keys and how they're verified |
+| [Desktop Agent](docs/desktop-agent.md) | Hardware-bound signing via the Kukux Sign Agent |
 
 ---
 
