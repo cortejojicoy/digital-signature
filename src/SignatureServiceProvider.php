@@ -159,7 +159,13 @@ class SignatureServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        // Run straight from the package, unless the host has published its
+        // own copy: a published file carries a new timestamp, so the migrator
+        // would treat the two as different migrations and run both.
+        if ($this->app->runningInConsole() && ! $this->migrationsArePublished()) {
+            $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        }
+
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'signature');
 
         // The floating launcher. Registered here rather than in the plugin so
@@ -359,5 +365,21 @@ class SignatureServiceProvider extends ServiceProvider
         }
 
         return $map;
+    }
+
+    /**
+     * Whether every package migration has a published copy in the host app.
+     */
+    protected function migrationsArePublished(): bool
+    {
+        foreach (glob(__DIR__ . '/../database/migrations/*.php') ?: [] as $sourcePath) {
+            $suffix = preg_replace('/^\d{4}_\d{2}_\d{2}_\d{6}_/', '', basename($sourcePath));
+
+            if ((glob(database_path('migrations/*_' . $suffix)) ?: []) === []) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
