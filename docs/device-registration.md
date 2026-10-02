@@ -199,3 +199,10 @@ For keys held in the Secure Enclave or TPM, with Touch ID / Windows Hello on eac
 - **Hitting `max_per_user`** blocks registration, not attestation. The user has to revoke an old device first.
 - **Revoking doesn't invalidate past signatures.** It only stops that device from signing again.
 - **The legacy fingerprint still runs.** `POST /signature/device-fingerprint` and `machine_fingerprint` still feed `Sig-Machine-Hash` and `enforce_machine_lock` (see [security.md §6–7](security.md)). Device keys sit alongside it, they don't replace it.
+
+## Not built yet
+
+| Feature | What happens today |
+|---|---|
+| Approval for new browser devices | A new browser registers as `active` straight away. The `pending` status exists but nothing sets it for browsers. The owner only gets a notification (`SIGNATURE_DEVICES_NOTIFY`), and not for their very first device. |
+| Hardware attestation | Browser keys can't be attested. For hardware-bound keys, see [Desktop agent](desktop-agent.md), though its attestation isn't verified yet either. |

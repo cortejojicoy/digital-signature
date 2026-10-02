@@ -282,4 +282,13 @@ On the PHP side you'll see:
 - **Windows without Hello.** A TPM key with no Hello has `user_presence = false`, so pairing fails with `presence_required` unless you set `SIGNATURE_AGENT_REQUIRE_PRESENCE=false`.
 - **Nothing prunes old rows.** Expired pairings and jobs are marked lazily when touched. Prune the tables yourself if they grow.
 
-Not built yet: attestation verification (everything is stored with `attested = false`), and PNPKI `.p12` / USB-token PDF signing through the agent.
+## Not built yet
+
+These were planned but aren't in the package today, so don't build on them:
+
+| Feature | What happens today |
+|---|---|
+| TPM / Secure Enclave attestation checks | The agent's attestation is saved with the claim but never verified. Every device is stored with `attested = false`. |
+| Pairing QR code | Users type the pairing code by hand. |
+| Scheduled cleanup | Expired pairings and jobs are only marked expired when something touches them. Prune the tables yourself. |
+| PNPKI and USB token support | The agent signs with its own hardware key only. No `.p12` certificates or USB tokens. |
