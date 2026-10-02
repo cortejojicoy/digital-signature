@@ -32,6 +32,7 @@ use Kukux\DigitalSignature\Http\Middleware\AuthenticateAgent;
 use Kukux\DigitalSignature\Http\Middleware\EnsureAgentVersion;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateDesignerController;
+use Kukux\DigitalSignature\Http\Controllers\PdfTemplatePreviewController;
 use Kukux\DigitalSignature\Http\Controllers\PdfTemplateSignerController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureAssetController;
 use Kukux\DigitalSignature\Http\Controllers\SignatureDocumentController;
@@ -315,6 +316,13 @@ class SignatureServiceProvider extends ServiceProvider
                     ->name('page');
                 Route::post('{template}/slots/{slot}', [PdfTemplateDesignerController::class, 'save'])
                     ->name('slot.save');
+
+                // Read-only sample, opened from "Apply this signature" in the
+                // drawer's Manage signatures.
+                Route::get('{template}/preview/meta', [PdfTemplatePreviewController::class, 'meta'])
+                    ->name('preview.meta');
+                Route::get('{template}/preview/document', [PdfTemplatePreviewController::class, 'document'])
+                    ->name('preview.document');
 
                 // End-user signer endpoints. Same prefix because they
                 // operate on the same template surface; subroutes are
