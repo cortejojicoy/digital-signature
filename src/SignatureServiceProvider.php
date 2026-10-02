@@ -2,8 +2,12 @@
 
 namespace Kukux\DigitalSignature;
 
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use Kukux\DigitalSignature\Console\InstallCommand;
 use Kukux\DigitalSignature\Console\ReleaseAgentComputer;
 use Kukux\DigitalSignature\Drivers\Certificates\CfsslDriver;
 use Kukux\DigitalSignature\Drivers\Certificates\OpenSslDriver;
@@ -170,7 +174,9 @@ class SignatureServiceProvider extends ServiceProvider
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'signature');
 
         if ($this->app->runningInConsole()) {
-            $this->commands([ReleaseAgentComputer::class]);
+            $this->commands([InstallCommand::class, ReleaseAgentComputer::class]);
+
+            $this->hintInstallAfterPackageDiscovery();
         }
 
         // The floating launcher. Registered here rather than in the plugin so
@@ -335,6 +341,40 @@ class SignatureServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../resources/dist' => public_path('vendor/digital-signature'),
             ], 'signature-assets');
+        }
+    }
+
+    /**
+     * `composer require` can't run a package's own scripts, but every Laravel
+     * app runs `php artisan package:discover` right after it. Printing here
+     * puts the next step at the bottom of the composer output. Print-only:
+     * composer may be running without a terminal.
+     */
+    protected function hintInstallAfterPackageDiscovery(): void
+    {
+        Event::listen(CommandFinished::class, function (CommandFinished $event): void {
+            if ($event->command !== 'package:discover' || $this->app->environment('production') || self::isSetUp()) {
+                return;
+            }
+
+            $event->output->writeln('');
+            $event->output->writeln('  <bg=blue;fg=white> INFO </> Digital Signature isn\'t set up yet. Run: <options=bold>php artisan signature:install</>');
+            $event->output->writeln('');
+        });
+    }
+
+    /** Whether the app has published the config or run the migration. */
+    public static function isSetUp(): bool
+    {
+        if (is_file(config_path('signature.php'))) {
+            return true;
+        }
+
+        try {
+            return Schema::hasTable('digital_signatures');
+        } catch (\Throwable) {
+            // No database configured yet: certainly not set up.
+            return false;
         }
     }
 
