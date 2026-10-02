@@ -44,12 +44,12 @@ pages as below, with navigation and search.
 
 ```bash
 composer require kukux/digital-signature
-php artisan vendor:publish --tag=signature-config
-php artisan migrate
-php artisan filament:assets
+php artisan signature:install
 ```
 
-`filament:assets` publishes the plugin's JS bundle (signature pad + picker) so it's reachable from the panel — re-run it after every `composer update` of this package.
+The installer asks once, then sets up the config, `.env`, assets and migration, and registers the plugin and a signature policy on your panels. Every step is logged and safe to rerun. See [Installation](docs/installation.md) for the flags and the manual steps.
+
+Re-run `php artisan filament:assets` after every `composer update` of this package.
 
 Register the plugin in your panel provider:
 
