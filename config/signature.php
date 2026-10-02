@@ -570,6 +570,15 @@ return [
             'pairing_ttl'      => 600,
             'job_ttl'          => 300,
             'skip_ttl'         => 120,
+            // Device types (Enums\DeviceType) refused at pairing, checked
+            // against what the agent detected, which the owner can't change.
+            // Virtual machines by default: their keys aren't in a real chip,
+            // and clones share one hardware id. Comma-separated; set it empty
+            // to allow VMs, e.g. for development in Parallels.
+            'blocked_device_types' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES', 'virtual_machine')),
+            ))),
         ],
     ],
 
