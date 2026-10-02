@@ -28,6 +28,12 @@
         .dsd-badge { border-radius: 9999px; padding: .05rem .5rem; font-size: .6875rem; font-weight: 600;
                      background: var(--dsd-soft); border: 1px solid var(--dsd-line); }
         .dsd-badge--strong { background: rgb(22 163 74 / .1); border-color: rgb(22 163 74 / .25); color: var(--dsd-ok); }
+        .dsd-badge--warn { background: rgb(220 38 38 / .08); border-color: rgb(220 38 38 / .2); color: var(--dsd-bad); }
+        .dsd-select { border-radius: .5rem; border: 1px solid var(--dsd-line); background: transparent; color: inherit;
+                      padding: .3rem .5rem; font-size: .8125rem; }
+        .dsd-select option, .dsd-select optgroup { color: #18181b; }
+        .dsd-field { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .6rem; font-size: .8125rem; }
+        .dsd-others { margin: .35rem 0 0; padding-left: 1.1rem; color: var(--dsd-muted); font-size: .75rem; line-height: 1.5; }
         .dsd-actions { display: flex; gap: .35rem; flex: none; }
         .dsd-btn { cursor: pointer; border-radius: .5rem; padding: .35rem .7rem; font-size: .8125rem; font-weight: 600;
                    border: 1px solid var(--dsd-line); background: transparent; color: inherit; text-decoration: none;
@@ -83,9 +89,12 @@
 
                     <p class="dsd-meta">
                         {{ $device->kind === 'agent'
-                            ? trim(($device->platform ?? '').' · Kukux Sign Agent '.($device->agent_version ?? ''), ' ·')
+                            ? trim($device->deviceType()->label().' · '.($device->platform ?? '').' · Kukux Sign Agent '.($device->agent_version ?? ''), ' ·')
                             : $device->describe() }}
                         · added {{ $device->created_at?->format('M j, Y') }}
+                        @if ($device->rebound_at)
+                            · re-paired {{ $device->rebound_at->format('M j, Y') }}
+                        @endif
                         · {{ $device->last_used_at ? 'last used '.$device->last_used_at->diffForHumans() : 'not used yet' }}
                     </p>
                     <p class="dsd-meta dsd-mono">{{ $device->shortFingerprint() }}</p>
@@ -105,6 +114,9 @@
                         @endif
                         @if ($device->status === 'pending')
                             <span class="dsd-badge">Pending approval</span>
+                        @endif
+                        @if ($device->kind === 'agent' && $vmBlocked && $device->isVirtualMachine())
+                            <span class="dsd-badge dsd-badge--warn">Virtual machine: no longer allowed for new pairings</span>
                         @endif
                     </div>
                 </div>
@@ -148,17 +160,51 @@
     @if ($agentEnabled)
         <div class="dsd-agent">
             @if ($pairing && $pairing->status === 'awaiting_confirmation' && $claim)
-                <h4>Pair {{ $claim['label'] }}?</h4>
+                @if ($claim['replaces'])
+                    <h4>Re-pair {{ $claim['replaces'] }}?</h4>
+                    <p class="dsd-meta">
+                        This is the same computer as <strong>{{ $claim['replaces'] }}</strong>. It gets new keys and keeps its
+                        history; its old keys will stop working.
+                    </p>
+                @else
+                    <h4>Pair {{ $claim['label'] }}?</h4>
+                @endif
                 <p class="dsd-meta">
                     {{ $claim['platform'] }} · {{ $claim['protection'] }}{{ $claim['presence'] ? ' · Touch ID / Windows Hello' : ' · no user presence' }}
                     · Kukux Sign Agent {{ $claim['version'] }}
                 </p>
-                @if ($claim['replaces'])
-                    <p class="dsd-meta">This looks like the same computer as <strong>{{ $claim['replaces'] }}</strong>, which will be revoked.</p>
+
+                <label class="dsd-field">
+                    <span>This computer is a</span>
+                    <select class="dsd-select" wire:model="pairDeviceType" @disabled($claim['type_locked'])>
+                        @foreach ($deviceTypes as $group => $types)
+                            <optgroup label="{{ $group }}">
+                                @foreach ($types as $value => $label)
+                                    <option value="{{ $value }}">{{ $label }}</option>
+                                @endforeach
+                            </optgroup>
+                        @endforeach
+                    </select>
+                </label>
+
+                @if (! $claim['identified'])
+                    <p class="dsd-meta">We couldn't identify this computer. If it's already paired, remove the old entry.</p>
                 @endif
-                <p class="dsd-meta">Only confirm if this is the computer you just entered the code on.</p>
+
+                @if ($claim['other_devices'] !== [])
+                    <p class="dsd-meta" style="margin-top:.6rem !important;">Your other signing devices:</p>
+                    <ul class="dsd-others">
+                        @foreach ($claim['other_devices'] as $other)
+                            <li>{{ $other }}</li>
+                        @endforeach
+                    </ul>
+                @endif
+
+                <p class="dsd-meta" style="margin-top:.6rem !important;">Only confirm if this is the computer you just entered the code on.</p>
                 <div class="dsd-row">
-                    <button type="button" class="dsd-btn dsd-btn--primary" wire:click="confirmPairing">Pair this computer</button>
+                    <button type="button" class="dsd-btn dsd-btn--primary" wire:click="confirmPairing">
+                        {{ $claim['replaces'] ? 'Re-pair this computer' : 'Pair this computer' }}
+                    </button>
                     <button type="button" class="dsd-btn" wire:click="rejectPairing">That's not mine</button>
                 </div>
             @elseif ($pairing && $userCode)
@@ -176,7 +222,7 @@
                 <h4>Sign from this computer's security chip</h4>
                 <p class="dsd-meta">
                     Kukux Sign Agent keeps your signing key in the Secure Enclave (Mac) or TPM (Windows), and asks
-                    for Touch ID or Windows Hello every time you sign.
+                    for Touch ID or Windows Hello every time you sign. A computer holds one signature for this app.
                 </p>
                 <div class="dsd-row">
                     <button type="button" class="dsd-btn dsd-btn--primary" wire:click="startPairing">Pair desktop agent</button>
