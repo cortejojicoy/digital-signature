@@ -143,6 +143,36 @@ describe('running on an existing install', function () {
             ->and(DB::table('digital_signatures')->where('id', $signature->id)->exists())->toBeTrue();
     });
 
+    it('adds the one-signature-per-computer columns, keying only the newest duplicate', function () {
+        makeFakeUser();
+        DB::table('users')->insert(['id' => 2, 'name' => 'Maria', 'email' => 'maria@example.test', 'password' => 'x']);
+
+        // An install from before the rule: no new columns, and two accounts
+        // with an active agent on the same computer.
+        Schema::table('digital_signature_devices', fn ($t) => $t->dropUnique('dsd_active_hardware_unique'));
+        Schema::table('digital_signature_devices', fn ($t) => $t->dropColumn([
+            'active_hardware_key', 'detected_device_type', 'chassis_type', 'virtual', 'rebound_at',
+        ]));
+        Schema::table('digital_signature_agent_pairings', fn ($t) => $t->dropConstrainedForeignId('replaces_device_id'));
+
+        $device = fn (int $userId, string $fingerprint) => DB::table('digital_signature_devices')->insertGetId([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(), 'user_id' => $userId, 'label' => 'Mac',
+            'public_key' => 'pem', 'key_fingerprint' => $fingerprint, 'algorithm' => 'ES256',
+            'kind' => 'agent', 'status' => 'active', 'hardware_id_hash' => str_repeat('ab', 32),
+        ]);
+        $older = $device(1, str_repeat('1', 64));
+        $newer = $device(2, str_repeat('2', 64));
+
+        packageMigration()->up();
+
+        expect(Schema::hasColumns('digital_signature_devices', ['active_hardware_key', 'detected_device_type', 'chassis_type', 'virtual', 'rebound_at']))->toBeTrue()
+            ->and(Schema::hasColumn('digital_signature_agent_pairings', 'replaces_device_id'))->toBeTrue()
+            // Both stay active: nobody loses a working device on upgrade.
+            ->and(DB::table('digital_signature_devices')->where('status', 'active')->count())->toBe(2)
+            ->and(DB::table('digital_signature_devices')->where('id', $newer)->value('active_hardware_key'))->toBe(str_repeat('ab', 32))
+            ->and(DB::table('digital_signature_devices')->where('id', $older)->value('active_hardware_key'))->toBeNull();
+    });
+
     it('does not drop tables on rollback that the pre-consolidation migrations created', function () {
         // A published copy of the old create migration, as a host records it.
         app('migration.repository')->log('2026_03_31_101500_create_digital_signatures_table', 1);
