@@ -176,7 +176,11 @@ class RunMigration implements InstallStep
         $migrator = $context->command->getLaravel()->make('migrator');
         $migrator->getRepository()->delete((object) ['migration' => $name]);
 
-        $result = $this->migrate($context, ['--path' => $file, '--realpath' => true], array_merge($problem, ["re-ran {$name}"]), $notes);
+        $result = $this->migrate($context, ['--path' => $file, '--realpath' => true], [
+            'Created '.count($missing).' missing table(s) by running '.$name.' again:',
+            '    '.implode(', ', $missing),
+            'They had been dropped, but the migrations table still recorded the migration as run.',
+        ], $notes);
 
         if ($result->status === StepResult::DONE && ($still = $this->missingTables()) !== []) {
             return StepResult::failed(['Re-ran the migration, but these tables are still missing: '.implode(', ', $still)], warnings: $notes);
