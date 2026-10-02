@@ -259,8 +259,8 @@ describe('signature:install', function () {
         Schema::enableForeignKeyConstraints();
 
         $this->artisan('signature:install', ['--no-assets' => true, '--no-panel' => true, '--no-policy' => true, '--no-interaction' => true])
-            ->expectsOutputToContain('these tables are missing')
-            ->expectsOutputToContain('re-ran 9999_12_31_000000_create_digital_signature_tables')
+            ->expectsOutputToContain('Created 2 missing table(s) by running 9999_12_31_000000_create_digital_signature_tables again')
+            ->expectsOutputToContain('still recorded the migration as run')
             ->assertSuccessful();
 
         expect(Schema::hasTable('digital_signatures'))->toBeTrue()
