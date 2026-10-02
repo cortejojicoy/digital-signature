@@ -35,13 +35,18 @@ class RegisterPolicy implements InstallStep
 
     public function run(InstallContext $context): StepResult
     {
-        $existing = Gate::getPolicyFor(Signature::class);
+        $namespace = $this->appNamespace($context);
 
-        if ($existing !== null) {
-            return StepResult::skipped('a policy is already registered: '.$existing::class);
+        // Read the registration, don't resolve it: resolving instantiates the
+        // policy, which throws if the app registered a class that's gone.
+        $registered = $this->registeredPolicy();
+
+        if ($registered !== null) {
+            return class_exists($registered)
+                ? StepResult::skipped("a policy is already registered: {$registered}")
+                : $this->restoreMissingPolicy($context, $registered, $namespace);
         }
 
-        $namespace = $this->appNamespace($context);
         $policyClass = $namespace.'Policies\\'.self::CLASS_NAME;
         $policyPath = $context->path('app/Policies/'.self::CLASS_NAME.'.php');
         $providerPath = $context->path('app/Providers/AppServiceProvider.php');
@@ -61,11 +66,7 @@ class RegisterPolicy implements InstallStep
                 mkdir(dirname($policyPath), 0755, true);
             }
 
-            file_put_contents($policyPath, str_replace(
-                '{{ namespace }}',
-                $namespace.'Policies',
-                (string) file_get_contents(dirname(__DIR__, 4).'/stubs/'.self::CLASS_NAME.'.php.stub'),
-            ));
+            $this->writePolicy($policyPath, $namespace.'Policies', self::CLASS_NAME);
 
             $details[] = $context->relative($policyPath);
         }
@@ -100,6 +101,65 @@ class RegisterPolicy implements InstallStep
         $details[] = 'registered in '.$context->relative($providerPath);
 
         return StepResult::done($details);
+    }
+
+    /**
+     * The app registers a policy class that can't be loaded, so every
+     * authorization check on a signature would throw. Write the class where
+     * its name says it lives, if that's inside the app and the file is gone.
+     */
+    protected function restoreMissingPolicy(InstallContext $context, string $class, string $namespace): StepResult
+    {
+        $problem = "A policy is registered for signatures ({$class}), but that class doesn't exist.";
+
+        if (! str_starts_with($class, $namespace)) {
+            return StepResult::manual([$problem, 'It\'s outside your app namespace, so create it yourself or remove the Gate::policy() line.']);
+        }
+
+        $path = $context->path('app/'.str_replace('\\', '/', substr($class, strlen($namespace))).'.php');
+        $relative = $context->relative($path);
+
+        if (is_file($path)) {
+            return StepResult::manual([
+                $problem,
+                "{$relative} exists but isn't autoloaded. Run: composer dump-autoload",
+            ]);
+        }
+
+        if ($context->dryRun()) {
+            return StepResult::dryRun([$problem, "would write {$relative}"]);
+        }
+
+        $this->writePolicy($path, substr($class, 0, (int) strrpos($class, '\\')), substr($class, (int) strrpos($class, '\\') + 1));
+
+        return StepResult::done([$relative], [
+            $problem.' Wrote it from the package\'s owner-only policy.',
+        ]);
+    }
+
+    protected function writePolicy(string $path, string $namespace, string $class): void
+    {
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0755, true);
+        }
+
+        file_put_contents($path, str_replace(
+            ['{{ namespace }}', 'class '.self::CLASS_NAME],
+            [$namespace, 'class '.$class],
+            (string) file_get_contents(dirname(__DIR__, 4).'/stubs/'.self::CLASS_NAME.'.php.stub'),
+        ));
+    }
+
+    /** The policy class registered for Signature, without resolving it. */
+    protected function registeredPolicy(): ?string
+    {
+        foreach (Gate::policies() as $model => $policy) {
+            if (ltrim((string) $model, '\\') === Signature::class) {
+                return ltrim((string) $policy, '\\');
+            }
+        }
+
+        return null;
     }
 
     /**
