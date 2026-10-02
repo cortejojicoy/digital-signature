@@ -97,7 +97,7 @@ The drawer widens and shows your signatures next to the selected one's details:
 - The image, **Download image** and **Revoke** (with an inline confirmation)
 - Signer, status, capture method, device, signed and registered dates
 - **Used on**: the documents this signature has been applied to
-- **Apply this signature**: one card per registered PDF template, with links to the signer and the designer
+- **Apply this signature**: one card per registered PDF template. Clicking it opens the template's sample PDF in the drawer, view-only
 - **Security metadata** (collapsible): record id, image hash, device fingerprint, device key, certificate fingerprint, each copyable
 
 Old `/signatures/{record}` links still work. They redirect to the list with the drawer open on that signature (`?dsig=manage:{uuid}`). Anyone who doesn't own the signature gets a 404.

@@ -125,9 +125,11 @@ You can:
 - download the signature image
 - revoke a signature (with a confirm step)
 - copy metadata values
-- see each registered PDF template, with links to sign it with this signature or open its designer
+- view each registered PDF template under **Apply this signature**
 
-Templates only show for the reusable (primary) signature. A revoked signature gets no sign link. Each template card shows a **Ready** or **Setup** badge and how many of its slots are placed (say `2/3 slots`). The signer and designer are still full pages.
+Templates only show for the reusable (primary) signature. Each card shows a **Ready** or **Setup** badge and how many of its slots are placed (say `2/3 slots`).
+
+Click a card to open the template's sample PDF right in the drawer. It's view-only: nothing can be placed or signed, and **← Manage signatures** takes you back to the list. The cards don't link to the signer or designer pages. Those pages still exist at their own URLs (see [PDF Templates](pdf-templates.md#the-placement-designer)).
 
 After you revoke your active signature, the draw form comes back on **My signatures**.
 
@@ -155,13 +157,15 @@ If the user already has an active signature, the form is replaced by a note tell
 
 ## Endpoints
 
-The document pane talks to three routes. They use `web` middleware only, and each one checks that the request belongs to the signed-in user.
+The document pane talks to these routes. They use `web` middleware only. The request routes check that the request belongs to the signed-in user; the preview routes only need someone signed in, since the sample holds no real data.
 
 | Route | Name | What it does |
 |---|---|---|
 | `GET /signature/requests/{id}/meta` | `signature.request.meta` | Pages, slots, the user's signatures, caption lines and `readOnly`. |
 | `GET /signature/requests/{id}/document` | `signature.request.document` | Streams the session's PDF from the signature disk. |
 | `POST /signature/requests/{id}/sign` | `signature.request.sign` | Takes a `placements[]` array and signs. |
+| `GET /signature/pdf-templates/{key}/preview/meta` | `signature.pdf-templates.preview.meta` | A template preview: same shape, with `readOnly: true` and no requests or signatures. |
+| `GET /signature/pdf-templates/{key}/preview/document` | `signature.pdf-templates.preview.document` | Streams the template's sample PDF. Signed-in users only. |
 
 - Someone else's request id gets a 403, not a 404.
 - Picking a signature you don't own is a 403. A revoked one is a 422.

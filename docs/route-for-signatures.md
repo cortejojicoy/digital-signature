@@ -12,7 +12,7 @@ It's a worked example. The pieces are the same for any generated document: paysl
 |---|---|
 | A record (`AccomplishmentReport`) | The thing that gets signed. Holds the period and a snapshot of who signs it. |
 | A template class | The Blade view, the signature lines and who each line is for. |
-| An A4 renderer | Keeps the page size fixed, so signature positions don't move. |
+| An A4 renderer | Keeps the page size fixed and records where each signature line landed. |
 | A routing action | Checks everything is in place, then opens the signing session. |
 | The button | A footer action on the modal that already generates the report. |
 
@@ -181,8 +181,6 @@ class AccomplishmentReportTemplate extends BladePdfTemplate
 {
     public const KEY = 'accomplishment-report';   // never change it: saved slot positions use it
 
-    public const EXPECTED_PAGES = 2;               // page 1 = AR, page 2 = CWA
-
     public function __construct()
     {
         parent::__construct(
@@ -220,18 +218,10 @@ class AccomplishmentReportTemplate extends BladePdfTemplate
                 defaultPage: 2, defaultX: 293.0, defaultY: 275.0, defaultWidth: 200.0, defaultHeight: 38.0),
         ];
     }
-
-    /** Refuse reports long enough to push the signature lines onto another page. */
-    public function pageCountMatches(AccomplishmentReport $report): bool
-    {
-        $contents = (string) file_get_contents($this->renderFor($report));
-
-        return max(1, preg_match_all('#/Type\s*/Page[^s]#', $contents)) === self::EXPECTED_PAGES;
-    }
 }
 ```
 
-- **Default positions** are in PDF points, with `y` measured from the bottom of the page. They're only a starting point: once you save a slot in the placement designer, the saved position wins.
+- **Default positions** are in PDF points, with `y` measured from the bottom of the page. They match the sample's 2-page layout, and they're only a fallback: on a real report the positions come from the Blade (next step).
 - **`sampleData()`** feeds the designer's preview. Build it from unsaved models so it never touches the database.
 - **Register it as a class name**, not an inline array. Its closures would break `php artisan config:cache`:
 
@@ -242,6 +232,29 @@ class AccomplishmentReportTemplate extends BladePdfTemplate
 ],
 ```
 
+### Mark the signature spaces in the Blade
+
+A report can run to any number of pages: 3 tasks put the signature block on page 1, 300 put it on page 40. So don't rely on fixed positions. Mark each signature space, and the package finds it in every document:
+
+```blade
+{{-- resources/views/accomplishment-report.blade.php --}}
+<p class="signature-label">Prepared By:</p>
+<div class="signature-space" data-signature-slot="prepared_by"></div>
+<p class="signature-name">{{ $personnel->full_name }}</p>
+
+{{-- … attested_by and noted_by the same way … --}}
+
+<p class="signature-label">ACCEPTED BY:</p>
+<div class="signature-space" style="height: 52px" data-signature-slot="accepted_by"></div>
+```
+
+```css
+.signature-label { margin: 0; }
+.signature-space { height: 56px; }   /* the box the stamp goes in */
+```
+
+The renderer below records where each one lands. See [Documents that run to any number of pages](pdf-templates.md#documents-that-run-to-any-number-of-pages).
+
 ---
 
 ## 4. The A4 renderer
@@ -250,6 +263,7 @@ class AccomplishmentReportTemplate extends BladePdfTemplate
 // app/Pdf/AccomplishmentReportRenderer.php
 use Barryvdh\DomPDF\Facade\Pdf;
 use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
+use Kukux\DigitalSignature\Pdf\SlotAnchors;
 
 class AccomplishmentReportRenderer implements PdfRenderer
 {
@@ -257,7 +271,13 @@ class AccomplishmentReportRenderer implements PdfRenderer
     {
         @mkdir(dirname($destinationPath), 0775, true);
 
-        file_put_contents($destinationPath, Pdf::loadView($view, $data)->setPaper('a4')->output());
+        $pdf = Pdf::loadView($view, $data)->setPaper('a4');
+
+        // Record where each data-signature-slot landed, page 2 or page 87.
+        $anchors = SlotAnchors::record($pdf->getDomPDF());
+
+        file_put_contents($destinationPath, $pdf->output());
+        SlotAnchors::write($destinationPath, $anchors());
 
         return $destinationPath;
     }
@@ -307,10 +327,13 @@ class RouteAccomplishmentReportForSignatures
                 return $this->refuse('No signatories set', 'Set '.implode(', ', $missing).' under "Update Signatures" first.');
             }
 
-            if (! (new AccomplishmentReportTemplate)->pageCountMatches($report)) {
+            // Any length is fine. This only fails if the Blade lost its markers.
+            $found = array_keys((new AccomplishmentReportTemplate)->documentPlacements($report));
+
+            if (array_diff(['prepared_by', 'attested_by', 'noted_by', 'accepted_by'], $found) !== []) {
                 DB::rollBack();
 
-                return $this->refuse('Report is too long to sign', 'Split the period into shorter ranges and route each one.');
+                return $this->refuse('Signature lines not found', 'Check the view still marks them with data-signature-slot.');
             }
 
             if (! $report->isReadyForSignatures()) {
@@ -403,9 +426,9 @@ On a page that shows one record, you don't need any of this: use `RequestSignatu
 
 ---
 
-## 7. Place the signature lines
+## 7. Check the sample in the designer
 
-Open `/admin/signature-templates/accomplishment-report/design` once, drag each line onto its printed rule and save. See [The placement designer](pdf-templates.md#the-placement-designer).
+Real reports get their positions from the Blade markers, so there's nothing to calibrate. The placement designer at `/admin/signature-templates/accomplishment-report/design` still shows the sample, and its positions are the fallback for any slot without a marker. See [The placement designer](pdf-templates.md#the-placement-designer).
 
 ---
 
@@ -455,7 +478,7 @@ public function test_the_modal_button_routes_instead_of_downloading(): void
 Also worth a test each:
 - routing twice returns the same session;
 - an empty period, a missing signatory and an unregistered signature are each refused, with nothing saved;
-- the template renders the expected page count.
+- a long report (say 150 tasks) still routes, with the AR signatures on the second-to-last page and Accepted on the last.
 
 Use `Storage::fake('local')` so rendered PDFs don't land in real storage.
 

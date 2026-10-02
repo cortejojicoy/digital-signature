@@ -137,10 +137,13 @@ class A4Renderer implements PdfRenderer
     {
         @mkdir(dirname($destinationPath), 0775, true);
 
-        file_put_contents(
-            $destinationPath,
-            \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data)->setPaper('a4')->output(),
-        );
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data)->setPaper('a4');
+
+        // Keep recording where signature slots land (see below).
+        $anchors = \Kukux\DigitalSignature\Pdf\SlotAnchors::record($pdf->getDomPDF());
+
+        file_put_contents($destinationPath, $pdf->output());
+        \Kukux\DigitalSignature\Pdf\SlotAnchors::write($destinationPath, $anchors());
 
         return $destinationPath;
     }
@@ -154,6 +157,26 @@ class A4Renderer implements PdfRenderer
 
 Use the same paper size as any non-signing preview or download of the document,
 so the signed copy looks the same as the one people already print.
+
+### Documents that run to any number of pages
+
+A designer placement says "page 1, 130pt up". That's fine for a form that never moves. A report that lists tasks doesn't work that way: with 3 tasks the signature block is on page 1, with 300 it's on page 40.
+
+So mark each signature space in the Blade, and the package finds it in every document:
+
+```blade
+<p>Prepared By:</p>
+<div data-signature-slot="prepared_by" style="height: 56px"></div>
+<p class="signature-line">{{ $preparer->name }}</p>
+```
+
+- **How it works:** while DomPDF draws the PDF, the renderer records the page and box of every `data-signature-slot` element (`SlotAnchors`). It saves them next to the PDF as `<file>.slots.json`. When a signing session opens, each request gets the box from that document, on whatever page it landed.
+- **The element is the stamp box.** Give it the height you want the signature to take; its width comes from the layout.
+- **Which renderers do it:** the stock `DomPdfRenderer` does it for you. A custom DomPDF renderer needs the two `SlotAnchors` lines shown above. Other renderers (Browsershot, Snappy) don't record anchors, so their templates use the designer's placement.
+- **Fallback:** a slot with no marker, or one that didn't render, uses the designer's placement, then its default.
+- **Sample and designer:** the sample still drives the designer's preview. Keep a default or designer placement on each slot; the readiness checks still look for one.
+
+A template class can supply placements some other way by implementing `Kukux\DigitalSignature\Contracts\PlacesSlotsInDocument`. `BladePdfTemplate` already does, by reading those anchors.
 
 ---
 
@@ -248,6 +271,7 @@ class DtrTemplate implements PdfTemplate
 - Units are **PDF points** (1/72 inch). US Letter landscape is 792 × 612, A4 landscape is 842 × 595.
 - **`y` counts up from the bottom.** A signature line near the bottom sits around `y = 60`–`120`.
 - Defaults only apply until an admin saves the slot in the designer.
+- For a document whose length varies, mark the slots in the Blade instead. See [Documents that run to any number of pages](#documents-that-run-to-any-number-of-pages).
 
 ---
 
@@ -362,7 +386,7 @@ Users drop a signature on the PDF and click **Finish & Save**. It lives at:
 /<panel-path>/signature-templates/{templateKey}/sign/{signatureUuid}
 ```
 
-The template cards in **Manage signatures** link here. The page shows one chip per slot, plus the active signature and up to 12 of your other primary signatures to swap between.
+The page shows one chip per slot, plus the active signature and up to 12 of your other primary signatures to swap between.
 
 It uses `signature.pdf-templates.signer.meta` (GET) and `signature.pdf-templates.signer.finalize` (POST).
 
