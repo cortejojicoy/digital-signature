@@ -235,22 +235,26 @@
                             @else
                                 <div class="dsig-templates">
                                     @foreach ($cards as $card)
-                                        @php $primaryUrl = $card['signerUrl'] ?? $card['designerUrl']; @endphp
-
                                         <div class="dsig-template" wire:key="dsig-template-{{ $card['key'] }}">
                                             <div class="dsig-template__head">
                                                 <p class="dsig-template__label">{{ $card['label'] }}</p>
                                                 <p class="dsig-template__key">{{ $card['key'] }}</p>
                                             </div>
 
-                                            <a class="dsig-template__preview" @if ($primaryUrl) href="{{ $primaryUrl }}" @endif>
+                                            {{-- Opens the sample in the drawer's own viewer, read-only. --}}
+                                            <button
+                                                type="button"
+                                                class="dsig-template__preview"
+                                                x-on:click="preview(@js($card['previewMetaUrl']))"
+                                                aria-label="View {{ $card['label'] }}"
+                                            >
                                                 <img
                                                     src="{{ $card['previewUrl'] }}"
                                                     alt="{{ $card['label'] }} preview"
                                                     loading="lazy"
                                                     onerror="this.style.display='none'"
                                                 />
-                                            </a>
+                                            </button>
 
                                             <div class="dsig-template__foot">
                                                 <span class="dsig-badge {{ $card['configured'] ? 'dsig-badge--ok' : '' }}">
@@ -259,16 +263,6 @@
                                                 <span style="opacity: .65">{{ $card['savedCount'] }}/{{ $card['slotCount'] }} slots</span>
                                             </div>
 
-                                            @if ($card['signerUrl'] || $card['designerUrl'])
-                                                <div class="dsig-template__links">
-                                                    @if ($card['signerUrl'])
-                                                        <a href="{{ $card['signerUrl'] }}">Sign document</a>
-                                                    @endif
-                                                    @if ($card['designerUrl'])
-                                                        <a href="{{ $card['designerUrl'] }}">Open designer</a>
-                                                    @endif
-                                                </div>
-                                            @endif
                                         </div>
                                     @endforeach
                                 </div>
