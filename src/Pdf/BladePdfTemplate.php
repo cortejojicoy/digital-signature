@@ -33,6 +33,8 @@ use Kukux\DigitalSignature\Pdf\Renderers\PdfRenderer;
  *                        // or
  *                        [['key' => 'employee', 'label' => '...', 'required' => true]]
  *     'renderer'      => MyRenderer::class,   // optional override
+ *     'paper'         => 'a4',                // optional; pins the stock renderer's paper
+ *     'orientation'   => 'portrait',          // optional, with 'paper'
  *   ]
  */
 class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesSlotsInDocument
@@ -104,6 +106,11 @@ class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesS
     /** @var class-string<PdfRenderer>|null  set when 'renderer' was in config */
     protected ?string $rendererClass = null;
 
+    /** Set when 'paper' was in config; used by the auto-detected renderer. */
+    protected ?string $paper = null;
+
+    protected string $orientation = 'portrait';
+
     /**
      * Build an instance from a config array. The array key from
      * config('signature.templates') becomes the template key.
@@ -134,6 +141,11 @@ class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesS
 
         if (isset($config['renderer'])) {
             $instance->rendererClass = $config['renderer'];
+        }
+
+        if (isset($config['paper'])) {
+            $instance->paper = (string) $config['paper'];
+            $instance->orientation = (string) ($config['orientation'] ?? 'portrait');
         }
 
         return $instance;
@@ -242,7 +254,7 @@ class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesS
             return $this->renderer = $instance;
         }
 
-        return $this->renderer = static::detectRenderer();
+        return $this->renderer = $this->detectRenderer();
     }
 
     /**
@@ -251,10 +263,10 @@ class BladePdfTemplate implements PdfTemplate, ConfiguresSigningSession, PlacesS
      * should be passed in explicitly via the 'renderer' config key
      * rather than relying on detection.
      */
-    protected static function detectRenderer(): PdfRenderer
+    protected function detectRenderer(): PdfRenderer
     {
         if (DomPdfRenderer::isAvailable()) {
-            return new DomPdfRenderer();
+            return new DomPdfRenderer($this->paper, $this->orientation);
         }
 
         throw new \RuntimeException(
