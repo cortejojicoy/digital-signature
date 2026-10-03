@@ -40,7 +40,46 @@ final readonly class SignatoryRoute
         public ?SignatureRequest $request,
 
         public RouteState $state,
+
+        /**
+         * Whoever the record names in this slot before mapping to a login —
+         * a Personnel row, say. Equal to $user when the record tags users
+         * directly; set while $user is null when the named person has no
+         * login, which is a different thing to fix than nobody being named.
+         */
+        public ?Model $tagged = null,
     ) {
+    }
+
+    /** Someone is named in the slot but cannot sign: they have no login. */
+    public function isTaggedWithoutLogin(): bool
+    {
+        return $this->user === null && $this->tagged !== null;
+    }
+
+    /**
+     * A readable name for any model a slot can point at: the signer's `name`,
+     * a `full_name` accessor, or a `getSignatoryName()` the host defines.
+     */
+    public static function nameOf(?Model $model): ?string
+    {
+        if ($model === null) {
+            return null;
+        }
+
+        if (method_exists($model, 'getSignatoryName')) {
+            return $model->getSignatoryName();
+        }
+
+        foreach (['name', 'full_name'] as $attribute) {
+            $value = $model->getAttribute($attribute);
+
+            if (is_string($value) && trim($value) !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     public function key(): string
@@ -65,7 +104,7 @@ final readonly class SignatoryRoute
 
     public function signerName(): ?string
     {
-        return $this->user?->getAttribute('name');
+        return self::nameOf($this->user) ?? self::nameOf($this->tagged);
     }
 
     public function signerEmail(): ?string
@@ -99,10 +138,16 @@ final readonly class SignatoryRoute
     public function blockerMessage(): ?string
     {
         return match ($this->state) {
-            RouteState::Unassigned => sprintf(
-                'No one is assigned as "%s" on this record.',
-                $this->slot->label,
-            ),
+            RouteState::Unassigned => $this->isTaggedWithoutLogin()
+                ? sprintf(
+                    '%s is named as "%s" but has no login, so they cannot sign.',
+                    self::nameOf($this->tagged) ?? 'The person named',
+                    $this->slot->label,
+                )
+                : sprintf(
+                    'No one is assigned as "%s" on this record.',
+                    $this->slot->label,
+                ),
             RouteState::AwaitingRegistration => sprintf(
                 '%s has not registered a signature yet.',
                 $this->signerName() ?? 'The assigned signatory',
