@@ -22,12 +22,18 @@ use Kukux\DigitalSignature\Filament\Actions\RequestSignaturesTableResolver;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
+use Kukux\DigitalSignature\Filament\Pages\SignedDocumentsResolver;
+use Kukux\DigitalSignature\Filament\Actions\DownloadDocumentOfRecordResolver;
+use Kukux\DigitalSignature\Filament\Actions\RouteForSignaturesResolver;
+use Kukux\DigitalSignature\Filament\Actions\ViewDocumentHistoryResolver;
+use Kukux\DigitalSignature\Filament\Actions\ViewDocumentOfRecordResolver;
 use Kukux\DigitalSignature\Filament\Resources\ResourceResolver;
 use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
 use Kukux\DigitalSignature\Filament\Livewire\SigningDevices;
 use Kukux\DigitalSignature\Http\Controllers\Agent\AgentController;
 use Kukux\DigitalSignature\Http\Controllers\Agent\AgentWebController;
 use Kukux\DigitalSignature\Http\Controllers\DeviceController;
+use Kukux\DigitalSignature\Http\Controllers\DocumentOfRecordController;
 use Kukux\DigitalSignature\Http\Middleware\AuthenticateAgent;
 use Kukux\DigitalSignature\Http\Middleware\EnsureAgentVersion;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
@@ -53,6 +59,13 @@ use Kukux\DigitalSignature\Services\SignatoryRouter;
 use Kukux\DigitalSignature\Services\SignatureManager;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
+use Kukux\DigitalSignature\Contracts\DocumentOfRecordGate;
+use Kukux\DigitalSignature\Contracts\SignatoryUserMapper;
+use Kukux\DigitalSignature\DocumentOfRecord\DefaultDocumentOfRecordGate;
+use Kukux\DigitalSignature\DocumentOfRecord\DocumentOfRecordResolver;
+use Kukux\DigitalSignature\Services\DocumentRegistry;
+use Kukux\DigitalSignature\Services\DocumentRouter;
+use Kukux\DigitalSignature\Signatories\IdentityUserMapper;
 use Livewire\Livewire;
 
 class SignatureServiceProvider extends ServiceProvider
@@ -75,6 +88,11 @@ class SignatureServiceProvider extends ServiceProvider
             PdfTemplateDesignerResolver::class,
             PdfTemplateSignerResolver::class,
             SignatureInboxResolver::class,
+            SignedDocumentsResolver::class,
+            RouteForSignaturesResolver::class,
+            ViewDocumentOfRecordResolver::class,
+            DownloadDocumentOfRecordResolver::class,
+            ViewDocumentHistoryResolver::class,
         ] as $resolver) {
             $resolver::registerAlias();
         }
@@ -126,6 +144,17 @@ class SignatureServiceProvider extends ServiceProvider
         // resolveSignatoriesUsing() override is registered onto it at panel
         // boot and must be visible to every later lookup.
         $this->app->singleton(SignatoryResolverFactory::class);
+
+        // How a tagged person becomes a login. Apps whose records tag
+        // Personnel/Employee rows bind their own (see SignatoryUserMapper);
+        // bindIf so an app provider that registers first still wins.
+        $this->app->bindIf(SignatoryUserMapper::class, IdentityUserMapper::class);
+
+        // Documents an app routes for signatures (config('signature.documents')).
+        $this->app->singleton(DocumentRegistry::class);
+        $this->app->singleton(DocumentRouter::class);
+        $this->app->singleton(DocumentOfRecordResolver::class);
+        $this->app->bindIf(DocumentOfRecordGate::class, DefaultDocumentOfRecordGate::class);
 
         $this->app->singleton(SignatoryRouter::class, function ($app) {
             return new SignatoryRouter(
@@ -200,6 +229,16 @@ class SignatureServiceProvider extends ServiceProvider
         if ($configured !== []) {
             $this->app->make(PdfTemplateRegistry::class)->registerMany($configured);
         }
+
+        // The documents the app routes, by key. Class-strings: built on first use.
+        $documents = (array) config('signature.documents', []);
+        if ($documents !== []) {
+            $this->app->make(DocumentRegistry::class)->registerMany($documents);
+        }
+
+        // Routing and document-of-record wording. Publish to override it
+        // app-wide: lang/vendor/signature/{locale}/routing.php.
+        $this->loadTranslationsFrom(__DIR__ . '/../lang', 'signature');
 
         // Route for receiving the browser device fingerprint and storing it in session
         Route::post('/signature/device-fingerprint', [DeviceFingerprintController::class, 'store'])
@@ -292,6 +331,22 @@ class SignatureServiceProvider extends ServiceProvider
                     ->name('sign');
             });
 
+        // A routed document's history: its current version, or any one version
+        // (the copy a signatory signed). Authorization is the bound
+        // DocumentOfRecordGate; see DocumentOfRecordController.
+        Route::prefix('signature/documents')
+            ->middleware(['web'])
+            ->name('signature.documents.')
+            ->group(function () {
+                Route::get('{session}', [DocumentOfRecordController::class, 'show'])
+                    ->whereUuid('session')
+                    ->name('show');
+                Route::get('{session}/versions/{version}', [DocumentOfRecordController::class, 'version'])
+                    ->whereUuid('session')
+                    ->whereNumber('version')
+                    ->name('version');
+            });
+
         // Placement-designer + signer endpoints.
         //
         // We use only the `web` middleware (not `auth`) because the bare
@@ -344,6 +399,10 @@ class SignatureServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../resources/views' => resource_path('views/vendor/signature'),
             ], 'signature-views');
+
+            $this->publishes([
+                __DIR__ . '/../lang' => $this->app->langPath('vendor/signature'),
+            ], 'signature-lang');
 
             // Publish the bundled JS to public/vendor/digital-signature/.
             // Filament's own asset pipeline (php artisan filament:assets) handles
