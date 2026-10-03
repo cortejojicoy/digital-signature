@@ -9,6 +9,7 @@ use Kukux\DigitalSignature\Filament\Concerns\ActsOnSignatureRequests;
 use Kukux\DigitalSignature\Filament\Concerns\ManagesSignatures;
 use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
+use Kukux\DigitalSignature\Filament\Pages\SignedDocuments;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Support\LauncherSettings;
@@ -162,6 +163,11 @@ class SignatureLauncher extends Component
     public function getInboxUrlProperty(): ?string
     {
         return $this->safeUrl(fn () => SignatureInbox::getUrl());
+    }
+
+    public function getSignedUrlProperty(): ?string
+    {
+        return $this->safeUrl(fn () => SignedDocuments::getUrl());
     }
 
     public function getRegisterUrlProperty(): ?string
