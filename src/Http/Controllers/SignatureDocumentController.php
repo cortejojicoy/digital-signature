@@ -101,6 +101,14 @@ class SignatureDocumentController extends Controller
                     ? $document->getSignableTitle()
                     : ($session?->template_key ?? 'Document'),
                 'url' => route('signature.request.document', ['signatureRequest' => $request->id]),
+                // A signed request opens on the copy this signatory signed;
+                // these say so, and where the document stands now.
+                'version'    => $request->isSigned() ? 'signed-by-me' : 'current',
+                'currentUrl' => route('signature.request.document', [
+                    'signatureRequest' => $request->id,
+                    'version'          => 'current',
+                ]),
+                'historyUrl' => $session?->uuid ? route('signature.documents.show', ['session' => $session->uuid]) : null,
             ],
             'signatures' => $this->library((int) $request->user_id),
         ]);
@@ -141,18 +149,26 @@ class SignatureDocumentController extends Controller
     }
 
     /**
-     * Stream the PDF this signatory is being asked to sign.
+     * Stream the PDF behind this request.
      *
-     * The *running* document, not the frozen base: in a sequential session the
-     * signatures already applied are part of what this signatory is agreeing
-     * to, and hiding them would make the preview a different document from the
-     * one being signed.
+     * Still to sign: the *running* document, not the frozen base. In a
+     * sequential session the signatures already applied are part of what this
+     * signatory is agreeing to, and hiding them would make the preview a
+     * different document from the one being signed.
+     *
+     * Already signed: the copy this signatory's signature produced, which is
+     * what they signed and what "View document" in their Signed list is for.
+     * `?version=current` shows where the document stands now instead.
      */
-    public function document(int $signatureRequest): StreamedResponse
+    public function document(Request $httpRequest, int $signatureRequest): StreamedResponse
     {
         $request = $this->ownedRequest($signatureRequest);
 
-        $path = $request->session?->documentToSign();
+        $path = $request->isSigned()
+            && $httpRequest->query('version') !== 'current'
+            && $request->signature?->signed_document_path
+                ? $request->signature->signed_document_path
+                : $request->session?->documentToSign();
 
         abort_unless($path, 404, 'This signing session has no document to show.');
 
@@ -421,7 +437,7 @@ class SignatureDocumentController extends Controller
         abort_unless($userId, 403, 'You must be signed in to view this document.');
 
         $request = SignatureRequest::query()
-            ->with(['session.signable', 'session.requests'])
+            ->with(['session.signable', 'session.requests', 'signature'])
             ->whereKey($id)
             ->where('user_id', $userId)
             ->first();
