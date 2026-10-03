@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Services;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Contracts\SignatoryUserMapper;
 use Kukux\DigitalSignature\Models\PdfTemplateSlot;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignatureRequest;
@@ -37,9 +38,19 @@ class SignatoryRouter
      */
     protected array $resolved = [];
 
+    /**
+     * Who the record tags in each slot, before mapping to a login. Same keys
+     * as $resolved. Kept so a person who is named but cannot sign (no login)
+     * is reported as that, not as "nobody is assigned".
+     *
+     * @var array<string, Model|null>
+     */
+    protected array $tagged = [];
+
     public function __construct(
         protected PdfTemplateRegistry $registry,
         protected SignatoryResolverFactory $resolvers,
+        protected ?SignatoryUserMapper $mapper = null,
     ) {
     }
 
@@ -97,7 +108,34 @@ class SignatoryRouter
             return $this->resolved[$memoKey];
         }
 
-        return $this->resolved[$memoKey] = $this->doResolveSignatory($record, $slot);
+        $tagged = $this->doResolveSignatory($record, $slot);
+
+        $this->tagged[$memoKey] = $tagged;
+
+        return $this->resolved[$memoKey] = $tagged === null ? null : $this->toUser($tagged);
+    }
+
+    /**
+     * Whoever the record names in this slot, whether or not they can sign:
+     * the Personnel row, say, rather than its login.
+     */
+    public function resolveTagged(Model $record, SlotDefinition $slot): ?Model
+    {
+        $this->resolveSignatory($record, $slot);
+
+        return $this->tagged[spl_object_id($record).':'.$slot->key] ?? null;
+    }
+
+    /**
+     * Signatures and requests are keyed by user id, so only a login may come
+     * out of routing. See SignatoryUserMapper for why this refuses rather
+     * than guesses.
+     */
+    protected function toUser(Model $tagged): ?Model
+    {
+        $user = ($this->mapper ?? app(SignatoryUserMapper::class))->toUser($tagged);
+
+        return $user instanceof Model ? $user : null;
     }
 
     /**
@@ -108,6 +146,7 @@ class SignatoryRouter
     {
         if ($record === null) {
             $this->resolved = [];
+            $this->tagged = [];
 
             return;
         }
@@ -116,7 +155,7 @@ class SignatoryRouter
 
         foreach (array_keys($this->resolved) as $key) {
             if (str_starts_with($key, $prefix)) {
-                unset($this->resolved[$key]);
+                unset($this->resolved[$key], $this->tagged[$key]);
             }
         }
     }
@@ -140,9 +179,9 @@ class SignatoryRouter
             return null;
         }
 
-        $user = $resolver->resolve($record, $slot);
+        $resolved = $resolver->resolve($record, $slot);
 
-        return $user instanceof Model ? $user : null;
+        return $resolved instanceof Model ? $resolved : null;
     }
 
     /**
@@ -209,6 +248,7 @@ class SignatoryRouter
                 signature: $request->signature,
                 request:   $request,
                 state:     $request->state,
+                tagged:    $this->resolveTagged($record, $slot),
             );
         }
 
@@ -236,6 +276,7 @@ class SignatoryRouter
             signature: $signature,
             request:   $request,
             state:     $state,
+            tagged:    $this->resolveTagged($record, $slot),
         );
     }
 
@@ -277,6 +318,7 @@ class SignatoryRouter
                     signature: $route->signature,
                     request:   $route->request,
                     state:     RouteState::Blocked,
+                    tagged:    $route->tagged,
                 );
 
                 continue;

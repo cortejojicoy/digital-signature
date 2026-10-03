@@ -3,6 +3,7 @@
 namespace Kukux\DigitalSignature\Security;
 
 use Illuminate\Support\Facades\Storage;
+use Kukux\DigitalSignature\Support\DiskPath;
 
 /**
  * Computes SHA-256 hashes of PDF files stored on the configured disk.
@@ -16,9 +17,14 @@ use Illuminate\Support\Facades\Storage;
  */
 class DocumentIntegrity
 {
+    /**
+     * @param  string  $pdfPath  disk-relative, or absolute inside the disk root
+     *   (what Signable::getSignablePdfPath() and PdfTemplate::renderFor()
+     *   return). Both name the same file; see Support\DiskPath.
+     */
     public function hash(string $pdfPath): string
     {
-        $content = Storage::disk(config('signature.storage_disk'))->get($pdfPath);
+        $content = Storage::disk(config('signature.storage_disk'))->get(DiskPath::relative($pdfPath));
 
         if ($content === null) {
             throw new \RuntimeException("Cannot hash PDF: file not found at [{$pdfPath}].");

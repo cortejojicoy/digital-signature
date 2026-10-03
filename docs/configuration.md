@@ -169,6 +169,7 @@ Pairs a computer whose signing key lives in its Secure Enclave or TPM. See [Desk
     'agent' => [
         'enabled'          => env('SIGNATURE_AGENT_ENABLED', false),
         'approval'         => env('SIGNATURE_AGENT_APPROVAL', 'prefer'),   // off | prefer | enforce
+        'scheme'           => 'kukuxsign',   // the custom URL scheme the agent registers for pairing links
         'download_url'     => env('SIGNATURE_AGENT_DOWNLOAD_URL', 'https://github.com/cortejojicoy/digital-signature-agent/releases/latest'),
         'min_version'      => env('SIGNATURE_AGENT_MIN_VERSION', '0.1.0'),
         'require_presence' => env('SIGNATURE_AGENT_REQUIRE_PRESENCE', true),
@@ -245,6 +246,100 @@ Requires the `openssl` CLI binary in `PATH`. Self-signed certificates (no CDP ex
 
 ---
 
+## Templates and documents
+
+```php
+'templates' => [
+    \App\Pdf\DtrTemplate::class,                                   // a class
+    'payslip' => ['view' => 'pdf.payslip', 'slots' => ['employee']],  // or a Blade template by key
+],
+
+'documents' => [
+    'dtr' => \App\Signatures\DtrDocument::class,                     // 2.0: documents this app routes
+],
+```
+
+Class-strings, not closures, so `php artisan config:cache` keeps working. Both are built through the container on first use. See [PDF Templates](pdf-templates.md) and [Integrating documents](integration/index.md).
+
+---
+
+## Placement designer
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `designer.dpi` | `SIGNATURE_DESIGNER_DPI` | `144` | Resolution of the page previews. Higher is sharper, slower and larger. |
+
+---
+
+## Stamp: verification QR, caption and the public page
+
+What is drawn inside each signature's box. Everything is carved **out of** the
+placement rectangle; the stamp never grows past the box a signatory or the
+form gave it.
+
+### `qr`
+
+A QR encoding the URL of the public verification page, drawn as a square off
+the right of the box.
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `qr.enabled` | `SIGNATURE_QR_ENABLED` | `true` | Draw it at all. |
+| `qr.min_size` | `SIGNATURE_QR_MIN_SIZE` | `26` | Points. Below this a phone won't decode it, so it stands down. |
+| `qr.max_size` | `SIGNATURE_QR_MAX_SIZE` | `48` | Points. Keeps it from dominating a large box. |
+| `qr.gap` | `SIGNATURE_QR_GAP` | `2` | Points between the QR and the signature. |
+
+### `verify`
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `verify.enabled` | `SIGNATURE_VERIFY_ENABLED` | `true` | The public `GET /signature/verify/{uuid}` page the QR points at. It discloses only what the printed page already shows. Off: the QR stands down with it. |
+
+### `caption`
+
+Readable provenance under (or beside) the signature: who, when, and a reference.
+
+| Key | Env | Default | Purpose |
+|---|---|---|---|
+| `caption.enabled` | `SIGNATURE_CAPTION_ENABLED` | `true` | Draw it at all. |
+| `caption.fields` | — | `['signer', 'signed_at', 'reference']` | Lines, in order. Also available: `email`. Lines that don't fit are dropped from the bottom. |
+| `caption.align` | `SIGNATURE_CAPTION_ALIGN` | `C` | `L`, `C` or `R`. |
+| `caption.line_height` | `SIGNATURE_CAPTION_LINE_HEIGHT` | `1.06` | Leading. |
+| `caption.position` | `SIGNATURE_CAPTION_POSITION` | `bottom` | `bottom`, `top`, `left` or `right`. A signatory can change it per signature while placing. |
+| `caption.width_ratio` | `SIGNATURE_CAPTION_WIDTH_RATIO` | `0.42` | For `left`/`right`: the most of the box's width the caption may take. |
+| `caption.min_box_width` | `SIGNATURE_CAPTION_MIN_BOX_WIDTH` | `110` | For `left`/`right`: below this the caption stands down. |
+| `caption.height_ratio` | `SIGNATURE_CAPTION_HEIGHT_RATIO` | `0.38` | For `top`/`bottom`: the most of the box's height the caption may take. |
+| `caption.min_box_height` | `SIGNATURE_CAPTION_MIN_BOX_HEIGHT` | `28` | For `top`/`bottom`: below this the caption stands down. |
+| `caption.max_font_pt` | `SIGNATURE_CAPTION_MAX_FONT` | `6` | The largest size that fits is used… |
+| `caption.min_font_pt` | `SIGNATURE_CAPTION_MIN_FONT` | `4` | …down to this, then lines are truncated with an ellipsis. |
+| `caption.date_format` | `SIGNATURE_CAPTION_DATE_FORMAT` | `j M Y H:i` | PHP date format for `signed_at`. |
+| `caption.color` | — | `[90, 90, 90]` | RGB. |
+
+---
+
+## Hashing
+
+| Key | Default | Purpose |
+|---|---|---|
+| `hash_algo` | `sha256` | Algorithm for image, document and signed-document hashes. Changing it on a live install makes earlier hashes incomparable; every stored version would report a mismatch. |
+
+---
+
+## Documents I've signed (2.0)
+
+The *Signed by me* page: every signature the user has put on a routed document, with **the copy they signed** and **the current** document. Like the inbox, it leaves the sidebar while the launcher (which links to it) replaces navigation.
+
+| Key | Env | Default |
+|---|---|---|
+| `signed.enabled` | `SIGNATURE_SIGNED_ENABLED` | `true` |
+| `signed.navigation` | `SIGNATURE_SIGNED_NAV` | `true` |
+| `signed.navigation_label` | `SIGNATURE_SIGNED_LABEL` | `Signed by me` |
+| `signed.navigation_icon` | `SIGNATURE_SIGNED_ICON` | `heroicon-o-document-check` |
+| `signed.navigation_group` | `SIGNATURE_SIGNED_GROUP` | the inbox's group |
+| `signed.navigation_sort` | `SIGNATURE_SIGNED_SORT` | `null` |
+
+---
+
 ## Full environment variable reference
 
 ```bash
@@ -299,15 +394,37 @@ SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
 SIGNATURE_LAUNCHER_WIDTH=64rem
 SIGNATURE_LAUNCHER_MANAGE_WIDTH=80rem
-SIGNATURE_CAPTION_ENABLED=true
-SIGNATURE_QR_ENABLED=true
-SIGNATURE_VERIFY_ENABLED=true
-SIGNATURE_CAPTION_POSITION=bottom
 SIGNATURE_LAUNCHER_AVOID_OVERLAP=true
 SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
 SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
 SIGNATURE_LAUNCHER_GAP=12
 SIGNATURE_LAUNCHER_Z_INDEX=40
+
+# Stamp: QR, verification page, caption
+SIGNATURE_QR_ENABLED=true
+SIGNATURE_QR_MIN_SIZE=26            # points; smaller won't scan, so it stands down
+SIGNATURE_QR_MAX_SIZE=48
+SIGNATURE_QR_GAP=2
+SIGNATURE_VERIFY_ENABLED=true       # the public page the QR points at
+SIGNATURE_CAPTION_ENABLED=true
+SIGNATURE_CAPTION_POSITION=bottom   # bottom | top | left | right
+SIGNATURE_CAPTION_ALIGN=C           # L | C | R
+SIGNATURE_CAPTION_LINE_HEIGHT=1.06
+SIGNATURE_CAPTION_WIDTH_RATIO=0.42
+SIGNATURE_CAPTION_MIN_BOX_WIDTH=110
+SIGNATURE_CAPTION_HEIGHT_RATIO=0.38
+SIGNATURE_CAPTION_MIN_BOX_HEIGHT=28
+SIGNATURE_CAPTION_MAX_FONT=6
+SIGNATURE_CAPTION_MIN_FONT=4
+SIGNATURE_CAPTION_DATE_FORMAT="j M Y H:i"
+
+# Signed by me (2.0)
+SIGNATURE_SIGNED_ENABLED=true
+SIGNATURE_SIGNED_NAV=true
+SIGNATURE_SIGNED_LABEL="Signed by me"
+SIGNATURE_SIGNED_ICON=heroicon-o-document-check
+SIGNATURE_SIGNED_GROUP=
+SIGNATURE_SIGNED_SORT=
 
 # Optional features
 SIGNATURE_TSA_URL=                  # blank = disabled

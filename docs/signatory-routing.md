@@ -44,7 +44,7 @@ SignatoryPanel::make('signatories');
 RequestSignaturesAction::make();
 ```
 
-4. Open `/admin/signature-templates/accomplishment-report/design` once and drag the three slots onto the signature lines.
+4. Open the placement designer once, at `/{panel}/signature-templates/accomplishment-report/design` on your panel (`/admin/…` on a panel with the id `admin`), and drag the three slots onto the signature lines. Or mark each signature space in the Blade with `data-signature-slot` and skip this step; see [PDF Templates](pdf-templates.md#documents-that-run-to-any-number-of-pages).
 
 That's it. Once each signatory has registered a signature in their own panel, being tagged on a record is enough for the document to find them.
 
@@ -71,14 +71,25 @@ In config, use the same keys: `signatory`, `role`, `order`, `required`.
 
 | Form | Example | Use it when |
 |---|---|---|
-| Relation name | `'attestedBy'` | The record has a `belongsTo`. The common case. |
+| Relation name | `'attestedBy'` | The record has a `belongsTo`. The common case. The relation may return any model; see below. |
 | Foreign key | `'attested_by_id'` | The record stores only an id. |
 | Closure | `fn ($record) => $record->department->head` | The person comes from somewhere other than a direct column. |
 | Invokable class | `\App\Signatories\DepartmentHead::class` | You want it reusable across templates and testable. |
 
 An invokable class can implement [`SignatoryResolver`](../src/Contracts/SignatoryResolver.php) to get `resolve($record, $slot)`, or just define `__invoke`.
 
-A slot with no `signatory` is **unrouted**: whoever opens the signer page places their own signature. A binding that can't resolve (null foreign key, deleted parent) doesn't throw; the slot just shows as `unassigned`.
+A slot with no `signatory` is **unrouted**: whoever opens the signer page places their own signature. A binding that can't resolve (null foreign key, deleted parent, a closure that hits a null) doesn't throw; the slot just shows as `unassigned`. A closure's exception is still reported, so a genuine bug surfaces in your logs.
+
+### Bindings that return someone other than a login
+
+Signatures belong to logins: requests and signatures are keyed by `user_id`. Whatever a binding returns goes through the bound [`SignatoryUserMapper`](integration/service-provider.md#signatoryusermapper-how-a-signatory-becomes-a-login) before it's used. The default passes logins through and refuses anything else, so a relation to a `Personnel` or `Employee` row routes as *"… is named but has no login"* until you bind a mapper:
+
+```php
+// app/Providers/SignatureServiceProvider.php
+$this->app->bind(SignatoryUserMapper::class, fn () => RelationUserMapper::using('user'));
+```
+
+Then `'attestedPersonnel'` is a valid binding, and the person's login signs. In 1.x the person's own id was silently used as a `user_id`.
 
 ---
 
@@ -220,7 +231,7 @@ app(AutoAffixService::class)->grant(
     grantorId:   auth()->id(),
     signature:   $mySignature,
     templateKey: 'accomplishment-report',
-    role:        'attested_by',      // optional
+    role:        'attester',         // optional; must match the slot's role() (its `role`, or its key)
     expiresAt:   now()->addYear(),   // defaults to auto_affix.default_grant_days
     maxUses:     null,               // or a cap
     signable:    null,               // or one specific record

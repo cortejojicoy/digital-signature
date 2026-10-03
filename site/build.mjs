@@ -63,6 +63,20 @@ const NAV = [
         ],
     },
     {
+        title: 'Integrating documents',
+        items: [
+            { file: 'integration/index.md', label: 'Overview' },
+            { file: 'integration/service-provider.md', label: 'Service provider' },
+            { file: 'integration/signable-documents.md', label: 'Signable documents' },
+            { file: 'integration/document-of-record.md', label: 'Document of record' },
+            { file: 'integration/testing.md', label: 'Testing' },
+            { file: 'integration/reference-integration.md', label: 'Reference: Accomplishment Report' },
+            { file: 'integration/recipes/generated-from-a-period.md', label: 'Recipe: generated from a period' },
+            { file: 'integration/recipes/existing-record.md', label: 'Recipe: existing record' },
+            { file: 'integration/recipes/external-signatories.md', label: 'Recipe: external signatories' },
+        ],
+    },
+    {
         title: 'Signing documents',
         items: [
             { file: 'signing-workflow.md', label: 'Signing workflow' },

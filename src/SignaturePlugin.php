@@ -8,10 +8,13 @@ use Filament\Support\Assets\Js;
 use Filament\Support\Facades\FilamentAsset;
 use Filament\View\PanelsRenderHook;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
+use Kukux\DigitalSignature\Contracts\SignableDocument;
+use Kukux\DigitalSignature\Services\DocumentRegistry;
 use Closure;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
+use Kukux\DigitalSignature\Filament\Pages\SignedDocuments;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
@@ -29,8 +32,11 @@ class SignaturePlugin implements Plugin
 
     protected ?string $navigationLabel = null;
 
-    /** @var array<PdfTemplate|class-string<PdfTemplate>> */
+    /** @var array<int|string, PdfTemplate|class-string<PdfTemplate>|array<string, mixed>> */
     protected array $templates = [];
+
+    /** @var array<string, class-string<SignableDocument>|SignableDocument> */
+    protected array $documents = [];
 
     protected ?Closure $signatoryResolver = null;
 
@@ -121,19 +127,49 @@ class SignaturePlugin implements Plugin
      * Register PdfTemplate implementations the placement designer and
      * "apply signature to PDF" flows should know about. Stacks on top
      * of templates already declared in config('signature.templates').
+     * Accepts the same shapes as the config: classes, instances, and
+     * key => array Blade templates.
      *
-     * @param iterable<PdfTemplate|class-string<PdfTemplate>> $templates
+     * @param iterable<int|string, PdfTemplate|class-string<PdfTemplate>|array<string, mixed>> $templates
      *
      * Example:
      *   SignaturePlugin::make()->templates([
      *       \App\Pdf\DtrTemplate::class,
-     *       \App\Pdf\PayslipTemplate::class,
+     *       'payslip' => ['view' => 'pdf.payslip', 'slots' => ['employee']],
      *   ])
      */
     public function templates(iterable $templates): static
     {
-        foreach ($templates as $template) {
+        foreach ($templates as $key => $template) {
+            // A string key is a Blade template's key and must survive: the
+            // registry builds the template from it.
+            if (is_string($key)) {
+                $this->templates[$key] = $template;
+
+                continue;
+            }
+
             $this->templates[] = $template;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Register the documents this panel routes for signatures, by key. Stacks
+     * on top of config('signature.documents').
+     *
+     * @param iterable<string, class-string<SignableDocument>|SignableDocument> $documents
+     *
+     * Example:
+     *   SignaturePlugin::make()->documents([
+     *       'dtr' => \App\Signatures\DtrDocument::class,
+     *   ])
+     */
+    public function documents(iterable $documents): static
+    {
+        foreach ($documents as $key => $document) {
+            $this->documents[$key] = $document;
         }
 
         return $this;
@@ -253,6 +289,10 @@ class SignaturePlugin implements Plugin
             app(PdfTemplateRegistry::class)->registerMany($this->templates);
         }
 
+        if ($this->documents !== []) {
+            app(DocumentRegistry::class)->registerMany($this->documents);
+        }
+
         if ($this->signatoryResolver !== null) {
             app(SignatoryResolverFactory::class)->overrideUsing($this->signatoryResolver);
         }
@@ -266,6 +306,12 @@ class SignaturePlugin implements Plugin
         // where a signatory finds the documents waiting on them.
         if ($this->registerInbox ?? config('signature.inbox.enabled', true)) {
             $pages[] = SignatureInbox::class;
+        }
+
+        // The full record of what this user has signed. The launcher's Signed
+        // tab links here for anything older than its last fifty.
+        if (config('signature.signed.enabled', true)) {
+            $pages[] = SignedDocuments::class;
         }
 
         $panel->pages($pages);

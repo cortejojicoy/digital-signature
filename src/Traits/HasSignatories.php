@@ -2,7 +2,12 @@
 
 namespace Kukux\DigitalSignature\Traits;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Kukux\DigitalSignature\Contracts\DocumentOfRecordGate;
+use Kukux\DigitalSignature\DocumentOfRecord\DocumentHistory;
+use Kukux\DigitalSignature\DocumentOfRecord\DocumentOfRecord;
+use Kukux\DigitalSignature\Exceptions\DocumentRetainedException;
 use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\SigningSession;
 use Kukux\DigitalSignature\Services\SignatoryRouter;
@@ -32,6 +37,44 @@ use Kukux\DigitalSignature\Signatories\SignatoryRoute;
  */
 trait HasSignatories
 {
+    /**
+     * A record whose document has been routed keeps it: its signed versions
+     * are a history its signatories are entitled to (see DocumentOfRecordGate).
+     * Soft deletes are left alone, since nothing is lost.
+     */
+    public static function bootHasSignatories(): void
+    {
+        static::deleting(function (Model $record): void {
+            if (method_exists($record, 'isForceDeleting') && ! $record->isForceDeleting()) {
+                return;
+            }
+
+            if (! app(DocumentOfRecordGate::class)->canDelete($record)) {
+                throw new DocumentRetainedException(sprintf(
+                    '%s #%s has been routed for signatures, so its signed versions are kept. '
+                    .'Bind a DocumentOfRecordGate whose canDelete() allows this if it must go.',
+                    class_basename($record),
+                    $record->getKey(),
+                ));
+            }
+        });
+    }
+
+    /**
+     * The routed document: the stored PDF its signatories signed, and where
+     * it stands. Null until it has been routed; a draft is rendered live.
+     */
+    public function documentOfRecord(): ?DocumentOfRecord
+    {
+        return DocumentOfRecord::for($this);
+    }
+
+    /** Every version of the routed document, oldest first. */
+    public function documentHistory(): DocumentHistory
+    {
+        return DocumentHistory::for($this);
+    }
+
     /**
      * Template key this record's signature layout comes from.
      *

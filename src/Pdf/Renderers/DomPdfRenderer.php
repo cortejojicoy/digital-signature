@@ -14,6 +14,19 @@ use Kukux\DigitalSignature\Pdf\SlotAnchors;
  */
 class DomPdfRenderer implements PdfRenderer
 {
+    /**
+     * @param  string|null  $paper  'a4', 'letter', 'legal', … or null for
+     *   `dompdf.default_paper_size`. Pin it for any signable document: slots
+     *   are stored as absolute PDF points, so a change to the app-wide default
+     *   would move every calibrated signature.
+     * @param  string  $orientation  'portrait' or 'landscape'
+     */
+    public function __construct(
+        protected ?string $paper = null,
+        protected string $orientation = 'portrait',
+    ) {
+    }
+
     public function render(string $view, array $data, string $destinationPath): string
     {
         if (! static::isAvailable()) {
@@ -32,6 +45,10 @@ class DomPdfRenderer implements PdfRenderer
         // Resolved at runtime to avoid hard-importing the facade — that
         // way the plugin still loads in apps that don't have dompdf.
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data);
+
+        if ($this->paper !== null) {
+            $pdf->setPaper($this->paper, $this->orientation);
+        }
 
         // Record where any `data-signature-slot` elements land, so a
         // document that flows across pages still gets signed in the right place.

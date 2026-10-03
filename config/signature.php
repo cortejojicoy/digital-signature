@@ -261,6 +261,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Signable documents
+    |--------------------------------------------------------------------------
+    | The documents this app routes for signatures, by key. Each is a class
+    | implementing Contracts\SignableDocument (extend
+    | Documents\AbstractSignableDocument): which template it renders with,
+    | how to find or create its record, and any checks of its own. Routing
+    | itself is the package's DocumentRouter, shared by every document.
+    |
+    | Class-strings, not closures, so `config:cache` keeps working; they are
+    | built through the container, so they can depend on app services.
+    |
+    |    'documents' => [
+    |        'dtr' => \App\Signatures\DtrDocument::class,
+    |    ],
+    |
+    | Route one with RouteForSignaturesAction::make()->document('dtr'), or
+    | app(DocumentRouter::class)->route('dtr', $subject, $context).
+    | See docs/integration/index.md.
+    */
+    'documents' => [
+        //
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Placement designer
     |--------------------------------------------------------------------------
     | The PDF Template Designer rasterizes the sample PDF at this DPI to
@@ -410,6 +435,24 @@ return [
         'navigation_icon'  => env('SIGNATURE_INBOX_ICON', 'heroicon-o-inbox-arrow-down'),
         'navigation_group' => env('SIGNATURE_INBOX_GROUP'),
         'navigation_sort'  => env('SIGNATURE_INBOX_SORT'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Documents I've signed
+    |--------------------------------------------------------------------------
+    | The "Signed by me" page: every signature the user has put on a routed
+    | document, with the copy they signed and the document as it stands now.
+    | Like the inbox, it leaves the sidebar while the launcher (which links to
+    | it) is on.
+    */
+    'signed' => [
+        'enabled'          => env('SIGNATURE_SIGNED_ENABLED', true),
+        'navigation'       => env('SIGNATURE_SIGNED_NAV', true),
+        'navigation_label' => env('SIGNATURE_SIGNED_LABEL', 'Signed by me'),
+        'navigation_icon'  => env('SIGNATURE_SIGNED_ICON', 'heroicon-o-document-check'),
+        'navigation_group' => env('SIGNATURE_SIGNED_GROUP'),
+        'navigation_sort'  => env('SIGNATURE_SIGNED_SORT'),
     ],
 
     /*

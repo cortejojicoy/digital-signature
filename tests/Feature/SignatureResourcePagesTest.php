@@ -148,3 +148,44 @@ describe('signature resource without a View page', function () {
         expect($mine->refresh()->isRevoked())->toBeTrue();
     });
 });
+
+/**
+ * "Signed by me": a real panel page listing what this user has signed, each
+ * with the copy they signed and the document as it stands now.
+ */
+describe('signed documents page', function () {
+
+    beforeEach(function () {
+        Storage::fake('testing');
+        leaveFormSchema();
+        registerLeaveForm();
+        stubSignatureEmbedding();
+
+        signingPerson(21, 'Dr Reyes');
+        $this->juana = signingPerson(22, 'Juana Cruz', supervisorId: 21);
+        app()->instance(\Kukux\DigitalSignature\Tests\Support\LeaveLedger::class, new \Kukux\DigitalSignature\Tests\Support\LeaveLedger([22 => 3]));
+    });
+
+    afterEach(fn () => Mockery::close());
+
+    it('renders the copy each user signed, and filters by title', function () {
+        signaturePanel();
+
+        $form = app(\Kukux\DigitalSignature\Services\DocumentRouter::class)
+            ->route('leave-form', $this->juana, ['period' => '2026-09'])
+            ->record();
+
+        $request = $form->latestSigningSession()->requests()->where('slot_key', 'applicant')->first();
+        app(\Kukux\DigitalSignature\Services\SigningSessionManager::class)->sign($request, $this->juana->user_id);
+
+        $this->actingAs(\Kukux\DigitalSignature\Tests\Support\TestUser::find($this->juana->user_id));
+
+        Livewire::test(\Kukux\DigitalSignature\Filament\Pages\SignedDocuments::class)
+            ->assertOk()
+            ->assertSee('Leave form #'.$form->id)
+            ->assertSee('The copy I signed')
+            ->assertSee(route('signature.request.document', ['signatureRequest' => $request->id]))
+            ->set('search', 'nothing like it')
+            ->assertDontSee('Leave form #'.$form->id);
+    });
+});

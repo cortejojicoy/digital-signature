@@ -128,31 +128,39 @@ class BrowsershotRenderer implements PdfRenderer
 Slots are stored as absolute PDF points, so the page size has to stay put.
 The stock DomPDF renderer uses whatever `dompdf.default_paper_size` is. Publish
 `config/dompdf.php` with `letter` someday, and every calibrated signature
-moves. A tiny renderer fixes the size in your template instead:
+moves. Pin it on the template:
 
 ```php
-class A4Renderer implements PdfRenderer
-{
-    public function render(string $view, array $data, string $destinationPath): string
-    {
-        @mkdir(dirname($destinationPath), 0775, true);
+// a template class
+use Kukux\DigitalSignature\Pdf\Renderers\DomPdfRenderer;
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data)->setPaper('a4');
+parent::__construct(
+    key: 'dtr',
+    // …
+    renderer: new DomPdfRenderer(paper: 'legal'),          // or paper: 'a4', orientation: 'landscape'
+);
+```
 
-        // Keep recording where signature slots land (see below).
-        $anchors = \Kukux\DigitalSignature\Pdf\SlotAnchors::record($pdf->getDomPDF());
+```php
+// or a config-array template
+'templates' => [
+    'dtr' => [
+        'view'  => 'pdf.dtr',
+        'paper' => 'legal',
+        // 'orientation' => 'landscape',
+    ],
+],
+```
 
-        file_put_contents($destinationPath, $pdf->output());
-        \Kukux\DigitalSignature\Pdf\SlotAnchors::write($destinationPath, $anchors());
+A renderer of your own that still uses DomPDF records slot positions with the
+same two `SlotAnchors` calls the stock one makes:
 
-        return $destinationPath;
-    }
+```php
+$pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, $data)->setPaper('a4');
 
-    public static function isAvailable(): bool
-    {
-        return class_exists(\Barryvdh\DomPDF\Facade\Pdf::class);
-    }
-}
+$anchors = \Kukux\DigitalSignature\Pdf\SlotAnchors::record($pdf->getDomPDF());
+file_put_contents($destinationPath, $pdf->output());
+\Kukux\DigitalSignature\Pdf\SlotAnchors::write($destinationPath, $anchors());
 ```
 
 Use the same paper size as any non-signing preview or download of the document,
@@ -172,7 +180,7 @@ So mark each signature space in the Blade, and the package finds it in every doc
 
 - **How it works:** while DomPDF draws the PDF, the renderer records the page and box of every `data-signature-slot` element (`SlotAnchors`). It saves them next to the PDF as `<file>.slots.json`. When a signing session opens, each request gets the box from that document, on whatever page it landed.
 - **The element is the stamp box.** Give it the height you want the signature to take; its width comes from the layout.
-- **Which renderers do it:** the stock `DomPdfRenderer` does it for you. A custom DomPDF renderer needs the two `SlotAnchors` lines shown above. Other renderers (Browsershot, Snappy) don't record anchors, so their templates use the designer's placement.
+- **Which renderers do it:** the stock `DomPdfRenderer` does it for you, at any paper size. A custom DomPDF renderer needs the two `SlotAnchors` calls shown above. Other renderers (Browsershot, Snappy) don't record anchors, so their templates use the designer's placement.
 - **Fallback:** a slot with no marker, or one that didn't render, uses the designer's placement, then its default.
 - **Sample and designer:** the sample still drives the designer's preview. Keep a default or designer placement on each slot; the readiness checks still look for one.
 
@@ -183,6 +191,8 @@ A template class can supply placements some other way by implementing `Kukux\Dig
 ## Implementing a template (full class)
 
 Use a class for conditional slots, complex data, or `config:cache`. `renderSample()` and `renderFor()` both return an absolute file path.
+
+> **Prefer extending `BladePdfTemplate`** (as the [reference integration](integration/reference-integration.md#3-the-template) does) over implementing `PdfTemplate` from scratch. You keep the constructor's named arguments and get two things for free: `data-signature-slot` markers (`PlacesSlotsInDocument`), and a render cache that refreshes when the record changes. Implement the contract yourself only when the rendering isn't a Blade view at all.
 
 ```php
 namespace App\Pdf;
@@ -251,7 +261,9 @@ class DtrTemplate implements PdfTemplate
         assert($record instanceof Dtr);
 
         $disk = Storage::disk(config('signature.storage_disk'));
-        $rel  = "generated/dtr/{$record->getKey()}.pdf";
+
+        // Keyed on updated_at too, so an edited record isn't served a stale render.
+        $rel  = "generated/dtr/{$record->getKey()}-{$record->updated_at?->timestamp}.pdf";
 
         if (! $disk->exists($rel)) {
             $disk->put($rel, app(DtrPdfRenderer::class)->renderBinary($record));
@@ -263,6 +275,8 @@ class DtrTemplate implements PdfTemplate
 ```
 
 `SlotDefinition` also takes `signatory`, `role` and `order`.
+
+This class doesn't implement `PlacesSlotsInDocument`, so `data-signature-slot` markers in its view are ignored and every signature goes where the designer or the defaults put it. Fine for a fixed form like a DTR; for a document whose length varies, extend `BladePdfTemplate` or implement `documentPlacements()` yourself.
 
 > **Gotcha:** the signer page's `?signable=ID` flow only works for config templates with a `signable` key. A full-class template returns a 422 there. Sign it through a [signing session](signatory-routing.md) or `SignatureManager` instead.
 

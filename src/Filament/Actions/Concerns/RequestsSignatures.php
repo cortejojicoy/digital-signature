@@ -3,9 +3,11 @@
 namespace Kukux\DigitalSignature\Filament\Actions\Concerns;
 
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Model;
+use Kukux\DigitalSignature\Documents\TemplateDocument;
+use Kukux\DigitalSignature\Routing\RoutingResult;
 use Kukux\DigitalSignature\Services\AutoAffixService;
-use Kukux\DigitalSignature\Services\SignatoryRouter;
-use Kukux\DigitalSignature\Services\SigningSessionManager;
+use Kukux\DigitalSignature\Services\DocumentRouter;
 
 /**
  * Opens (or advances) a signing session for the record the action sits on.
@@ -64,72 +66,71 @@ trait RequestsSignatures
         $this->action(fn ($record = null) => $this->handleRequest($record));
     }
 
+    /**
+     * Routes through DocumentRouter, the same path every document takes: a
+     * record with no SignableDocument of its own is routed with its template
+     * and the package's checks (TemplateDocument).
+     */
     protected function handleRequest(mixed $record): void
     {
-        if ($record === null) {
+        if (! $record instanceof Model) {
             $this->notifyFailure('No record', 'This action must run against a record.');
 
             return;
         }
 
-        $router = app(SignatoryRouter::class);
-
         try {
-            $blockers = $router->blockers($record, $this->templateKey);
-        } catch (\Throwable $e) {
-            $this->notifyFailure('Cannot route signatories', $e->getMessage());
-
-            return;
-        }
-
-        // Only unassigned / unregistered roles stop us — an outstanding
-        // signature is exactly what we're about to ask for.
-        $fatal = array_filter(
-            $router->routeFor($record, $this->templateKey),
-            fn ($route) => $route->isRequired() && in_array($route->state->value, [
-                'unassigned',
-                'awaiting_registration',
-            ], true),
-        );
-
-        if ($fatal !== []) {
-            $this->notifyFailure(
-                'Not ready for signatures',
-                implode(' ', array_map(
-                    fn ($route) => $route->blockerMessage() ?? $route->state->label(),
-                    $fatal,
-                )),
+            $result = app(DocumentRouter::class)->route(
+                new TemplateDocument($this->templateKey ?? $this->templateKeyOf($record)),
+                $record,
             );
 
-            return;
-        }
-
-        try {
-            $session = app(SigningSessionManager::class)->open($record, $this->templateKey);
-
-            $affixed = $this->autoAffix
-                ? app(AutoAffixService::class)->process($session)
+            $affixed = $this->autoAffix && $result->ok()
+                ? app(AutoAffixService::class)->process($result->session())
                 : [];
         } catch (\Throwable $e) {
             report($e);
-            $this->notifyFailure('Could not open signing session', $e->getMessage());
+
+            $failed = RoutingResult::refused('failed', ['error' => $e->getMessage()]);
+            $this->notifyFailure($failed->title(), $failed->body());
 
             return;
         }
 
-        $pending = count($blockers);
+        if ($result->wasRefused()) {
+            $this->notifyFailure($result->title(), $result->body());
+
+            return;
+        }
+
+        $body = $result->body();
+
+        if ($affixed !== []) {
+            $body .= ' '.trans_choice(
+                '{1} One signature was applied under a standing authorisation.|[2,*] :count signatures were applied under standing authorisations.',
+                count($affixed),
+                ['count' => count($affixed)],
+            );
+        }
 
         Notification::make()
-            ->title('Signatures requested')
-            ->body($affixed === []
-                ? sprintf('%d signator%s notified.', $pending, $pending === 1 ? 'y' : 'ies')
-                : sprintf(
-                    '%d signature%s applied automatically under standing authorisations; the rest were notified.',
-                    count($affixed),
-                    count($affixed) === 1 ? '' : 's',
-                ))
+            ->title($result->title())
+            ->body($body)
             ->success()
             ->send();
+    }
+
+    protected function templateKeyOf(Model $record): string
+    {
+        if (method_exists($record, 'signatureTemplateKey')) {
+            return $record->signatureTemplateKey();
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'No template given and [%s] does not expose signatureTemplateKey(). Use '
+            .'->template(\'…\') or the HasPdfTemplate trait.',
+            $record::class,
+        ));
     }
 
     protected function notifyFailure(string $title, string $body): void

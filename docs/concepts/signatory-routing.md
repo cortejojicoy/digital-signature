@@ -192,11 +192,12 @@ $router->routeFor($accomplishmentReport);
 // [
 //   'prepared_by' => SignatoryRoute {
 //       slot:      SlotDefinition,
-//       position:  PdfTemplateSlot   (saved coords, or slot defaults),
+//       position:  ?array            (['page','x','y','width','height']: saved coords, or slot defaults),
 //       user:      User #12 Juan Dela Cruz,
 //       signature: Signature #88     (their active primary) | null,
 //       state:     'ready' | 'awaiting_registration' | 'unassigned'
-//                  | 'awaiting_consent' | 'signed' | 'declined',
+//                  | 'awaiting_consent' | 'blocked' | 'signed' | 'declined',
+//       tagged:    whoever the record names, before mapping to a login (2.0),
 //   },
 //   'attested_by' => …,
 //   'noted_by'    => …,
@@ -466,7 +467,7 @@ class AccomplishmentReport extends Model implements Signable
 ### Step 3 — Drop the panel into the existing resource (1 line)
 
 ```php
-use Kukux\DigitalSignature\Filament\SignatoryPanel;
+use Kukux\DigitalSignature\Filament\Components\SignatoryPanel;
 
 public static function infolist(Schema $schema): Schema
 {
@@ -491,7 +492,7 @@ Which renders:
 
 ### Step 4 — Place the slots visually (once, in the designer)
 
-`/admin/signature-templates/accomplishment-report/design` — already shipped.
+`/{panel}/signature-templates/accomplishment-report/design` on your panel — already shipped.
 Drag `prepared_by`, `attested_by`, `noted_by` onto the signature lines, save.
 Done forever for every AR.
 
@@ -513,15 +514,23 @@ inbox come from the plugin.
 
 ## 8. Filament v3 / v4 / v5 compatibility
 
-`composer.json` already declares `filament/filament: ^3.0 || ^4.0 || ^5.0`,
-but only the **resource** is actually version-bridged.
+`composer.json` declares `filament/filament: ^3.0 || ^4.0 || ^5.0`, and CI runs
+the suite on each.
 
 ### What's bridged today
 
-[`ResourceResolver`](../../src/Filament/Resources/ResourceResolver.php) detects the
-major version by probing for `Filament\Schemas\Schema`, then `class_alias`es
-the canonical `SignatureResource` to `V3\SignatureResource` or
-`V4\SignatureResource`. v5 currently maps to the V4 implementation.
+Every component whose base class or properties moved between majors has a
+`*Resolver` (a `ComponentResolver`) that `class_alias`es one canonical class
+name to a `V3\…` or `V4\…` implementation, at register time. v5 maps to V4.
+Bridged this way: the `SignatureResource`; the `SignDocumentAction`,
+`SignDocumentHeaderAction`, `RequestSignaturesAction` and
+`RequestSignaturesTableAction` actions; the `PdfTemplateDesigner`,
+`PdfTemplateSigner`, `SignatureInbox` and (2.0) `SignedDocuments` pages; and
+(2.0) `RouteForSignaturesAction`, `ViewDocumentOfRecordAction`,
+`DownloadDocumentOfRecordAction` and `ViewDocumentHistoryAction`. Infolist
+entries (`SignatoryPanel`, `DocumentHistoryEntry`) need no bridge; see below.
+
+The table below is the design record of what had to be bridged and why.
 
 ### What is *not* bridged — the real v3 gaps
 

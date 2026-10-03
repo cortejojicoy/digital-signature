@@ -52,7 +52,17 @@ class CallableResolver implements SignatoryResolver
 
     public function resolve(Model $record, SlotDefinition $slot): Authenticatable|Model|null
     {
-        $result = ($this->callback)($record, $slot);
+        // A binding that can't resolve means "nobody assigned", never a crash:
+        // `fn ($r) => $r->department->head` on a record with no department is
+        // an unassigned slot, the same answer RelationResolver gives. It is
+        // reported rather than swallowed, so a genuine bug still surfaces.
+        try {
+            $result = ($this->callback)($record, $slot);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
 
         if ($result instanceof Authenticatable || $result instanceof Model) {
             return $result;

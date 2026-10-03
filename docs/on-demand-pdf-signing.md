@@ -67,7 +67,7 @@ class RequisitionIssueSlip extends Model implements Signable
 
 Path rules:
 
-- **Return a path relative to `signature.storage_disk`** (env `SIGNATURE_DISK`, default `local`). Not `storage_path(...)`: the drivers and the hash read it through `Storage::disk()`.
+- **Return a file on `signature.storage_disk`** (env `SIGNATURE_DISK`, default `local`): disk-relative (`documents/12.pdf`), or absolute inside that disk's root (`Storage::disk(...)->path('documents/12.pdf')`, which is what `HasPdfTemplate` returns). Both are normalised before hashing and signing. A path *outside* the disk (`storage_path('tmp/…')` on another disk) is not: the drivers read through `Storage::disk()`.
 - **Use a stable name**, like the primary key. No timestamps or slugs.
 - **Keep the disk private** (`local`, `private`, `s3`) so unsigned PDFs aren't public.
 - **Throw on failure.** The return type is `string`; returning `null` gives a `Return value must be of type string, null returned` TypeError. Exceptions show up as a "Signing failed" notification.

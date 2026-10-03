@@ -1092,13 +1092,25 @@
                                 </p>
 
                                 <div class="dsig-card__actions">
+                                    {{-- The copy this signature produced: what they signed, as they signed it. --}}
                                     <button
                                         type="button"
                                         class="dsig-btn dsig-btn--ghost"
                                         x-on:click="view({{ $request->id }})"
                                     >
-                                        View document
+                                        The copy I signed
                                     </button>
+
+                                    @if ($session?->uuid)
+                                        <a
+                                            class="dsig-btn dsig-btn--ghost"
+                                            href="{{ route('signature.documents.show', ['session' => $session->uuid]) }}"
+                                            target="_blank"
+                                            rel="noopener"
+                                        >
+                                            Current
+                                        </a>
+                                    @endif
                                 </div>
                             </div>
                         @endforeach
@@ -1109,6 +1121,12 @@
                             <p>Documents you sign will be kept here.</p>
                         </div>
                     @endforelse
+
+                    @if ($history !== [] && $this->signedUrl)
+                        <p class="dsig-daygroup">
+                            <a href="{{ $this->signedUrl }}">All documents I've signed →</a>
+                        </p>
+                    @endif
                 @endif
             </div>
 
