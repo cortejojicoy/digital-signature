@@ -82,7 +82,10 @@ jobs:
       - name: Run tests
         run: |
           set -o pipefail
-          vendor/bin/pest | tee pest-output.txt
+          # Plain text: Pest 4 colours its output even when piped, and the
+          # checks below grep for lines that start with "Tests:" / "PASS".
+          # An escape code in front made a green run look like a crashed one.
+          vendor/bin/pest --colors=never | tee pest-output.txt
 
           if ! grep -qE '^ *Tests: ' pest-output.txt; then
             echo "::error::Pest exited without printing a summary — the runner died mid-run and tests were silently skipped."
