@@ -278,7 +278,9 @@ describe('floating launcher component', function () {
         expect($html)->toContain("tab === 'signed'")
             ->and($html)->toContain('dsig-daygroup')
             ->and($html)->toContain('Today')
-            ->and($html)->toContain('View document');
+            // The copy this signatory signed, and the document as it stands now.
+            ->and($html)->toContain('The copy I signed')
+            ->and($html)->toContain('/signature/documents/');
     });
 
     it('hides the button entirely when configured to and nothing is waiting', function () {

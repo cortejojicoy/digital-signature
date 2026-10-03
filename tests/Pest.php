@@ -142,3 +142,109 @@ function arSessionTemplate(array $extra = []): void
         );
     }
 }
+
+/**
+ * Tables for the leave-form fixture: people kept apart from logins, and a
+ * document that snapshots its reviewer (see tests/Support/LeaveForm).
+ */
+function leaveFormSchema(): void
+{
+    \Illuminate\Support\Facades\Schema::create('people', function ($table) {
+        $table->id();
+        $table->string('name');
+        $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+        $table->unsignedBigInteger('supervisor_id')->nullable();
+        $table->timestamps();
+    });
+
+    \Illuminate\Support\Facades\Schema::create('leave_forms', function ($table) {
+        $table->id();
+        $table->foreignId('person_id')->constrained('people');
+        $table->string('period');
+        \Kukux\DigitalSignature\Database\SignatoryColumns::add($table, ['reviewer'], references: 'people');
+        $table->timestamps();
+        $table->unique(['person_id', 'period']);
+    });
+}
+
+/**
+ * Registers the leave-form template and document, with people mapped to their
+ * logins the way a host app binds it.
+ *
+ * @param  array<string, mixed>  $extra  template config overrides
+ */
+function registerLeaveForm(array $extra = []): void
+{
+    registerRoutedTemplate('leave-form', [
+        'applicant' => ['label' => 'Applicant', 'signatory' => 'person', 'order' => 1, 'required' => true,
+            'page' => 1, 'x' => 60, 'y' => 120, 'width' => 150, 'height' => 40],
+        'reviewer' => ['label' => 'Reviewer', 'signatory' => 'reviewer', 'order' => 2, 'required' => true,
+            'page' => 1, 'x' => 320, 'y' => 120, 'width' => 150, 'height' => 40],
+    ], array_merge(['renderer' => \Kukux\DigitalSignature\Tests\Support\StubPdfRenderer::class], $extra));
+
+    app()->bind(
+        \Kukux\DigitalSignature\Contracts\SignatoryUserMapper::class,
+        fn () => \Kukux\DigitalSignature\Signatories\RelationUserMapper::using('user'),
+    );
+
+    app(\Kukux\DigitalSignature\Services\DocumentRegistry::class)
+        ->register('leave-form', \Kukux\DigitalSignature\Tests\Support\LeaveFormDocument::class);
+}
+
+/**
+ * A person with a login and a registered signature, ready to sign.
+ */
+function signingPerson(int $id, string $name, ?int $supervisorId = null): \Kukux\DigitalSignature\Tests\Support\Person
+{
+    $user = makeUser($id, $name);
+    makePrimarySignature($user->id);
+
+    return \Kukux\DigitalSignature\Tests\Support\Person::create([
+        'id'            => $id,
+        'name'          => $name,
+        'user_id'       => $user->id,
+        'supervisor_id' => $supervisorId,
+    ]);
+}
+
+/**
+ * Replace the cryptographic embed with a stub that writes a distinct PDF per
+ * signature, so session and history tests run without certificates. Returns
+ * the paths each signature was asked to sign, in order.
+ */
+function stubSignatureEmbedding(): \ArrayObject
+{
+    $signed = new \ArrayObject;
+
+    $manager = Mockery::mock(
+        \Kukux\DigitalSignature\Services\SignatureManager::class.'[embedAndFinalize]',
+        [
+            app(\Kukux\DigitalSignature\Services\CertificateService::class),
+            app(\Kukux\DigitalSignature\Services\PdfSignerService::class),
+            app(\Kukux\DigitalSignature\Security\DuplicateSignatureGuard::class),
+            app(\Kukux\DigitalSignature\Security\CrlValidator::class),
+            app(\Kukux\DigitalSignature\Security\DocumentIntegrity::class),
+            app(\Kukux\DigitalSignature\Security\SignatureMetadataService::class),
+        ],
+    );
+    $manager->shouldAllowMockingProtectedMethods();
+    $manager->shouldReceive('embedAndFinalize')
+        ->andReturnUsing(function (\Kukux\DigitalSignature\Models\Signature $sig, string $pw, ?string $source = null) use ($signed) {
+            $signed[] = $source;
+            $bytes = "%PDF-1.4\n% signed by signature {$sig->id} on top of {$source}\n";
+            $out = 'signed-docs/'.$sig->uuid.'.pdf';
+            \Illuminate\Support\Facades\Storage::disk('testing')->put($out, $bytes);
+            $sig->update([
+                'signed_document_path' => $out,
+                'signed_document_hash' => hash('sha256', $bytes),
+                'status'               => 'signed',
+                'signed_at'            => now(),
+            ]);
+        });
+
+    app()->instance(\Kukux\DigitalSignature\Services\SignatureManager::class, $manager);
+    app()->forgetInstance(\Kukux\DigitalSignature\Services\SigningSessionManager::class);
+    app()->forgetInstance(\Kukux\DigitalSignature\Services\DocumentRouter::class);
+
+    return $signed;
+}
