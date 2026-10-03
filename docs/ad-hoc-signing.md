@@ -34,7 +34,7 @@ class Contract extends Model implements Signable
 }
 ```
 
-`getSignablePdfPath()` returns a path on the `signature.storage_disk` disk (`SIGNATURE_DISK`, default `local`).
+`getSignablePdfPath()` returns a path to a file on the `signature.storage_disk` disk (`SIGNATURE_DISK`, default `local`): either disk-relative, or absolute inside that disk's root. `HasPdfTemplate` returns the absolute form; the package normalises both.
 
 ## Register Signatures
 

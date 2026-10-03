@@ -206,7 +206,7 @@ On Filament v3 you must use `SignDocumentHeaderAction` in headers. On v4/v5 eith
 
 | Method | What it does |
 |---|---|
-| `stampAt(page, x, y, w, h)` | Fixed stamp position in PDF points, measured from the bottom-left of the page. Leave it out to let the signer place the signature. |
+| `stampAt(page, x, y, w, h)` | Fixed stamp position in PDF points, measured from the bottom-left of the page. Set it: this action has no placement step, so without it the stamp lands at the PDF driver's default corner. To let the signer place their own signature, send them to the [signer page](pdf-templates.md#the-signer-page) or route the document ([Integrating documents](integration/index.md)); both have drag-to-place. |
 | `queued()` | Dispatch `EmbedSignatureJob` to the queue. Without it, the action calls `embedAndFinalize()` directly and no worker is needed. |
 
 On submit, the action copies the chosen signature into a new document-specific `Signature` linked to the record, then signs the PDF (CRL check if enabled, PKCS#7 signing, document hash).

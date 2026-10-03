@@ -23,7 +23,8 @@ class Contract extends Model implements Signable
         return $this->title;
     }
 
-    // Path to the PDF on the configured storage disk
+    // The PDF on the signature disk: disk-relative ('documents/12.pdf') or
+    // absolute inside the disk root (what HasPdfTemplate returns). Both work.
     public function getSignablePdfPath(): string
     {
         return $this->pdf_path;
