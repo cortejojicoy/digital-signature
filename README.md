@@ -26,7 +26,8 @@ pages as below, with navigation and search.
 | [Ad-hoc Signing](docs/ad-hoc-signing.md) | Implement document signing outside a package resource |
 | [Certificates](docs/certificates.md) | Certificate issuance, CA setup, CFSSL |
 | [Signatory Routing](docs/signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory documents, Filament version compatibility |
-| [Guide: Route for Signatures](docs/route-for-signatures.md) | Add a "Route for Signatures" button to a generated report |
+| [Integrating documents](docs/integration/index.md) | **2.0.** Make your own documents signable: definitions, guards, the container bindings, the document of record, recipes |
+| [Upgrading to 2.0](UPGRADE-2.0.md) | Every breaking change, with before and after |
 | [Security](docs/security.md) | HMAC metadata, machine binding, DB cross-validation, forgery detection |
 | [Device Registration](docs/device-registration.md) | Browser signing keys and how they're verified |
 | [Desktop Agent](docs/desktop-agent.md) | Hardware-bound signing via the Kukux Sign Agent |
@@ -220,6 +221,20 @@ Each person registers their signature once in their own panel. Being tagged on
 a record is then enough for the document to reach them — the plugin resolves
 the person, finds their signature, pre-fills the placement, and lists the
 document in their **Awaiting my signature** inbox.
+
+If your records tag people who aren't `User` rows (`Personnel`, `Employee`),
+bind how they become logins once, and slots can name them directly:
+
+```php
+// app/Providers/SignatureServiceProvider.php
+$this->app->bind(SignatoryUserMapper::class, fn () => RelationUserMapper::using('user'));
+```
+
+**Documents generated from a person and a period** (a report, a DTR), and any
+document with its own preconditions, are defined once as a `SignableDocument`
+and routed by the package. Once routed, View and Download serve the **document
+of record**: every signed version is kept, and each signatory can reopen the
+exact copy they signed. See [Integrating documents](docs/integration/index.md).
 
 **On consent.** By default the plugin never signs *for* anyone: the signature
 is always produced in the signatory's own authenticated request, with their own
