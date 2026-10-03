@@ -141,7 +141,7 @@ class FpdiDriver implements PdfSignerDriver
 
         $outName = config('signature.signed_docs_path')
             . '/' . pathinfo($pdfPath, PATHINFO_FILENAME)
-            . '_signed_' . time() . '.pdf';
+            . '_signed_' . time() . '_' . \Illuminate\Support\Str::random(8) . '.pdf';
 
         try {
             $disk->put($outName, $pdf->Output('', 'S'));
