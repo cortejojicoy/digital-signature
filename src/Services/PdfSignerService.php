@@ -2,8 +2,10 @@
 
 namespace Kukux\DigitalSignature\Services;
 
+use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Drivers\PdfSigners\Contracts\PdfSignerDriver;
 use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Support\DiskPath;
 
 class PdfSignerService
 {
@@ -32,8 +34,10 @@ class PdfSignerService
 
         $position = $all->first() ?? [];
 
-        return $this->driver->sign(
-            pdfPath:   $sourcePdfPath ?? $signature->signable->getSignablePdfPath(),
+        $output = $this->driver->sign(
+            // Drivers read through Storage::disk()->path(), so they need the
+            // disk-relative form; getSignablePdfPath() returns an absolute one.
+            pdfPath:   DiskPath::relative($sourcePdfPath ?? $signature->signable->getSignablePdfPath()),
             imagePath: $signature->image_path,
             position:  $position,
             certData:  $certData,
@@ -42,6 +46,59 @@ class PdfSignerService
             caption:   $this->buildCaption($signature),
             extraPositions: $all->slice(1)->values()->all(),
         );
+
+        return $this->keepAsVersion($signature, $output);
+    }
+
+    /**
+     * Move the driver's output to a path that belongs to this signature alone.
+     *
+     * Each signed file is a version in the document's history: the copy that
+     * signatory reviewed and signed. Drivers name their output after the
+     * source and a timestamp, so two signers working from the same source in
+     * the same second (a parallel session) would get the same name, and the
+     * second write would replace the first signer's copy. The signature's
+     * uuid can't collide, and a version that somehow exists already is
+     * refused rather than overwritten.
+     *
+     *   {signed_docs_path}/{session uuid}/{signature uuid}.pdf   in a session
+     *   {signed_docs_path}/{signature uuid}.pdf                  otherwise
+     */
+    protected function keepAsVersion(Signature $signature, string $output): string
+    {
+        if (! $signature->uuid) {
+            return $output;
+        }
+
+        $disk = Storage::disk(config('signature.storage_disk'));
+        $output = DiskPath::relative($output);
+
+        // A custom or test driver that wrote nowhere we can see: leave it be.
+        if (! $disk->exists($output)) {
+            return $output;
+        }
+
+        $folder = rtrim((string) config('signature.signed_docs_path', 'signed-docs'), '/');
+        $session = $signature->signing_session_id ? $signature->session : null;
+
+        $target = $session?->uuid
+            ? "{$folder}/{$session->uuid}/{$signature->uuid}.pdf"
+            : "{$folder}/{$signature->uuid}.pdf";
+
+        if ($target === $output) {
+            return $output;
+        }
+
+        if ($disk->exists($target)) {
+            throw new \RuntimeException(sprintf(
+                'Refusing to overwrite the signed version at [%s]. A signed document is never replaced.',
+                $target,
+            ));
+        }
+
+        $disk->move($output, $target);
+
+        return $target;
     }
 
     /**

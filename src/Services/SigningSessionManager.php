@@ -86,16 +86,17 @@ class SigningSessionManager
             return $existing;
         }
 
-        $basePath = $this->freezeDocument($record, $template);
+        $uuid = (string) Str::uuid();
+        $basePath = $this->freezeDocument($record, $template, $uuid);
 
         // Where the slots actually landed in this record's document. A report
         // that runs to more pages moves its signature block; the designer's
         // placement only knows the sample.
         $placements = $template instanceof PlacesSlotsInDocument ? $template->documentPlacements($record) : [];
 
-        return DB::transaction(function () use ($record, $template, $templateKey, $basePath, $actorId, $placements) {
+        return DB::transaction(function () use ($record, $template, $templateKey, $basePath, $actorId, $placements, $uuid) {
             $session = SigningSession::create([
-                'uuid'                  => (string) Str::uuid(),
+                'uuid'                  => $uuid,
                 'signable_type'         => $record->getMorphClass(),
                 'signable_id'           => $record->getKey(),
                 'template_key'          => $templateKey,
@@ -551,19 +552,23 @@ class SigningSessionManager
      * Render the record's PDF and copy it somewhere the session owns, so a
      * later re-render (or a cache eviction) cannot change what is being signed.
      *
+     * Version 0 of the document's history: kept under the session's own
+     * uuid, so a session reopened in the same second as a cancelled one
+     * can't overwrite the base the earlier signatures were made on.
+     *
      * @return string Disk-relative path.
      */
-    protected function freezeDocument(Model $record, PdfTemplate $template): string
+    protected function freezeDocument(Model $record, PdfTemplate $template, string $sessionUuid): string
     {
         $rendered = $template->renderFor($record);
 
         $disk = Storage::disk(config('signature.storage_disk'));
 
         $relative = sprintf(
-            'signing-sessions/%s/%s/base-%s.pdf',
+            'signing-sessions/%s/%s/%s/base.pdf',
             $template->key(),
             $record->getKey(),
-            now()->format('YmdHis'),
+            $sessionUuid,
         );
 
         $bytes = is_file($rendered)
