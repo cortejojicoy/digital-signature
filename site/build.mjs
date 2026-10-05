@@ -71,6 +71,7 @@ const NAV = [
             { file: 'integration/document-of-record.md', label: 'Document of record' },
             { file: 'integration/testing.md', label: 'Testing' },
             { file: 'integration/reference-integration.md', label: 'Reference: Accomplishment Report' },
+            { file: 'integration/migrating-from-1x.md', label: 'Walkthrough: 1.x to 2.0' },
             { file: 'integration/recipes/generated-from-a-period.md', label: 'Recipe: generated from a period' },
             { file: 'integration/recipes/existing-record.md', label: 'Recipe: existing record' },
             { file: 'integration/recipes/external-signatories.md', label: 'Recipe: external signatories' },
