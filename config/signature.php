@@ -556,6 +556,13 @@ return [
             'pairing_ttl'      => 600,
             'job_ttl'          => 300,
             'skip_ttl'         => 120,
+            // Under approval = enforce, the signing page checks it's on the
+            // paired computer before it offers "Sign here": it opens a
+            // kukuxsign://presence link and waits for the agent to report
+            // in. checkin_ttl: seconds a check stays open. checkin_valid_for:
+            // seconds a confirmed check is remembered for this session.
+            'checkin_ttl'       => env('SIGNATURE_AGENT_CHECKIN_TTL', 90),
+            'checkin_valid_for' => env('SIGNATURE_AGENT_CHECKIN_VALID_FOR', 900),
             // Device types (Enums\DeviceType) refused at pairing, checked
             // against what the agent detected, which the owner can't change.
             // Virtual machines by default: their keys aren't in a real chip,
