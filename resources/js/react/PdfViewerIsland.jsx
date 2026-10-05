@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
 import { cssRectToPdfPoints, pdfPointsToCssRect } from '../utils/pdfCoords.js';
-import { layoutStamp, defaultStampBox } from '../utils/stampLayout.js';
+import { layoutStamp, defaultStampBox, captionReserve, stampBoxForInk } from '../utils/stampLayout.js';
 import { StampPreview } from './components/StampPreview.jsx';
 
 /**
@@ -256,7 +256,6 @@ function PdfViewerIsland({ el }) {
             { width: placement.width, height: placement.height },
             signature?.caption ?? [],
             meta?.stamp,
-            placement.captionPosition,
             aspects[placement.signatureId],
         );
 
@@ -327,15 +326,12 @@ function PdfViewerIsland({ el }) {
 
         // Default to the slot's own size where the administrator set one, so a
         // dropped signature matches the layout the document was designed for.
-        // Otherwise size it so the ink lands at its natural shape once the
-        // caption and QR have taken their share.
+        // Otherwise size it so the ink lands at its natural shape beside the
+        // name and date.
         const frozen = activeRequest.placement;
         const box = frozen && frozen.page === hit.number
             ? { width: frozen.width, height: frozen.height }
-            : defaultStampBox(aspects[dragging.sig.id], page.widthPt, meta?.stamp);
-        // A dropped stamp starts on the configured side; the control in the
-        // tray moves it per placement afterwards.
-        const side = meta?.stamp?.caption?.position ?? 'bottom';
+            : defaultStampBox(aspects[dragging.sig.id], page.widthPt, meta?.stamp, dragging.sig.caption);
 
         const width  = box.width  * zoom;
         const height = box.height * zoom;
@@ -359,7 +355,6 @@ function PdfViewerIsland({ el }) {
             page: hit.number,
             ...cssRectToPdfPoints(rect, page, nominal),
             signatureId: dragging.sig.id,
-            captionPosition: side,
         }]);
 
         // Move on to the next slot that has nothing at all on it yet, so a
@@ -393,7 +388,7 @@ function PdfViewerIsland({ el }) {
         }
 
         const nominal = nominalBox(page, zoom);
-        const box     = defaultStampBox(aspects[activeSigId], page.widthPt, meta?.stamp);
+        const box     = defaultStampBox(aspects[activeSigId], page.widthPt, meta?.stamp, activeSig?.caption);
         const width   = box.width  * zoom;
         const height  = box.height * zoom;
 
@@ -410,7 +405,7 @@ function PdfViewerIsland({ el }) {
             signatureId: activeSigId,
         }]);
         advancePast(activeRequest.id);
-    }, [pages, activeRequest, zoom, aspects, activeSigId, advancePast, meta]);
+    }, [pages, activeRequest, zoom, aspects, activeSigId, activeSig, advancePast, meta]);
 
     const removePlacement = useCallback((stampId, requestId) => {
         setPlacements((current) => current.filter((p) => p.id !== stampId));
@@ -433,7 +428,6 @@ function PdfViewerIsland({ el }) {
             width:        round2(p.width),
             height:       round2(p.height),
             signature_id: p.signatureId ?? null,
-            caption_position: p.captionPosition ?? null,
         }));
 
         setBusy(true);
@@ -645,6 +639,7 @@ function PdfViewerIsland({ el }) {
                                             backgroundImageUrl={sig?.previewUrl}
                                             preview={previewFor(placement, sig)}
                                             aspect={aspects[placement.signatureId]}
+                                            {...inkOnlyResize(sig, meta?.stamp, zoom)}
                                             onSelect={() => {
                                                 setActiveRequestId(placement.requestId);
                                                 setSelectedStampId(placement.id);
@@ -725,8 +720,7 @@ function PdfViewerIsland({ el }) {
                     style={{
                         left:   `${dragging.x}px`,
                         top:    `${dragging.y}px`,
-                        width:  `${GHOST_WIDTH}px`,
-                        height: `${GHOST_WIDTH / (aspects[dragging.sig.id] ?? 3.2) + GHOST_CAPTION}px`,
+                        ...ghostSize(dragging.sig, aspects[dragging.sig.id], meta?.stamp),
                     }}
                 >
                     <StampPreview
@@ -742,9 +736,19 @@ function PdfViewerIsland({ el }) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // The ghost is not a placement yet, so it has no box to be laid out against.
-// These give it a plausible one at a readable size.
-const GHOST_WIDTH = 150;
-const GHOST_CAPTION = 26;
+// This gives it a plausible one: the ink at a readable width, beside the text
+// at the size it will print.
+const GHOST_INK_WIDTH = 110;
+
+function ghostBox(signature, aspect, rules) {
+    return stampBoxForInk(GHOST_INK_WIDTH, aspect, signature.caption ?? [], rules);
+}
+
+function ghostSize(signature, aspect, rules) {
+    const box = ghostBox(signature, aspect, rules);
+
+    return { width: `${box.width}px`, height: `${box.height}px` };
+}
 
 /**
  * Lay the dragged signature out as if it had already been dropped, so the
@@ -752,19 +756,22 @@ const GHOST_CAPTION = 26;
  * that then rearranges itself on release.
  */
 function ghostPreview(signature, aspect, rules) {
-    const heightPt = GHOST_WIDTH / (aspect ?? 3.2) + GHOST_CAPTION;
-
     return scalePreview(
-        layoutStamp(
-            { width: GHOST_WIDTH, height: heightPt },
-            signature.caption ?? [],
-            rules,
-            undefined,
-            aspect,
-        ),
+        layoutStamp(ghostBox(signature, aspect, rules), signature.caption ?? [], rules, aspect),
         1,
         rules,
     );
+}
+
+/**
+ * What SlotBox needs so its resize handle scales the signature and leaves the
+ * name and date at their printed size: the width the text claims, and the
+ * least height that holds it, in CSS pixels.
+ */
+function inkOnlyResize(signature, rules, zoom) {
+    const { reserveWidth, minHeight } = captionReserve(signature?.caption ?? [], rules);
+
+    return { reserveWidth: reserveWidth * zoom, minHeight: minHeight * zoom };
 }
 
 /**
@@ -781,17 +788,12 @@ function scalePreview(layout, zoom, rules) {
             width:  layout.image.width  * zoom,
             height: layout.image.height * zoom,
         },
-        qr: layout.qr
-            ? { x: layout.qr.x * zoom, y: layout.qr.y * zoom, size: layout.qr.size * zoom }
-            : null,
         caption: {
             lines:        layout.caption.lines,
             x:            layout.caption.x * zoom,
             y:            layout.caption.y * zoom,
-            w:            (layout.caption.w ?? 0) * zoom,
             sizePx:       layout.caption.size * zoom,
-            lineHeightPx: layout.caption.size * zoom * (rules?.caption?.lineHeight ?? 1.06),
-            align:        layout.caption.align,
+            lineHeightPx: layout.caption.size * zoom * (rules?.caption?.lineHeight ?? 1.15),
         },
     };
 }
