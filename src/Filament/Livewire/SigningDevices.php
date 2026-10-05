@@ -166,8 +166,12 @@ class SigningDevices extends Component
         $registry = app(DeviceRegistry::class);
         $key = $registry->verifiedKey($this->userId());
 
+        $devices = $this->devices();
+
         return view('signature::filament.livewire.signing-devices', [
-            'devices'      => $this->devices(),
+            'devices'      => $devices,
+            // One computer per account: the agent devices that keep it from pairing another.
+            'computers'    => $devices->where('kind', 'agent')->where('status', 'active')->values(),
             'pairing'      => $pairing,
             'claim'        => $pairing ? app(AgentPairingService::class)->describeClaim($pairing) : null,
             'agentEnabled' => AgentServer::enabled(),
