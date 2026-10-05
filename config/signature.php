@@ -606,6 +606,10 @@ return [
             'approval'         => env('SIGNATURE_AGENT_APPROVAL', 'prefer'),
             'scheme'           => 'kukuxsign',
             'download_url'     => env('SIGNATURE_AGENT_DOWNLOAD_URL', 'https://github.com/cortejojicoy/digital-signature-agent/releases/latest'),
+            // Where the agent sends people to manage their signing devices,
+            // e.g. to remove the computer their account is paired with.
+            // Must be on this app's origin; defaults to the app itself.
+            'devices_url'      => env('SIGNATURE_AGENT_DEVICES_URL'),
             'min_version'      => env('SIGNATURE_AGENT_MIN_VERSION', '0.1.0'),
             'require_presence' => env('SIGNATURE_AGENT_REQUIRE_PRESENCE', true),
             'server_id'        => env('SIGNATURE_AGENT_SERVER_ID'),
