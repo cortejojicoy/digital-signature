@@ -57,6 +57,7 @@ Everything lives under `signature.devices.agent` in `config/signature.php`.
 | `pairing_ttl` | none | `600` | Seconds a pairing code stays valid. |
 | `job_ttl` | none | `300` | Seconds a signing job stays valid, and how long a completed approval can be spent. |
 | `skip_ttl` | none | `120` | Seconds "Sign in the browser instead" suppresses the agent. |
+| `devices_url` | `SIGNATURE_AGENT_DEVICES_URL` | the app's origin | Where the agent sends people to manage their signing devices, for example to remove the computer their account is already paired with. Must be on this app's origin, or the agent uses the origin instead. |
 | `blocked_device_types` | `SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES` | `virtual_machine` | Device types refused at pairing, comma-separated. Checked against what the agent *detected*, which the owner can't change. Set it empty to allow VMs, for example for development in Parallels. |
 
 ### Approval modes
@@ -115,11 +116,36 @@ A computer can be paired with many apps, but holds only one account's signature 
 
 Confirm checks again under a row lock, and the unique `active_hardware_key` column (the hash while a device is an active agent, otherwise null) holds the line even if two pairings race.
 
-A claim with no `hardware_id_hash` (some boards have no usable firmware uuid) can't be matched, so it always pairs as a new device; the agent's own check still applies on that computer.
+A claim with no `hardware_id_hash` (some boards have no usable firmware uuid) can't be matched to another account's computer, so that check passes; the agent's own check still applies on that computer.
+
+### One computer per account
+
+An account can pair the agent with only one computer per app. On claim, after the check above, the server looks at the account's active agent devices:
+
+| The account's active agent devices… | Result |
+|---|---|
+| none | A new device on confirm. |
+| one, with this claim's `hardware_id_hash` | **Rebind**, as above. |
+| one, named by the claim's `replaces` with a valid `rebind_agent` proof | **Rebind**, whatever the hash says. |
+| one on another computer, or either hash is missing, and no proof | `409 account_already_paired`, with `device: { label, device_type }` naming the account's own computer. |
+
+**Same-computer proof.** When the same account re-pairs, the agent adds `replaces: { device_uuid, proof }` to the claim: its existing device, and a `rebind_agent` proof by that pairing's session key, with no OS prompt. The session key is created in the Secure Enclave / TPM and can't leave it, so only that computer can produce the proof. This covers computers without a hardware id, and a hardware id that changed (a replaced logic board). A proof that doesn't verify is `422 invalid_proof`; one naming a device that isn't this account's active agent is ignored. A reinstall loses the old keys, so it falls back to the hash: on a computer without one, remove the old device first.
+
+**Placeholder UUIDs.** Some boards ship the same firmware UUID (for example `03000200-0400-0500-0006-000700080009`). The agent sends no hardware id for those and for any UUID of one repeated digit, and the server treats their salted hashes as missing too, for older agents. The list is `AgentPairingService::PLACEHOLDER_UUIDS`, shared with the agent through `tests/Fixtures/placeholder-uuids.json`.
+
+Lookup returns the account's computer as `agent_device: { uuid, label, device_type, hardware_id_hash }`, so the agent can refuse before creating any key or showing Touch ID. Only the holder of the account's own pairing code gets it, and the hash only tells whether it's the same computer.
+
+Confirm checks again under a row lock, and the unique `active_agent_user_key` column (the user id while a device is an active agent, otherwise null) holds the line if two pairings race. **My signing devices** says before pairing that the account already has a computer, and won't confirm a second one.
+
+Browser devices don't count: an account can still sign in any number of browsers.
+
+On upgrade, an account that already holds several computers keeps them all: the newest gets the key and the rest stay active but unkeyed, so no one loses a working computer. New pairings for that account are refused until one is left.
+
+To move to another computer, revoke the old one in **My signing devices**, then pair the new one.
 
 #### Releasing a computer
 
-If an owner unpairs while the server is unreachable, the agent retries the revoke later. Until it lands, the server still counts the computer as theirs. An owner can also revoke it from **My signing devices**, or an admin can release it:
+If an owner unpairs while the server is unreachable, the agent asks first: remove the signature from the computer anyway, or keep the pairing. If they remove it, the agent retries the revoke later. Until it lands, the server still counts the computer as theirs, so another account can't pair it and their account can't pair another computer. An owner can also revoke it from **My signing devices**, or an admin can release it:
 
 ```bash
 php artisan signature:agent-release              # list paired computers
@@ -214,6 +240,7 @@ v1|<purpose>|<nonce>|<user_id>|<payload_hash>
 | Purpose | Signed by | Nonce | payload_hash |
 |---|---|---|---|
 | `register_agent` | Identity key | Pairing nonce | `sha256(identity_spki_der ‖ session_spki_der)`, raw bytes concatenated |
+| `rebind_agent` | The existing pairing's session key | Pairing nonce | The same hash, of the new keys. Sent as the claim's `replaces.proof` when re-pairing. |
 | `sign_receipt` | Identity key | Job nonce | The document hash from the job |
 | `request` | Session key | `X-Agent-Nonce` | `sha256("<METHOD>\|<path+query>\|<raw body>\|<timestamp>")` |
 
@@ -231,7 +258,7 @@ These are **not** in the `web` group (the agent has no cookies, so CSRF would re
 
 | Method | Path | Auth | Throttle | Body | Returns |
 |---|---|---|---|---|---|
-| POST | `pairings/lookup` | none | 10/min | `user_code` | pairing, nonce, user, `server{id,name,origin,salt}`, `require_presence`, `blocked_device_types`, `expires_at` |
+| POST | `pairings/lookup` | none | 10/min | `user_code` | pairing, nonce, user, `server{id,name,origin,salt}`, `require_presence`, `blocked_device_types`, `agent_device`, `devices_url`, `expires_at` |
 | POST | `pairings/{uuid}/claim` | code + proof | 20/min | `user_code`, `identity_public_key`, `session_public_key` (base64 SPKI), `algorithm`, `protection`, `user_presence`, `agent_version`, `device{…}`, `attestation?`, `proof` | `status: awaiting_confirmation`, `poll_secret`, `existing_device{uuid,label,device_type}` or null |
 | POST | `pairings/{uuid}/poll` | poll secret | 120/min | `poll_secret` | `status`; when confirmed, also `device{uuid,label,device_type}`, `token` (once) and `rebound` |
 | GET | `status` | agent | 120/min | none | `device{uuid,label,status}`, `user{id,name}`, `other_devices[{uuid,label,device_type,last_used_at}]` |
@@ -293,6 +320,7 @@ The agent shows `message` to the user. `AgentApiException::render()` produces it
 | 404 | `job_not_found` | Job missing or belongs to another user |
 | 409 | `key_already_registered` | Identity key already registered |
 | 409 | `machine_already_paired` | Another account's agent already holds this computer for this app |
+| 409 | `account_already_paired` | This account is already paired with another computer for this app. `device.label` names it. |
 | 409 | `token_already_issued` | Poll after the token was handed out |
 | 409 | `job_unavailable` | Job not pending (claim), or not claimed by this device / expired (complete) |
 | 422 | `invalid_request` | A required string field is missing or too long |

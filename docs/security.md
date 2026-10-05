@@ -356,6 +356,7 @@ The browser fingerprint in §6–7 is a value the browser *asserts*. A device ke
 - Agent requests need both the bearer token and a session-key proof over the exact request (`AuthenticateAgent`). A leaked token alone is useless.
 - Revoking an agent device revokes its tokens, and its next call is a 401, on which the agent deletes its keys.
 - One computer holds one account's signature per app, enforced by a unique index on the hardware hash. Another account pairing the same computer gets `409 machine_already_paired`.
+- One account is paired with one computer per app, enforced by a unique index on the user id of active agent devices. Pairing a second computer gets `409 account_already_paired`, naming only the account's own computer. Re-pairing the same computer is proven by a `rebind_agent` signature from the old pairing's session key, which can't leave that computer's Secure Enclave / TPM; without that proof or a matching hardware id, the server refuses. Firmware placeholder UUIDs shared by many boards count as no hardware id.
 - Virtual machines are refused at pairing by default. Their keys aren't in a real chip, and clones share one hardware ID. The check uses what the agent *detected*, so the owner can't relabel a VM.
 
 **Limits.** The key belongs to a browser profile, not to hardware. Clearing site data creates a new device. See [Device registration: limits](device-registration.md#limits). For hardware-bound keys (Secure Enclave / TPM), see [Desktop agent](desktop-agent.md).
