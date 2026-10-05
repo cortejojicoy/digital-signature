@@ -4,7 +4,7 @@ How an app makes its own documents signable: route them to the right people, sig
 
 The package owns everything that is the same for every document: routing, the checks before routing, signing, the document of record, and the wording. Your app supplies what only it knows. It does that by **implementing contracts and binding classes in the container**, not by copying routing code.
 
-> New in 2.0. Upgrading from 1.x? See [UPGRADE-2.0.md](../../UPGRADE-2.0.md).
+> New in 2.0. Upgrading from 1.x? See [UPGRADE-2.0.md](../../UPGRADE-2.0.md), then the [walkthrough](migrating-from-1x.md) of a real move.
 
 ---
 
@@ -70,6 +70,7 @@ Details in [Signable documents](signable-documents.md). After routing, the recor
 | [Document of record](document-of-record.md) | States, versions, `verify()`, retention, the gate, the Filament UI |
 | [Testing](testing.md) | `SignableDocumentContract`, the checks every document gets for free |
 | [Reference integration](reference-integration.md) | The Accomplishment Report in uplb-performance, end to end, as it runs |
+| [Walkthrough: 1.x to 2.0](migrating-from-1x.md) | How the Accomplishment Report moved off its 1.x code, step by step, with the gotchas |
 | [Recipe: generated from a period](recipes/generated-from-a-period.md) | A document built from a person and a period (DTR) |
 | [Recipe: existing record](recipes/existing-record.md) | A document that already is a row (Travel Request) |
 | [Recipe: external signatories](recipes/external-signatories.md) | Approvers who live in another system |
