@@ -15,6 +15,7 @@
         .dsd-note { border-radius: .6rem; padding: .6rem .75rem; margin-bottom: .75rem; font-size: .8125rem; line-height: 1.45; }
         .dsd-note--ok { background: rgb(22 163 74 / .1); color: var(--dsd-ok); }
         .dsd-note--bad { background: rgb(220 38 38 / .1); color: var(--dsd-bad); }
+        .dsd-note--info { background: var(--dsd-soft); border: 1px solid var(--dsd-line); }
         .dsd-list { border: 1px solid var(--dsd-line); border-radius: .75rem; overflow: hidden; }
         .dsd-item { display: flex; gap: .75rem; align-items: flex-start; padding: .75rem .9rem; }
         .dsd-item + .dsd-item { border-top: 1px solid var(--dsd-line); }
@@ -159,7 +160,16 @@
 
     @if ($agentEnabled)
         <div class="dsd-agent">
-            @if ($pairing && $pairing->status === 'awaiting_confirmation' && $claim)
+            @if ($pairing && $pairing->status === 'awaiting_confirmation' && $claim && $claim['blocked_by'])
+                <h4>Your account is already paired with another computer</h4>
+                <p class="dsd-meta">
+                    One account can be paired with only one computer. Revoke <strong>{{ $claim['blocked_by'] }}</strong>
+                    above, then pair this computer again.
+                </p>
+                <div class="dsd-row">
+                    <button type="button" class="dsd-btn" wire:click="rejectPairing">Cancel</button>
+                </div>
+            @elseif ($pairing && $pairing->status === 'awaiting_confirmation' && $claim)
                 @if ($claim['replaces'])
                     <h4>Re-pair {{ $claim['replaces'] }}?</h4>
                     <p class="dsd-meta">
@@ -208,6 +218,7 @@
                     <button type="button" class="dsd-btn" wire:click="rejectPairing">That's not mine</button>
                 </div>
             @elseif ($pairing && $userCode)
+                @include('signature::filament.livewire.partials.paired-computer-note')
                 <h4>Enter this code in Kukux Sign Agent</h4>
                 <p class="dsd-code" aria-label="Pairing code">{{ $userCode }}</p>
                 <p class="dsd-meta">
@@ -219,10 +230,12 @@
                     <button type="button" class="dsd-btn" wire:click="rejectPairing">Cancel</button>
                 </div>
             @else
+                @include('signature::filament.livewire.partials.paired-computer-note')
                 <h4>Sign from this computer's security chip</h4>
                 <p class="dsd-meta">
                     Kukux Sign Agent keeps your signing key in the Secure Enclave (Mac) or TPM (Windows), and asks
-                    for Touch ID or Windows Hello every time you sign. A computer holds one signature for this app.
+                    for Touch ID or Windows Hello every time you sign. A computer holds one signature for this app,
+                    and your account can be paired with one computer.
                 </p>
                 <div class="dsd-row">
                     <button type="button" class="dsd-btn dsd-btn--primary" wire:click="startPairing">Pair desktop agent</button>
