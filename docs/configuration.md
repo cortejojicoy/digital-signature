@@ -271,49 +271,39 @@ Class-strings, not closures, so `php artisan config:cache` keeps working. Both a
 
 ---
 
-## Stamp: verification QR, caption and the public page
+## Stamp: caption and the public page
 
-What is drawn inside each signature's box. Everything is carved **out of** the
-placement rectangle; the stamp never grows past the box a signatory or the
-form gave it.
+What is drawn inside each signature's box. It follows COA Circular No. 2021-006, IV.C.13: the handwritten signature with the signatory's full name and the date beside it. Everything is carved **out of** the placement rectangle; the stamp never grows past the box a signatory or the form gave it.
 
-### `qr`
+```
+[signature]  Digitally signed
+             by Juan DelaCruz
+             Date: 2020.05.21
+             19:37:33 +08'00'
+```
 
-A QR encoding the URL of the public verification page, drawn as a square off
-the right of the box.
+### `caption`
+
+The text is drawn at a fixed size whatever size the box is, so resizing a placement scales only the signature image.
 
 | Key | Env | Default | Purpose |
 |---|---|---|---|
-| `qr.enabled` | `SIGNATURE_QR_ENABLED` | `true` | Draw it at all. |
-| `qr.min_size` | `SIGNATURE_QR_MIN_SIZE` | `26` | Points. Below this a phone won't decode it, so it stands down. |
-| `qr.max_size` | `SIGNATURE_QR_MAX_SIZE` | `48` | Points. Keeps it from dominating a large box. |
-| `qr.gap` | `SIGNATURE_QR_GAP` | `2` | Points between the QR and the signature. |
+| `caption.enabled` | `SIGNATURE_CAPTION_ENABLED` | `true` | Draw the text at all. |
+| `caption.label` | `SIGNATURE_CAPTION_LABEL` | `Digitally signed` | First line. |
+| `caption.font_pt` | `SIGNATURE_CAPTION_FONT` | `7` | Fixed size of the text. |
+| `caption.min_font_pt` | `SIGNATURE_CAPTION_MIN_FONT` | `4` | Only used when a box is too small for `font_pt`. The name is never truncated. |
+| `caption.line_height` | `SIGNATURE_CAPTION_LINE_HEIGHT` | `1.15` | Leading. |
+| `caption.gap` | `SIGNATURE_CAPTION_GAP` | `3` | Points between the signature and the text. |
+| `caption.date_format` | `SIGNATURE_CAPTION_DATE_FORMAT` | `Y.m.d` | PHP format for the `Date:` line. |
+| `caption.time_format` | `SIGNATURE_CAPTION_TIME_FORMAT` | `H:i:s` | PHP format for the time line. The UTC offset is appended as `+08'00'`. |
+| `caption.timezone` | `SIGNATURE_CAPTION_TIMEZONE` | `null` | Zone the time is shown in. `null` uses the app timezone; `Asia/Manila` prints Philippine time. |
+| `caption.color` | — | `[0, 0, 0]` | RGB. |
 
 ### `verify`
 
 | Key | Env | Default | Purpose |
 |---|---|---|---|
-| `verify.enabled` | `SIGNATURE_VERIFY_ENABLED` | `true` | The public `GET /signature/verify/{uuid}` page the QR points at. It discloses only what the printed page already shows. Off: the QR stands down with it. |
-
-### `caption`
-
-Readable provenance under (or beside) the signature: who, when, and a reference.
-
-| Key | Env | Default | Purpose |
-|---|---|---|---|
-| `caption.enabled` | `SIGNATURE_CAPTION_ENABLED` | `true` | Draw it at all. |
-| `caption.fields` | — | `['signer', 'signed_at', 'reference']` | Lines, in order. Also available: `email`. Lines that don't fit are dropped from the bottom. |
-| `caption.align` | `SIGNATURE_CAPTION_ALIGN` | `C` | `L`, `C` or `R`. |
-| `caption.line_height` | `SIGNATURE_CAPTION_LINE_HEIGHT` | `1.06` | Leading. |
-| `caption.position` | `SIGNATURE_CAPTION_POSITION` | `bottom` | `bottom`, `top`, `left` or `right`. A signatory can change it per signature while placing. |
-| `caption.width_ratio` | `SIGNATURE_CAPTION_WIDTH_RATIO` | `0.42` | For `left`/`right`: the most of the box's width the caption may take. |
-| `caption.min_box_width` | `SIGNATURE_CAPTION_MIN_BOX_WIDTH` | `110` | For `left`/`right`: below this the caption stands down. |
-| `caption.height_ratio` | `SIGNATURE_CAPTION_HEIGHT_RATIO` | `0.38` | For `top`/`bottom`: the most of the box's height the caption may take. |
-| `caption.min_box_height` | `SIGNATURE_CAPTION_MIN_BOX_HEIGHT` | `28` | For `top`/`bottom`: below this the caption stands down. |
-| `caption.max_font_pt` | `SIGNATURE_CAPTION_MAX_FONT` | `6` | The largest size that fits is used… |
-| `caption.min_font_pt` | `SIGNATURE_CAPTION_MIN_FONT` | `4` | …down to this, then lines are truncated with an ellipsis. |
-| `caption.date_format` | `SIGNATURE_CAPTION_DATE_FORMAT` | `j M Y H:i` | PHP date format for `signed_at`. |
-| `caption.color` | — | `[90, 90, 90]` | RGB. |
+| `verify.enabled` | `SIGNATURE_VERIFY_ENABLED` | `true` | The public `GET /signature/verify/{uuid}` page. It discloses only what the printed page already shows. |
 
 ---
 
@@ -400,23 +390,17 @@ SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
 SIGNATURE_LAUNCHER_GAP=12
 SIGNATURE_LAUNCHER_Z_INDEX=40
 
-# Stamp: QR, verification page, caption
-SIGNATURE_QR_ENABLED=true
-SIGNATURE_QR_MIN_SIZE=26            # points; smaller won't scan, so it stands down
-SIGNATURE_QR_MAX_SIZE=48
-SIGNATURE_QR_GAP=2
-SIGNATURE_VERIFY_ENABLED=true       # the public page the QR points at
+# Stamp: COA caption, verification page
+SIGNATURE_VERIFY_ENABLED=true
 SIGNATURE_CAPTION_ENABLED=true
-SIGNATURE_CAPTION_POSITION=bottom   # bottom | top | left | right
-SIGNATURE_CAPTION_ALIGN=C           # L | C | R
-SIGNATURE_CAPTION_LINE_HEIGHT=1.06
-SIGNATURE_CAPTION_WIDTH_RATIO=0.42
-SIGNATURE_CAPTION_MIN_BOX_WIDTH=110
-SIGNATURE_CAPTION_HEIGHT_RATIO=0.38
-SIGNATURE_CAPTION_MIN_BOX_HEIGHT=28
-SIGNATURE_CAPTION_MAX_FONT=6
+SIGNATURE_CAPTION_LABEL="Digitally signed"
+SIGNATURE_CAPTION_FONT=7            # fixed; only the signature scales
 SIGNATURE_CAPTION_MIN_FONT=4
-SIGNATURE_CAPTION_DATE_FORMAT="j M Y H:i"
+SIGNATURE_CAPTION_LINE_HEIGHT=1.15
+SIGNATURE_CAPTION_GAP=3
+SIGNATURE_CAPTION_DATE_FORMAT="Y.m.d"
+SIGNATURE_CAPTION_TIME_FORMAT="H:i:s"
+SIGNATURE_CAPTION_TIMEZONE=Asia/Manila
 
 # Signed by me (2.0)
 SIGNATURE_SIGNED_ENABLED=true

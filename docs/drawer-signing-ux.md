@@ -73,15 +73,18 @@ That puts the box at the slot's saved position, or in the centre of page 1. Then
 
 ### What the box shows
 
-The box previews the whole stamp, not just the ink:
+The box previews the whole stamp, not just the ink. It follows the example in COA Circular No. 2021-006, IV.C.13: the handwritten signature on the left, and the signatory's full name and the date beside it.
 
-- the signature image
-- a QR square (a placeholder in the preview)
-- a caption: signer, time and a reference
+```
+[signature]  Digitally signed
+             by Juan DelaCruz
+             Date: 2020.05.21
+             19:37:33 +08'00'
+```
 
-The caption sits on the side set by `signature.caption.position` (`bottom`, `top`, `left` or `right`, default `bottom`). There's no per-stamp control in the drawer, so set the default to suit your forms.
+The text is a fixed size. Dragging the resize handle scales the signature and leaves the text alone, so the name prints at the same size on every stamp. The text only gets smaller when a box is too small to hold it, and the name is never cut off.
 
-The browser can't measure fonts exactly like TCPDF does. So a caption line might truncate in one and not the other. The ink placement still matches.
+The browser can't measure fonts exactly like TCPDF does, so the text column can differ by a fraction of a point between the preview and the PDF.
 
 ### Several slots or several places
 
@@ -171,7 +174,7 @@ The document pane talks to these routes. They use `web` middleware only. The req
 - Picking a signature you don't own is a 403. A revoked one is a 422.
 - A failed batch returns 422 with `status: "partial"` (some signed) or `"failed"` (none signed).
 
-The QR on the stamp points to `GET /signature/verify/{uuid}` (`signature.verify`). That page is public on purpose, so whoever holds the printed copy can check it.
+`GET /signature/verify/{uuid}` (`signature.verify`) answers whether a signature reference is real and still stands. That page is public on purpose, so whoever holds the document can check it.
 
 ---
 
