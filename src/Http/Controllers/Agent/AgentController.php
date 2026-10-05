@@ -9,6 +9,7 @@ use Illuminate\Routing\Controller;
 use Kukux\DigitalSignature\Agent\AgentApiException;
 use Kukux\DigitalSignature\Agent\AgentJobService;
 use Kukux\DigitalSignature\Agent\AgentPairingService;
+use Kukux\DigitalSignature\Agent\AgentPresenceService;
 use Kukux\DigitalSignature\Http\Middleware\AuthenticateAgent;
 use Kukux\DigitalSignature\Models\SigningDevice;
 use Kukux\DigitalSignature\Security\DeviceRegistry;
@@ -27,6 +28,7 @@ class AgentController extends Controller
     public function __construct(
         private readonly AgentPairingService $pairings,
         private readonly AgentJobService $jobs,
+        private readonly AgentPresenceService $presenceChecks,
     ) {}
 
     // ── Pairing (unauthenticated: the code and the proofs carry the trust) ──
@@ -96,6 +98,11 @@ class AgentController extends Controller
     public function rejectJob(Request $request, string $job): JsonResponse
     {
         return response()->json($this->jobs->reject($this->device($request), $job, $this->string($request, 'reason', 32)));
+    }
+
+    public function presence(Request $request, string $check): JsonResponse
+    {
+        return response()->json($this->presenceChecks->report($this->device($request), $check, $this->string($request, 'link_token', 128)));
     }
 
     // ── Helpers ──
