@@ -99,6 +99,9 @@ return new class extends Migration
                 // Unique: one active pairing per computer for this app
                 // (SigningDevice keeps it in step).
                 $t->string('active_hardware_key', 64)->nullable()->unique('dsd_active_hardware_unique');
+                // user_id while this is an active agent, else null. Unique:
+                // one paired computer per account for this app.
+                $t->unsignedBigInteger('active_agent_user_key')->nullable()->unique('dsd_active_agent_user_unique');
                 $t->string('agent_version', 32)->nullable();
                 $t->text('session_public_key')->nullable();
                 $t->timestamp('rebound_at')->nullable();   // re-paired from the same computer
@@ -620,6 +623,18 @@ return new class extends Migration
             });
         }
 
+        if (! Schema::hasColumn('digital_signature_devices', 'active_agent_user_key')) {
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->unsignedBigInteger('active_agent_user_key')->nullable()->after('active_hardware_key');
+            });
+
+            $this->backfillActiveAgentUserKeys();
+
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->unique('active_agent_user_key', 'dsd_active_agent_user_unique');
+            });
+        }
+
         if (! Schema::hasColumn('digital_signature_agent_pairings', 'replaces_device_id')) {
             Schema::table('digital_signature_agent_pairings', function (Blueprint $t) {
                 $t->foreignId('replaces_device_id')
@@ -649,6 +664,26 @@ return new class extends Migration
             ->each(fn (object $row) => DB::table('digital_signature_devices')
                 ->where('id', $row->id)
                 ->update(['active_hardware_key' => $row->hardware_id_hash]));
+    }
+
+    /**
+     * An install from before one-computer-per-account may already hold
+     * several active agent devices for one account. As with the hardware key,
+     * the newest keeps the key and the rest stay active but unkeyed: no one
+     * loses a working computer, and pairing checks refuse a new one until
+     * the account is down to one.
+     */
+    protected function backfillActiveAgentUserKeys(): void
+    {
+        DB::table('digital_signature_devices')
+            ->where('kind', 'agent')
+            ->where('status', 'active')
+            ->orderByDesc('id')
+            ->get(['id', 'user_id'])
+            ->unique('user_id')
+            ->each(fn (object $row) => DB::table('digital_signature_devices')
+                ->where('id', $row->id)
+                ->update(['active_agent_user_key' => $row->user_id]));
     }
 
     /**
