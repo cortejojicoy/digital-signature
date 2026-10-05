@@ -92,7 +92,7 @@ function agentUser(int $id = 42): TestUser
  * keys and a registration proof. Starts a pairing on the web unless given the
  * code of one. The claim response is returned unchecked.
  */
-function claimAgent($test, TestUser $user, array $deviceOverrides = [], ?string $userCode = null): array
+function claimAgent($test, TestUser $user, array $deviceOverrides = [], ?string $userCode = null, ?array $previous = null): array
 {
     $identity = agentKey();
     $session = agentKey();
@@ -120,6 +120,11 @@ function claimAgent($test, TestUser $user, array $deviceOverrides = [], ?string 
         ], $deviceOverrides),
         'agent_version'       => AGENT_VERSION,
         'proof'               => agentSign($identity, DeviceProofVerifier::message('register_agent', $lookup['nonce'], $lookup['user_id'], $bound)),
+        // Re-pairing from the install that holds $previous: its session key vouches for the new keys.
+        'replaces'            => $previous === null ? null : [
+            'device_uuid' => $previous['device']->uuid,
+            'proof'       => agentSign($previous['session'], DeviceProofVerifier::message('rebind_agent', $lookup['nonce'], $lookup['user_id'], $bound)),
+        ],
     ]);
 
     return ['identity' => $identity, 'session' => $session, 'lookup' => $lookup, 'response' => $response];
@@ -129,9 +134,9 @@ function claimAgent($test, TestUser $user, array $deviceOverrides = [], ?string 
  * The whole pairing dance: web start → agent lookup → claim → web confirm →
  * agent poll for its token. Returns what the agent keeps.
  */
-function pairAgent($test, TestUser $user, array $deviceOverrides = [], ?string $deviceType = null): array
+function pairAgent($test, TestUser $user, array $deviceOverrides = [], ?string $deviceType = null, ?array $previous = null): array
 {
-    ['identity' => $identity, 'session' => $session, 'lookup' => $lookup, 'response' => $response] = claimAgent($test, $user, $deviceOverrides);
+    ['identity' => $identity, 'session' => $session, 'lookup' => $lookup, 'response' => $response] = claimAgent($test, $user, $deviceOverrides, null, $previous);
     $claim = $response->assertOk()->json();
 
     $device = app(AgentPairingService::class)->confirm(AgentPairing::where('uuid', $lookup['pairing'])->firstOrFail(), $user->id, $deviceType);
@@ -153,6 +158,28 @@ function pairAgent($test, TestUser $user, array $deviceOverrides = [], ?string $
         'claim'       => $claim,
         'poll'        => $poll,
     ];
+}
+
+/**
+ * A device row made directly, without pairing: a browser profile, or an agent
+ * computer that appears between a claim and its confirm.
+ */
+function signingDevice(int $userId, string $kind = 'browser', array $attributes = []): SigningDevice
+{
+    return SigningDevice::create($attributes + [
+        'uuid'            => (string) \Illuminate\Support\Str::uuid(),
+        'user_id'         => $userId,
+        'label'           => $kind === 'agent' ? 'Office Mac mini' : 'Chrome on Mac',
+        'public_key'      => 'test',
+        'key_fingerprint' => bin2hex(random_bytes(32)),
+        'algorithm'       => 'ES256',
+        'kind'            => $kind,
+        'protection'      => $kind === 'agent' ? 'secure_enclave' : 'browser',
+        'device_type'     => $kind === 'agent' ? 'mac_mini' : 'desktop',
+        'model'           => $kind === 'agent' ? 'Mac mini (2024)' : null,
+        'hardware_id_hash' => $kind === 'agent' ? str_repeat('cd', 32) : null,
+        'status'          => 'active',
+    ]);
 }
 
 function agentDocument(): Signable
@@ -777,13 +804,206 @@ describe('one signature per computer', function () {
     it("lists the account's other devices to the agent", function () {
         $juan = agentUser(42);
         $laptop = pairAgent($this, $juan);
-        pairAgent($this, $juan, ['hardware_id_hash' => str_repeat('cd', 32), 'label' => 'Office Mac mini', 'model' => 'Mac mini (2024)', 'device_type' => 'mac_mini']);
+        signingDevice(42);
 
         agentCall($this, $laptop, 'GET', '/signature/agent/status')
             ->assertOk()
             ->assertJsonCount(1, 'other_devices')
-            ->assertJsonPath('other_devices.0.label', 'Office Mac mini')
-            ->assertJsonPath('other_devices.0.device_type', 'mac_mini');
+            ->assertJsonPath('other_devices.0.label', 'Chrome on Mac')
+            ->assertJsonPath('other_devices.0.device_type', 'desktop');
+    });
+});
+
+// ── One computer per account for this app (one-computer-per-account-plan.md) ──
+
+describe('one computer per account', function () {
+
+    it('refuses a second computer for the same account, naming the first', function () {
+        $juan = agentUser(42);
+        $first = pairAgent($this, $juan)['device'];
+
+        $claim = claimAgent($this, $juan, ['hardware_id_hash' => str_repeat('cd', 32), 'label' => 'Office Mac mini']);
+
+        $claim['response']->assertStatus(409)
+            ->assertJsonPath('error.code', 'account_already_paired')
+            ->assertJsonPath('device.label', 'Juan’s MacBook Pro')
+            ->assertJsonPath('device.device_type', 'laptop');
+        expect($claim['response']->json('error.message'))->toContain('Juan’s MacBook Pro')
+            ->and($first->fresh()->status)->toBe('active')
+            ->and(AgentPairing::where('uuid', $claim['lookup']['pairing'])->value('status'))->toBe('pending')
+            ->and(SigningDevice::where('kind', 'agent')->count())->toBe(1);
+    });
+
+    it("gives the agent the account's computer at lookup", function () {
+        $juan = agentUser(42);
+        $code = fn () => app(AgentPairingService::class)->start($juan->id)['user_code'];
+
+        agentPost($this, '/signature/agent/pairings/lookup', ['user_code' => $code()])
+            ->assertJsonPath('agent_device', null)
+            ->assertJsonPath('devices_url', AgentServer::origin());
+
+        $device = pairAgent($this, $juan)['device'];
+        config(['signature.devices.agent.devices_url' => AgentServer::origin().'/admin/signatures']);
+
+        agentPost($this, '/signature/agent/pairings/lookup', ['user_code' => $code()])
+            ->assertJsonPath('agent_device.uuid', $device->uuid)
+            ->assertJsonPath('agent_device.label', 'Juan’s MacBook Pro')
+            ->assertJsonPath('agent_device.hardware_id_hash', str_repeat('ab', 32))
+            ->assertJsonPath('devices_url', AgentServer::origin().'/admin/signatures');
+    });
+
+    it('frees the account once its computer is revoked', function () {
+        $juan = agentUser(42);
+        $first = pairAgent($this, $juan)['device'];
+        app(DeviceRegistry::class)->revoke($first);
+
+        expect($first->fresh()->active_agent_user_key)->toBeNull();
+
+        $second = pairAgent($this, $juan, ['hardware_id_hash' => str_repeat('cd', 32)]);
+        expect($second['device']->id)->not->toBe($first->id)
+            ->and($second['poll']['rebound'])->toBeFalse();
+    });
+
+    it('checks the account again on confirm', function () {
+        $juan = agentUser(42);
+        $claim = claimAgent($this, $juan);
+        $claim['response']->assertOk();
+
+        // Another computer was paired between the claim and the confirm.
+        signingDevice(42, 'agent');
+
+        expect(fn () => app(AgentPairingService::class)->confirm(AgentPairing::where('uuid', $claim['lookup']['pairing'])->firstOrFail(), 42))
+            ->toThrow(InvalidArgumentException::class, 'already paired with another computer on this app: Office Mac mini');
+        expect(SigningDevice::where('kind', 'agent')->count())->toBe(1);
+    });
+
+    it('enforces one active computer per account in the database itself', function () {
+        $device = pairAgent($this, agentUser(42))['device'];
+
+        $clone = $device->replicate()->fill([
+            'uuid'             => (string) \Illuminate\Support\Str::uuid(),
+            'key_fingerprint'  => str_repeat('cd', 32),
+            'hardware_id_hash' => str_repeat('cd', 32),
+        ]);
+
+        expect(fn () => $clone->save())->toThrow(\Illuminate\Database\UniqueConstraintViolationException::class);
+    });
+
+    it('cannot prove it is the same computer without a hardware id, so it refuses', function () {
+        $juan = agentUser(42);
+        pairAgent($this, $juan, ['hardware_id_hash' => null]);
+
+        claimAgent($this, $juan, ['hardware_id_hash' => null])['response']
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'account_already_paired');
+        claimAgent($this, $juan)['response']
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'account_already_paired');
+    });
+
+    it('reports a computer held by another account before its own computer', function () {
+        $maria = agentUser(7);
+        pairAgent($this, $maria, ['hardware_id_hash' => str_repeat('cd', 32)]);
+        $juan = agentUser(42);
+        pairAgent($this, $juan);
+
+        Auth::login($maria);
+        claimAgent($this, $maria)['response']
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'machine_already_paired');
+    });
+
+    it('keeps computers paired before the rule, but pairs no more until one is left', function () {
+        $juan = agentUser(42);
+        $laptop = pairAgent($this, $juan)['device'];
+        // Paired under the old rule. As after the upgrade backfill, the
+        // newest holds the account key and the older one is unkeyed.
+        \Illuminate\Support\Facades\DB::table('digital_signature_devices')->where('id', $laptop->id)->update(['active_agent_user_key' => null]);
+        $mini = signingDevice(42, 'agent');
+
+        // Not even a re-pair of the laptop while the Mac mini is still paired.
+        claimAgent($this, $juan)['response']
+            ->assertStatus(409)
+            ->assertJsonPath('device.label', 'Office Mac mini');
+        expect($laptop->fresh()->status)->toBe('active')
+            ->and($mini->fresh()->status)->toBe('active');
+
+        app(DeviceRegistry::class)->revoke($mini);
+        expect(pairAgent($this, $juan)['poll']['rebound'])->toBeTrue();
+    });
+
+    it('re-pairs a computer without a hardware id when its old key vouches for it', function () {
+        $juan = agentUser(42);
+        $first = pairAgent($this, $juan, ['hardware_id_hash' => null]);
+
+        $second = pairAgent($this, $juan, ['hardware_id_hash' => null], null, $first);
+
+        expect($second['claim']['existing_device']['uuid'])->toBe($first['device']->uuid)
+            ->and($second['poll']['rebound'])->toBeTrue()
+            ->and($second['device']->id)->toBe($first['device']->id)
+            ->and(SigningDevice::where('kind', 'agent')->active()->count())->toBe(1);
+        agentCall($this, $first, 'GET', '/signature/agent/status')->assertUnauthorized();
+        agentCall($this, $second, 'GET', '/signature/agent/status')->assertOk();
+    });
+
+    it('follows a computer whose hardware id changed, on the old key\'s word', function () {
+        $juan = agentUser(42);
+        $first = pairAgent($this, $juan);
+
+        $second = pairAgent($this, $juan, ['hardware_id_hash' => str_repeat('cd', 32)], null, $first);
+
+        expect($second['device']->id)->toBe($first['device']->id)
+            ->and($second['device']->fresh()->hardware_id_hash)->toBe(str_repeat('cd', 32));
+    });
+
+    it('refuses a re-pairing proof that does not verify', function () {
+        $juan = agentUser(42);
+        $first = pairAgent($this, $juan, ['hardware_id_hash' => null]);
+        $forged = ['device' => $first['device'], 'session' => agentKey()];
+
+        claimAgent($this, $juan, ['hardware_id_hash' => null], null, $forged)['response']
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'invalid_proof');
+    });
+
+    it("ignores a proof that names another account's device", function () {
+        $maria = agentUser(7);
+        $marias = pairAgent($this, $maria, ['hardware_id_hash' => str_repeat('cd', 32)]);
+        $juan = agentUser(42);
+        $juans = pairAgent($this, $juan);
+
+        // Juan's install can't sign for Maria's device, and her device isn't his to name.
+        claimAgent($this, $juan, ['hardware_id_hash' => str_repeat('ef', 32)], null, ['device' => $marias['device'], 'session' => $juans['session']])['response']
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'account_already_paired');
+        expect($marias['device']->fresh()->status)->toBe('active');
+    });
+
+    it('treats a firmware placeholder uuid as no hardware id', function () {
+        $placeholder = hash('sha256', AgentServer::salt().'03000200-0400-0500-0006-000700080009');
+        $juan = agentUser(42);
+        $juans = pairAgent($this, $juan, ['hardware_id_hash' => $placeholder])['device'];
+        $maria = agentUser(7);
+
+        // Another board with the same placeholder is not Juan's computer.
+        $marias = pairAgent($this, $maria, ['hardware_id_hash' => $placeholder])['device'];
+
+        expect($juans->fresh()->hardware_id_hash)->toBeNull()
+            ->and($marias->fresh()->hardware_id_hash)->toBeNull()
+            ->and($juans->fresh()->status)->toBe('active');
+    });
+
+    it('knows the same placeholder uuids as the agent', function () {
+        $fixture = json_decode(file_get_contents(__DIR__.'/../Fixtures/placeholder-uuids.json'), true);
+
+        expect(AgentPairingService::PLACEHOLDER_UUIDS)->toBe($fixture['uuids']);
+    });
+
+    it('does not count browser devices', function () {
+        $juan = agentUser(42);
+        signingDevice(42);
+
+        expect(pairAgent($this, $juan)['poll']['status'])->toBe('confirmed');
     });
 });
 
@@ -916,7 +1136,7 @@ describe('signing devices component: one per computer', function () {
 
     it("shows the account's other devices and saves the corrected type", function () {
         $juan = agentUser();
-        pairAgent($this, $juan);
+        signingDevice($juan->id);
 
         $component = \Livewire\Livewire::test(\Kukux\DigitalSignature\Filament\Livewire\SigningDevices::class)->call('startPairing');
         claimAgent($this, $juan, ['hardware_id_hash' => str_repeat('cd', 32), 'label' => 'Office Mac', 'device_type' => 'mac_mini'], $component->get('userCode'))['response']
@@ -925,13 +1145,35 @@ describe('signing devices component: one per computer', function () {
         $component->call('refreshPairing')
             ->assertSee('Pair Office Mac?')
             ->assertSee('Your other signing devices')
-            ->assertSee('Juan’s MacBook Pro (Computer laptop)')
+            ->assertSee('Chrome on Mac (Computer desktop)')
             ->assertSet('pairDeviceType', 'mac_mini')
             ->set('pairDeviceType', 'mac_studio')
             ->call('confirmPairing')
             ->assertSee('Paired Office Mac');
 
         expect(SigningDevice::where('label', 'Office Mac')->value('device_type'))->toBe('mac_studio');
+    });
+
+    it('says before pairing that the account already has a computer', function () {
+        $juan = agentUser();
+        pairAgent($this, $juan);
+
+        \Livewire\Livewire::test(\Kukux\DigitalSignature\Filament\Livewire\SigningDevices::class)
+            ->assertSee('Your account is paired with')
+            ->assertSee('You can only re-pair that computer')
+            ->call('startPairing')
+            ->assertSee('You can only re-pair that computer');
+    });
+
+    it('will not confirm a second computer that slipped past the claim', function () {
+        $juan = agentUser();
+        $component = \Livewire\Livewire::test(\Kukux\DigitalSignature\Filament\Livewire\SigningDevices::class)->call('startPairing');
+        claimAgent($this, $juan, [], $component->get('userCode'))['response']->assertOk();
+        signingDevice($juan->id, 'agent');
+
+        $component->call('refreshPairing')
+            ->assertSee('Your account is already paired with another computer')
+            ->assertDontSee('Pair this computer');
     });
 
     it('offers to re-pair the same computer, and says so after', function () {
