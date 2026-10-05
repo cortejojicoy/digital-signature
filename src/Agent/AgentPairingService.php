@@ -96,14 +96,17 @@ class AgentPairingService
     {
         try {
             return DB::transaction(fn () => $this->confirmLocked($pairing, $userId, $deviceType));
-        } catch (UniqueConstraintViolationException) {
-            // Another pairing for this computer committed first.
-            throw new InvalidArgumentException(self::MACHINE_TAKEN);
+        } catch (UniqueConstraintViolationException $e) {
+            // Another pairing committed first: for this computer, or for this account.
+            throw new InvalidArgumentException(str_contains($e->getMessage(), 'active_agent_user') ? self::ACCOUNT_TAKEN : self::MACHINE_TAKEN);
         }
     }
 
     private const MACHINE_TAKEN = 'This computer is already paired with another account on this app. '
         .'They can remove it from their signing devices, or an admin can release it.';
+
+    private const ACCOUNT_TAKEN = 'Your account is already paired with another computer on this app. '
+        .'Remove it from your signing devices, then pair this one.';
 
     private function confirmLocked(AgentPairing $pairing, int $userId, ?string $deviceType): SigningDevice
     {
@@ -135,10 +138,22 @@ class AgentPairingService
             throw new InvalidArgumentException(self::MACHINE_TAKEN);
         }
 
-        // Newest first. Duplicates from before this rule (kept on upgrade)
-        // are retired now that the computer has one pairing again.
-        $existing = $holders->first();
-        $holders->skip(1)->each(fn (SigningDevice $old) => $this->registry->revoke($old));
+        // The device the agent proved it holds at claim, if it's still active.
+        $proven = isset($claim['proven_device_id'])
+            ? SigningDevice::query()->lockForUpdate()->whereKey($claim['proven_device_id'])
+                ->where('user_id', $userId)->where('kind', 'agent')->active()->first()
+            : null;
+
+        // And that this account hasn't paired another computer since.
+        if ($blocker = $this->blockingComputer($this->activeAgentsFor($userId, lock: true), $hardware, $proven)) {
+            throw new InvalidArgumentException(self::accountTakenMessage($blocker));
+        }
+
+        // The proven device, else this computer's newest. Other duplicates on
+        // this computer (from before this rule, kept on upgrade) are retired
+        // now that it has one pairing again.
+        $existing = $proven ?? $holders->first();
+        $holders->reject(fn (SigningDevice $d) => $d->is($existing))->each(fn (SigningDevice $old) => $this->registry->revoke($old));
 
         $shown = $this->chooseType($detected, $deviceType);
 
@@ -255,10 +270,18 @@ class AgentPairingService
 
         $device = $claim['device'];
         $detected = DeviceType::fromAgent($device['device_type'] ?? null, $device['form_factor'] ?? null);
+        $hardware = ($device['hardware_id_hash'] ?? '') ?: null;
 
-        // This user's device on this computer, which confirming updates.
-        $replaces = $this->activeAgentsOn(($device['hardware_id_hash'] ?? '') ?: null)
+        // This user's device on this computer, which confirming updates: the
+        // one the agent proved it holds, else the one with this hash.
+        $proven = isset($claim['proven_device_id'])
+            ? $this->activeAgentsFor((int) $pairing->user_id)->firstWhere('id', $claim['proven_device_id'])
+            : null;
+        $replaces = $proven ?? $this->activeAgentsOn($hardware)
             ->first(fn (SigningDevice $d) => (int) $d->user_id === (int) $pairing->user_id);
+
+        // This user's other computer, which keeps them from confirming this one.
+        $blocker = $this->blockingComputer($this->activeAgentsFor((int) $pairing->user_id), $hardware, $proven);
 
         // Where else the account can sign, so the owner sees it before adding a computer.
         $others = SigningDevice::query()
@@ -283,6 +306,7 @@ class AgentPairingService
             'presence'        => (bool) $claim['user_presence'],
             'version'         => $claim['agent_version'],
             'replaces'        => $replaces?->displayName(),
+            'blocked_by'      => $blocker?->displayName(),
             'device_type'     => $detected->value,
             // The owner may correct the type, but not away from a VM (policy goes by detection).
             'type_locked'     => $detected === DeviceType::VirtualMachine,
@@ -310,6 +334,7 @@ class AgentPairingService
         }
 
         $user = $pairing->user;
+        $computer = $this->activeAgentsFor((int) $pairing->user_id)->first();
 
         return [
             'pairing'          => $pairing->uuid,
@@ -324,6 +349,16 @@ class AgentPairingService
             ],
             'require_presence'     => (bool) config('signature.devices.agent.require_presence', true),
             'blocked_device_types' => self::blockedTypes(),
+            // The account's paired computer, so the agent can refuse a second
+            // one before any key or Touch ID prompt. The hash only says
+            // whether it's this computer; only this account's code gets it.
+            'agent_device'         => $computer === null ? null : [
+                'uuid'             => $computer->uuid,
+                'label'            => $computer->displayName(),
+                'device_type'      => $computer->deviceType()->value,
+                'hardware_id_hash' => $computer->hardware_id_hash ?: null,
+            ],
+            'devices_url'          => config('signature.devices.agent.devices_url') ?: AgentServer::origin(),
             'expires_at'           => $pairing->expires_at->toIso8601String(),
         ];
     }
@@ -387,7 +422,8 @@ class AgentPairingService
             $text = fn (string $key, int $max): string => Str::limit(trim(strip_tags((string) ($device[$key] ?? ''))), $max, '');
             $protection = in_array($input['protection'] ?? null, self::PROTECTIONS, true) ? $input['protection'] : 'software';
             $hardware = (string) ($device['hardware_id_hash'] ?? '');
-            $hardware = preg_match('/^[0-9a-f]{64}$/', $hardware) ? $hardware : '';
+            // A firmware placeholder is shared by many boards: no id at all.
+            $hardware = preg_match('/^[0-9a-f]{64}$/', $hardware) && ! in_array($hardware, self::placeholderHashes(), true) ? $hardware : '';
             $formFactor = in_array($device['form_factor'] ?? null, ['laptop', 'desktop'], true) ? $device['form_factor'] : 'unknown';
             $detected = DeviceType::fromAgent($device['device_type'] ?? null, $formFactor);
             $virtual = ($device['virtual'] ?? false) === true;
@@ -406,7 +442,19 @@ class AgentPairingService
                 throw new AgentApiException(409, 'machine_already_paired', 'This computer is already paired with another account on this app.');
             }
 
-            $existing = $holders->first();
+            // Re-pairing: the old pairing's session key signed the new keys,
+            // so this is that device's computer whatever its hash says.
+            $proven = $this->provenDevice($pairing, $input['replaces'] ?? null, $bound);
+
+            // One computer per account for this app. Names only the account's
+            // own computer, to the holder of the account's own code.
+            if ($blocker = $this->blockingComputer($this->activeAgentsFor((int) $pairing->user_id), $hardware ?: null, $proven)) {
+                throw new AgentApiException(409, 'account_already_paired', self::accountTakenMessage($blocker), [
+                    'device' => ['label' => $blocker->displayName(), 'device_type' => $blocker->deviceType()->value],
+                ]);
+            }
+
+            $existing = $proven ?? $holders->first();
             $pollSecret = AgentServer::token();
 
             $pairing->update([
@@ -438,6 +486,7 @@ class AgentPairingService
                         'virtual'          => $virtual,
                     ],
                     'ip'                  => $ip,
+                    'proven_device_id'    => $proven?->id,
                 ],
             ]);
 
@@ -517,6 +566,106 @@ class AgentPairingService
             ->when($lock, fn ($q) => $q->lockForUpdate())
             ->orderByDesc('id')
             ->get();
+    }
+
+    /**
+     * This user's active agent devices for this app, newest first. Normally
+     * at most one; older installs may hold several.
+     *
+     * @return Collection<int, SigningDevice>
+     */
+    private function activeAgentsFor(int $userId, bool $lock = false): Collection
+    {
+        return SigningDevice::query()
+            ->where('kind', 'agent')
+            ->where('user_id', $userId)
+            ->active()
+            ->when($lock, fn ($q) => $q->lockForUpdate())
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    /**
+     * Of the account's agent devices, the first that isn't provably this
+     * computer: it keeps the account from pairing here. Proof is the rebind
+     * proof ($proven), or a matching hardware id. Without a hardware id on
+     * either side there's no proof, so that counts as another computer.
+     *
+     * @param  Collection<int, SigningDevice>  $mine
+     */
+    private function blockingComputer(Collection $mine, ?string $hardwareIdHash, ?SigningDevice $proven = null): ?SigningDevice
+    {
+        return $mine->first(fn (SigningDevice $d) => ! $d->is($proven)
+            && ($hardwareIdHash === null || $d->hardware_id_hash !== $hardwareIdHash));
+    }
+
+    /**
+     * The account's active agent device whose session key signed the new
+     * keys (`rebind_agent`). That key never leaves the computer's Secure
+     * Enclave / TPM, so this proves the claim comes from that device's
+     * computer even without a hardware id (one-computer-per-account-plan.md
+     * §13). Null without a proof, or when that device is gone.
+     *
+     * @throws AgentApiException when a proof is sent and doesn't verify.
+     */
+    private function provenDevice(AgentPairing $pairing, mixed $replaces, string $bound): ?SigningDevice
+    {
+        if (! is_array($replaces) || ! is_string($replaces['device_uuid'] ?? null)) {
+            return null;
+        }
+
+        $device = SigningDevice::query()
+            ->where('uuid', $replaces['device_uuid'])
+            ->where('user_id', $pairing->user_id)
+            ->where('kind', 'agent')
+            ->active()
+            ->first();
+
+        if ($device === null || ! $device->session_public_key) {
+            return null;
+        }
+
+        $proof = base64_decode((string) ($replaces['proof'] ?? ''), true);
+        $message = DeviceProofVerifier::message('rebind_agent', $pairing->nonce, $pairing->user_id, $bound);
+
+        if ($proof === false || ! DeviceProofVerifier::verify($device->session_public_key, 'ES256', $message, $proof, 'der')) {
+            throw new AgentApiException(422, 'invalid_proof', 'The re-pairing proof did not verify.');
+        }
+
+        return $device;
+    }
+
+    /**
+     * Firmware placeholder UUIDs (tests/Fixtures/placeholder-uuids.json, and
+     * any UUID of one repeated hex digit), hashed the way the agent hashes a
+     * hardware UUID. The agent already sends no id for these; this catches
+     * older agents (one-computer-per-account-plan.md §14).
+     */
+    public const PLACEHOLDER_UUIDS = [
+        '03000200-0400-0500-0006-000700080009',
+        '00020003-0004-0005-0006-000700080009',
+        '12345678-1234-5678-90AB-CDDEEFAABBCC',
+        '01234567-8910-1112-1314-151617181920',
+        '11111111-2222-3333-4444-555555555555',
+    ];
+
+    /** @return list<string> */
+    private static function placeholderHashes(): array
+    {
+        $repeated = array_map(
+            fn (string $d) => implode('-', [str_repeat($d, 8), str_repeat($d, 4), str_repeat($d, 4), str_repeat($d, 4), str_repeat($d, 12)]),
+            str_split('0123456789ABCDEF'),
+        );
+        $salt = AgentServer::salt();
+
+        return array_map(fn (string $uuid) => hash('sha256', $salt.$uuid), [...self::PLACEHOLDER_UUIDS, ...$repeated]);
+    }
+
+    private static function accountTakenMessage(SigningDevice $computer): string
+    {
+        return "Your account is already paired with another computer on this app: {$computer->displayName()}. "
+            .'One account can be paired with only one computer. '
+            ."Remove {$computer->displayName()} from your signing devices on the web, then pair this computer.";
     }
 
     /** The owner's correction wins, except over a detected VM. */
