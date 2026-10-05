@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchWithAgentApproval } from '../utils/agentApproval.js';
+import { checkAgentPresence } from '../utils/agentPresence.js';
 import { createRoot } from 'react-dom/client';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SlotBox } from './components/SlotBox.jsx';
@@ -74,6 +75,11 @@ function PdfViewerIsland({ el }) {
     const [dragging, setDragging] = useState(null);
     const [busy, setBusy] = useState(false);
     const [done, setDone] = useState(null);
+    // Under approval = enforce: whether this browser is on the computer the
+    // account is paired with. 'ok' when the app does not require it.
+    // ok | here | unpaired | checking | waiting | elsewhere | other_account
+    const [agentState, setAgentState] = useState('ok');
+    const presenceRun = useRef(0);
 
     const pdfRef     = useRef(null);
     const canvasRefs = useRef(new Map());
@@ -86,6 +92,41 @@ function PdfViewerIsland({ el }) {
     const signatures = meta?.signatures ?? [];
     const activeSig = signatures.find((s) => s.id === activeSigId) ?? null;
     const activeRequest = requests.find((r) => r.id === activeRequestId) ?? null;
+
+    // ── Paired computer ─────────────────────────────────────────────────────
+    //
+    // "Sign here" only works on the computer the account is paired with. The
+    // page can't ask the agent directly, so it asks the server for a check
+    // and wakes the agent; see utils/agentPresence.js.
+    const runPresenceCheck = useCallback(async () => {
+        const agent = meta?.agent;
+        if (!agent?.required) { setAgentState('ok'); return; }
+        if (!agent.paired)    { setAgentState('unpaired'); return; }
+
+        const run = ++presenceRun.current;
+        setAgentState('checking');
+
+        const outcome = await checkAgentPresence(agent.checkUrl, (state) => {
+            if (presenceRun.current === run) setAgentState(state);
+        });
+
+        if (presenceRun.current === run) setAgentState(outcome);
+    }, [meta]);
+
+    useEffect(() => {
+        if (!meta || meta.readOnly) return;
+
+        if (!meta.agent?.required) setAgentState('ok');
+        else if (!meta.agent.paired) setAgentState('unpaired');
+        else if (meta.agent.here) setAgentState('here');
+        else runPresenceCheck();
+
+        // Leaving the document abandons the check rather than letting it
+        // set state on a viewer that is gone.
+        return () => { presenceRun.current++; };
+    }, [meta, runPresenceCheck]);
+
+    const agentAllowsSigning = agentState === 'ok' || agentState === 'here';
 
     // ── Bootstrap: meta, then the document itself ───────────────────────────
     useEffect(() => {
@@ -542,7 +583,8 @@ function PdfViewerIsland({ el }) {
                         type="button"
                         className="dsig-btn"
                         onClick={commit}
-                        disabled={busy || noSigs || placements.length === 0 || blockedPlaced}
+                        disabled={busy || noSigs || placements.length === 0 || blockedPlaced || !agentAllowsSigning}
+                        title={agentAllowsSigning ? undefined : agentMessage(agentState, meta.agent)}
                     >
                         {busy
                             ? 'Signing…'
@@ -586,6 +628,10 @@ function PdfViewerIsland({ el }) {
                         ))}
                     </div>
                 </div>
+            )}
+
+            {!readOnly && !agentAllowsSigning && (
+                <AgentNotice state={agentState} agent={meta.agent} onRetry={runPresenceCheck} />
             )}
 
             {blockedPlaced && (
@@ -734,6 +780,57 @@ function PdfViewerIsland({ el }) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Why "Sign here" is off, in the words the server would use to refuse it.
+ */
+function agentMessage(state, agent) {
+    const computer = agent?.computer ?? 'another computer';
+
+    switch (state) {
+        case 'unpaired':
+            return 'You cannot sign yet: pair Kukux Sign Agent with your computer first.';
+        case 'checking':
+            return 'Checking that this is the computer paired with your account…';
+        case 'other_account':
+            return 'You are prohibited from signing on this computer. It is paired with another account.';
+        case 'waiting':
+        case 'elsewhere':
+        default:
+            return `You are prohibited from signing on this computer. Your account is paired with ${computer}; sign from that computer.`;
+    }
+}
+
+function AgentNotice({ state, agent, onRetry }) {
+    const checking = state === 'checking';
+    const tone = checking ? '' : (state === 'unpaired' ? ' dsig-viewer__msg--warn' : ' dsig-viewer__msg--error');
+
+    return (
+        <p className={'dsig-viewer__msg' + tone} role={checking ? 'status' : 'alert'}>
+            {agentMessage(state, agent)}
+            {checking && ' If your browser asks to open Kukux Sign Agent, allow it.'}
+            {state === 'waiting' && ' Still listening — if this is that computer, make sure Kukux Sign Agent is running and up to date.'}
+            {state === 'unpaired' && agent?.devicesUrl && (
+                <>
+                    {' '}
+                    <a href={agent.devicesUrl} className="dsig-linkbtn">Pair a computer</a>
+                </>
+            )}
+            {state === 'unpaired' && agent?.downloadUrl && (
+                <>
+                    {' · '}
+                    <a href={agent.downloadUrl} target="_blank" rel="noopener" className="dsig-linkbtn">Download the agent</a>
+                </>
+            )}
+            {(state === 'elsewhere' || state === 'other_account') && (
+                <>
+                    {' '}
+                    <button type="button" className="dsig-linkbtn" onClick={onRetry}>Check again</button>
+                </>
+            )}
+        </p>
+    );
+}
 
 // The ghost is not a placement yet, so it has no box to be laid out against.
 // This gives it a plausible one: the ink at a readable width, beside the text
