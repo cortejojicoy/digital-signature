@@ -648,6 +648,119 @@ describe('signing jobs', function () {
     });
 });
 
+describe('presence checks', function () {
+
+    beforeEach(function () {
+        config(['signature.devices.agent.approval' => 'enforce']);
+    });
+
+    function startPresence($test): array
+    {
+        $check = $test->postJson('/signature/agent-web/presence')->assertOk()->json();
+
+        expect($check['link'])->toMatch('#^kukuxsign://presence/[0-9a-f-]{36}\?t=[A-Za-z0-9_-]{43}&s=[A-Za-z0-9_-]{1,64}$#');
+
+        $parts = parse_url($check['link']);
+        parse_str($parts['query'], $query);
+
+        return ['uuid' => $check['uuid'], 'token' => $query['t'], 'server' => $query['s']];
+    }
+
+    it('confirms the paired computer and remembers it for the session', function () {
+        $user = agentUser();
+        $agent = pairAgent($this, $user);
+
+        $check = startPresence($this);
+        expect($check['server'])->toBe(AgentServer::id());
+
+        $this->getJson("/signature/agent-web/presence/{$check['uuid']}")->assertOk()->assertJson(['status' => 'pending']);
+
+        agentCall($this, $agent, 'POST', "/signature/agent/presence/{$check['uuid']}", ['link_token' => $check['token']])
+            ->assertOk()
+            ->assertJson(['status' => 'confirmed']);
+
+        $this->getJson("/signature/agent-web/presence/{$check['uuid']}")->assertOk()->assertJson(['status' => 'confirmed']);
+
+        expect(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->here($user->id)?->id)->toBe($agent['device']->id)
+            ->and(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->refusal($user->id))->toBeNull();
+    });
+
+    it("tells the page when the computer answering is another account's", function () {
+        $other = agentUser(43);
+        $otherAgent = pairAgent($this, $other, ['hardware_id_hash' => str_repeat('ef', 32)]);
+
+        $user = agentUser();
+        pairAgent($this, $user);
+        $check = startPresence($this);
+
+        agentCall($this, $otherAgent, 'POST', "/signature/agent/presence/{$check['uuid']}", ['link_token' => $check['token']])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'wrong_account');
+
+        $this->getJson("/signature/agent-web/presence/{$check['uuid']}")->assertOk()->assertJson(['status' => 'other_account']);
+
+        expect(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->refusal($user->id))
+            ->toContain('prohibited from signing on this computer');
+    });
+
+    it('makes the link token single use', function () {
+        $user = agentUser();
+        $agent = pairAgent($this, $user);
+        $check = startPresence($this);
+
+        agentCall($this, $agent, 'POST', "/signature/agent/presence/{$check['uuid']}", ['link_token' => $check['token']])->assertOk();
+        agentCall($this, $agent, 'POST', "/signature/agent/presence/{$check['uuid']}", ['link_token' => $check['token']])
+            ->assertStatus(409);
+    });
+
+    it('refuses a wrong link token', function () {
+        $user = agentUser();
+        $agent = pairAgent($this, $user);
+        $check = startPresence($this);
+
+        agentCall($this, $agent, 'POST', "/signature/agent/presence/{$check['uuid']}", ['link_token' => b64url(32)])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'invalid_link_token');
+    });
+
+    it('expires an unanswered check', function () {
+        $user = agentUser();
+        pairAgent($this, $user);
+        $check = startPresence($this);
+
+        $this->travel(2)->minutes();
+
+        $this->getJson("/signature/agent-web/presence/{$check['uuid']}")->assertOk()->assertJson(['status' => 'expired']);
+        expect(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->refusal($user->id))
+            ->toContain('Your account is paired with');
+    });
+
+    it('says when there is no paired computer to check for', function () {
+        $user = agentUser();
+
+        $this->postJson('/signature/agent-web/presence')->assertStatus(409)->assertJson(['status' => 'unpaired']);
+        expect(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->refusal($user->id))
+            ->toContain('pair Kukux Sign Agent');
+    });
+
+    it("shows a check only to the user who started it", function () {
+        $user = agentUser();
+        pairAgent($this, $user);
+        $check = startPresence($this);
+
+        agentUser(43);
+        $this->getJson("/signature/agent-web/presence/{$check['uuid']}")->assertNotFound();
+    });
+
+    it('is not required outside enforce', function () {
+        config(['signature.devices.agent.approval' => 'prefer']);
+        $user = agentUser();
+
+        $this->postJson('/signature/agent-web/presence')->assertNotFound();
+        expect(app(\Kukux\DigitalSignature\Agent\AgentPresenceService::class)->refusal($user->id))->toBeNull();
+    });
+});
+
 describe('signing devices component', function () {
 
     it('starts a pairing, then confirms the claimed computer', function () {

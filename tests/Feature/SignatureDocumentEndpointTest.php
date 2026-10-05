@@ -198,6 +198,98 @@ describe('signature request document endpoints', function () {
 
     // ── Refusals ─────────────────────────────────────────────────────────────
 
+    describe('paired computer under approval = enforce', function () {
+
+        beforeEach(function () {
+            config([
+                'signature.devices.agent.enabled'  => true,
+                'signature.devices.agent.approval' => 'enforce',
+            ]);
+        });
+
+        function pairedComputerFor(int $userId): \Kukux\DigitalSignature\Models\SigningDevice
+        {
+            return \Kukux\DigitalSignature\Models\SigningDevice::create([
+                'uuid'            => (string) \Illuminate\Support\Str::uuid(),
+                'user_id'         => $userId,
+                'label'           => 'Office Mac mini',
+                'public_key'      => 'test',
+                'key_fingerprint' => bin2hex(random_bytes(32)),
+                'algorithm'       => 'ES256',
+                'kind'            => 'agent',
+                'protection'      => 'secure_enclave',
+                'device_type'     => 'mac_mini',
+                'status'          => 'active',
+            ]);
+        }
+
+        it('tells the page there is no paired computer, and refuses to sign', function () {
+            $this->actingAs(TestUser::find(11))
+                ->getJson("/signature/requests/{$this->prepared->id}/meta")
+                ->assertOk()
+                ->assertJsonPath('agent.required', true)
+                ->assertJsonPath('agent.paired', false);
+
+            $this->actingAs(TestUser::find(11))
+                ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                    'page' => 1, 'x' => 10, 'y' => 10, 'width' => 100, 'height' => 30,
+                ])
+                ->assertStatus(403)
+                ->assertJsonPath('status', 'prohibited')
+                ->assertJsonPath('error', 'You cannot sign yet: pair Kukux Sign Agent with your computer first.');
+
+            expect($this->prepared->fresh()->isSigned())->toBeFalse();
+        });
+
+        it('prohibits signing from a computer that has not checked in as the paired one', function () {
+            pairedComputerFor(11);
+
+            $this->actingAs(TestUser::find(11))
+                ->getJson("/signature/requests/{$this->prepared->id}/meta")
+                ->assertOk()
+                ->assertJsonPath('agent.paired', true)
+                ->assertJsonPath('agent.here', false)
+                ->assertJsonPath('agent.computer', 'Office Mac mini');
+
+            $this->actingAs(TestUser::find(11))
+                ->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                    'page' => 1, 'x' => 10, 'y' => 10, 'width' => 100, 'height' => 30,
+                ])
+                ->assertStatus(403)
+                ->assertJsonPath('error', 'You are prohibited from signing on this computer. Your account is paired with Office Mac mini; sign from that computer.');
+        });
+
+        it('lets a session on the paired computer through to the approval step', function () {
+            $computer = pairedComputerFor(11);
+
+            $this->actingAs(TestUser::find(11))
+                ->withSession([\Kukux\DigitalSignature\Agent\AgentPresenceService::SESSION_KEY => [
+                    'user_id' => 11, 'device_id' => $computer->id, 'at' => now()->getTimestamp(),
+                ]])
+                ->getJson("/signature/requests/{$this->prepared->id}/meta")
+                ->assertJsonPath('agent.here', true);
+
+            // Past the gate, signing asks the computer to approve, as before.
+            $this->postJson("/signature/requests/{$this->prepared->id}/sign", [
+                'page' => 1, 'x' => 10, 'y' => 10, 'width' => 100, 'height' => 30,
+            ])->assertStatus(428);
+        });
+
+        it('stops honouring a check once the computer is revoked', function () {
+            $computer = pairedComputerFor(11);
+            $computer->update(['status' => 'revoked', 'revoked_at' => now()]);
+
+            $this->actingAs(TestUser::find(11))
+                ->withSession([\Kukux\DigitalSignature\Agent\AgentPresenceService::SESSION_KEY => [
+                    'user_id' => 11, 'device_id' => $computer->id, 'at' => now()->getTimestamp(),
+                ]])
+                ->getJson("/signature/requests/{$this->prepared->id}/meta")
+                ->assertJsonPath('agent.paired', false)
+                ->assertJsonPath('agent.here', false);
+        });
+    });
+
+
     it('refuses a request from somebody else’s queue', function () {
         foreach (['meta', 'document'] as $endpoint) {
             $this->actingAs(TestUser::find(11))
