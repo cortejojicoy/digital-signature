@@ -113,7 +113,7 @@ See [docs/integration](docs/integration/index.md).
 
 ## A 1.x "Route for Signatures" integration
 
-If you built a document from the 1.x guide (a routing action class, an A4 renderer, a closure per slot, a footer button), here is the mapping. The [reference integration](docs/integration/reference-integration.md) is the result for the guide's own example.
+If you built a document from the 1.x guide (a routing action class, an A4 renderer, a closure per slot, a footer button), here is the mapping. The [reference integration](docs/integration/reference-integration.md) is the result for the guide's own example, and the [walkthrough](docs/integration/migrating-from-1x.md) shows how it got there, step by step.
 
 | 1.x | 2.0 |
 |---|---|
