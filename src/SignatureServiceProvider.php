@@ -278,6 +278,7 @@ class SignatureServiceProvider extends ServiceProvider
                     Route::post('jobs/{job}/claim', [AgentController::class, 'claimJob'])->whereUuid('job')->name('jobs.claim');
                     Route::post('jobs/{job}/complete', [AgentController::class, 'completeJob'])->whereUuid('job')->name('jobs.complete');
                     Route::post('jobs/{job}/reject', [AgentController::class, 'rejectJob'])->whereUuid('job')->name('jobs.reject');
+                    Route::post('presence/{check}', [AgentController::class, 'presence'])->whereUuid('check')->name('presence');
                 });
             });
 
@@ -288,6 +289,9 @@ class SignatureServiceProvider extends ServiceProvider
             ->group(function () {
                 Route::get('jobs/{uuid}', [AgentWebController::class, 'job'])->whereUuid('uuid')->name('job');
                 Route::post('skip', [AgentWebController::class, 'skip'])->name('skip');
+                // "Is this the paired computer?" — see AgentPresenceService.
+                Route::post('presence', [AgentWebController::class, 'startPresence'])->name('presence.start');
+                Route::get('presence/{uuid}', [AgentWebController::class, 'presence'])->whereUuid('uuid')->name('presence');
             });
 
         // Signed-URL endpoint that streams signature images from the (typically
