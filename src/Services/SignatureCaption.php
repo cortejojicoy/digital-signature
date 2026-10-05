@@ -6,12 +6,18 @@ use Illuminate\Support\Carbon;
 use Kukux\DigitalSignature\Models\Signature;
 
 /**
- * The lines of readable provenance that go under a stamped signature.
+ * The text drawn beside a stamped signature, in the format COA Circular
+ * No. 2021-006 (IV.C.13) gives as its example:
+ *
+ *     Digitally signed
+ *     by Juan DelaCruz
+ *     Date: 2020.05.21
+ *     19:37:33 +08'00'
  *
  * Extracted so the placement UI and the PDF writer ask the same question of
- * the same object. The signatory is positioning a box that will end up holding
- * ink, a QR and this text; if the preview guessed at the text independently,
- * the thing they aligned against the form would not be the thing that printed.
+ * the same object. If the preview guessed at the text independently, the
+ * thing a signatory aligned against the form would not be the thing that
+ * printed.
  */
 class SignatureCaption
 {
@@ -24,34 +30,37 @@ class SignatureCaption
             return [];
         }
 
-        $signer = $signature->user;
+        $name = trim((string) $signature->user?->name);
+
+        if ($name === '') {
+            return [];
+        }
 
         // The preview dates itself now and so does the stamp, each at the
         // moment it runs — so a signatory who leaves the drawer open over
         // lunch sees a slightly stale time. The alternative is freezing a
         // timestamp before the signature exists, which would print a lie.
-        $moment = $at ?? now();
+        $moment = ($at ?? now())->copy();
 
-        $available = [
-            'signer'    => $signer?->name,
-            'email'     => $signer?->email,
-            'signed_at' => 'Signed '.$moment->format(
-                (string) config('signature.caption.date_format', 'j M Y H:i'),
-            ),
-            'reference' => 'Ref '.substr((string) $signature->uuid, 0, 8),
+        if ($zone = config('signature.caption.timezone')) {
+            $moment->setTimezone((string) $zone);
+        }
+
+        // +08'00' rather than +08:00: the offset as PDF readers print it in
+        // their own signature appearances, which is what the circular shows.
+        $offset = str_replace(':', "'", $moment->format('P'))."'";
+
+        return [
+            (string) config('signature.caption.label', 'Digitally signed'),
+            'by '.$name,
+            'Date: '.$moment->format((string) config('signature.caption.date_format', 'Y.m.d')),
+            $moment->format((string) config('signature.caption.time_format', 'H:i:s')).' '.$offset,
         ];
-
-        $wanted = (array) config('signature.caption.fields', ['signer', 'signed_at', 'reference']);
-
-        return array_values(array_filter(
-            array_map(fn (string $field): string => (string) ($available[$field] ?? ''), $wanted),
-            fn (string $line): bool => trim($line) !== '',
-        ));
     }
 
     /**
-     * The layout rules the browser needs to draw the same bands this package
-     * will stamp: how much height the caption may claim, and whether a QR fits.
+     * The layout rules the browser needs to draw the stamp this package will
+     * print: the text block's size and the gap beside the ink.
      *
      * Sent to the client rather than a finished layout, because the box is
      * being dragged and resized — the rules are stable, the box is not.
@@ -62,23 +71,11 @@ class SignatureCaption
     {
         return [
             'caption' => [
-                'enabled'      => (bool) config('signature.caption.enabled', true),
-                'minBoxHeight' => (float) config('signature.caption.min_box_height', 28),
-                'heightRatio'  => (float) config('signature.caption.height_ratio', 0.38),
-                'maxFont'      => (float) config('signature.caption.max_font_pt', 6),
-                'minFont'      => (float) config('signature.caption.min_font_pt', 4),
-                'lineHeight'   => (float) config('signature.caption.line_height', 1.06),
-                'align'        => (string) config('signature.caption.align', 'C'),
-                'position'     => (string) config('signature.caption.position', 'bottom'),
-                'widthRatio'   => (float) config('signature.caption.width_ratio', 0.42),
-                'minBoxWidth'  => (float) config('signature.caption.min_box_width', 110),
-            ],
-            'qr' => [
-                'enabled' => (bool) config('signature.qr.enabled', true)
-                    && (bool) config('signature.verify.enabled', true),
-                'minSize' => (float) config('signature.qr.min_size', 26),
-                'maxSize' => (float) config('signature.qr.max_size', 48),
-                'gap'     => (float) config('signature.qr.gap', 2),
+                'enabled'    => (bool) config('signature.caption.enabled', true),
+                'fontSize'   => (float) config('signature.caption.font_pt', 7),
+                'minFont'    => (float) config('signature.caption.min_font_pt', 4),
+                'lineHeight' => (float) config('signature.caption.line_height', 1.15),
+                'gap'        => (float) config('signature.caption.gap', 3),
             ],
         ];
     }
