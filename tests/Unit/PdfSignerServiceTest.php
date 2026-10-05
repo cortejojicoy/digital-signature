@@ -162,10 +162,9 @@ describe('PdfSignerService', function () {
         Storage::disk('testing')->assertExists($outPath);
     });
 
-    it('encodes the verification URL in the QR, not a wall of text', function () {
-        // The old payload was four labelled lines including a Verify address
-        // pointing at a route this package never registered — so scanning it
-        // produced text and a dead link.
+    it('sends no QR payload — the stamp follows the COA format', function () {
+        // COA Circular 2021-006 IV.C.13 asks for the name and the handwritten
+        // signature beside each other, nothing more.
         $user = makeFakeUser();
 
         $sig = Signature::create([
@@ -193,15 +192,10 @@ describe('PdfSignerService', function () {
 
         (new PdfSignerService($driver))->sign($sig, []);
 
-        $qr = $this->args[5];
-
-        expect($qr)->toContain('/signature/verify/11112222-0000-0000-0000-000000000000')
-            // A bare URL, so a phone camera offers to open it.
-            ->and($qr)->not->toContain("\n")
-            ->and($qr)->not->toContain('Signer:');
+        expect($this->args[5] ?? '')->toBe('');
     });
 
-    it('hands the driver readable provenance to draw under the signature', function () {
+    it('hands the driver the COA name-and-date lines to draw beside the signature', function () {
         $user = makeFakeUser();
 
         $sig = Signature::create([
@@ -231,11 +225,11 @@ describe('PdfSignerService', function () {
 
         (new PdfSignerService($driver))->sign($sig, []);
 
-        expect($this->caption)->toHaveCount(3)
-            ->and($this->caption[0])->toBe('Test User')
-            ->and($this->caption[1])->toStartWith('Signed ')
-            // The reference is what somebody reading the printout quotes back.
-            ->and($this->caption[2])->toBe('Ref a1b2c3d4');
+        expect($this->caption)->toHaveCount(4)
+            ->and($this->caption[0])->toBe('Digitally signed')
+            ->and($this->caption[1])->toBe('by Test User')
+            ->and($this->caption[2])->toMatch('/^Date: \d{4}\.\d{2}\.\d{2}$/')
+            ->and($this->caption[3])->toMatch("/^\d{2}:\d{2}:\d{2} [+-]\d{2}'\d{2}'$/");
     });
 
     it('sends no caption when captions are switched off', function () {
