@@ -86,6 +86,10 @@ The text is a fixed size. Dragging the resize handle scales the signature and le
 
 The browser can't measure fonts exactly like TCPDF does, so the text column can differ by a fraction of a point between the preview and the PDF.
 
+### Signing only from the paired computer
+
+Under `signature.devices.agent.approval = enforce`, **Sign here** stays off until the page has confirmed it's on the computer the account is paired with. With no paired computer, it says to pair Kukux Sign Agent first. On any other computer, it says the signer is prohibited from signing there and names the paired computer. See [Desktop agent](desktop-agent.md#signing-only-from-the-paired-computer-enforce).
+
 ### Several slots or several places
 
 If the user is more than one signatory on the same document (say "Prepared by" and "Noted by"), the pane shows a chip for each slot.

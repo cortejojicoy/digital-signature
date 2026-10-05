@@ -57,6 +57,8 @@ Everything lives under `signature.devices.agent` in `config/signature.php`.
 | `pairing_ttl` | none | `600` | Seconds a pairing code stays valid. |
 | `job_ttl` | none | `300` | Seconds a signing job stays valid, and how long a completed approval can be spent. |
 | `skip_ttl` | none | `120` | Seconds "Sign in the browser instead" suppresses the agent. |
+| `checkin_ttl` | `SIGNATURE_AGENT_CHECKIN_TTL` | `90` | Under `enforce`: seconds a "this computer?" check stays open. |
+| `checkin_valid_for` | `SIGNATURE_AGENT_CHECKIN_VALID_FOR` | `900` | Under `enforce`: seconds a confirmed check is remembered for the session. |
 | `devices_url` | `SIGNATURE_AGENT_DEVICES_URL` | the app's origin | Where the agent sends people to manage their signing devices, for example to remove the computer their account is already paired with. Must be on this app's origin, or the agent uses the origin instead. |
 | `blocked_device_types` | `SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES` | `virtual_machine` | Device types refused at pairing, comma-separated. Checked against what the agent *detected*, which the owner can't change. Set it empty to allow VMs, for example for development in Parallels. |
 
@@ -68,7 +70,22 @@ Everything lives under `signature.devices.agent` in `config/signature.php`.
 |---|---|
 | `off` | Never asks the agent. The browser device is recorded as usual. |
 | `prefer` | Asks the agent, and offers **Sign in the browser instead**. Users without a paired computer sign as before. |
-| `enforce` | Signing a document needs approval on a paired computer. No skip. Users with no paired computer get `UnregisteredDeviceException`. |
+| `enforce` | Signing a document needs approval on a paired computer. No skip. Users with no paired computer get `UnregisteredDeviceException`. The signing page also checks it's on the paired computer before it offers **Sign here**; see below. |
+
+### Signing only from the paired computer (`enforce`)
+
+Under `enforce`, the document drawer's **Sign here** button only works on the computer the account is paired with:
+
+| Situation | What the signer sees |
+|---|---|
+| No paired computer | Button off: "You cannot sign yet: pair Kukux Sign Agent with your computer first." |
+| On the paired computer | Button on, once the agent has checked in. |
+| On any other computer | Button off: "You are prohibited from signing on this computer. Your account is paired with *{computer}*; sign from that computer." |
+| This computer's agent is another account's | Button off: "You are prohibited from signing on this computer. It is paired with another account." |
+
+A web page can't ask the agent anything directly, so the check goes through the server. When the document opens, the page asks for a check, opens its `kukuxsign://presence/{uuid}?t=…&s=…` link, and polls. The agent on that computer, if there is one, reports in with `POST /signature/agent/presence/{uuid}`. It does this silently, with no window and no Touch ID / Hello prompt. If the paired computer reports in, the button turns on, and the session remembers it for `checkin_valid_for` seconds. If nothing answers, this isn't the paired computer, or its agent isn't running or is too old to know the link. The page shows the message after about 12 seconds but keeps listening until the check expires, and offers **Check again**.
+
+`POST /signature/requests/{id}/sign` applies the same rule and answers `403` with `status: "prohibited"` and the message. The approval job is still what authorizes a signature; the check only decides whether this browser may ask for one. Needs Kukux Sign Agent with presence-link support.
 
 ### server_id, salt and APP_KEY
 
@@ -266,6 +283,7 @@ These are **not** in the `web` group (the agent has no cookies, so CSRF would re
 | POST | `jobs/{uuid}/claim` | agent | 120/min | `link_token` | `uuid`, `purpose`, `status`, `nonce`, `user_id`, `payload_hash`, `document{title}`, `signer{name}`, `expires_at` |
 | POST | `jobs/{uuid}/complete` | agent | 120/min | `proof` | `status: completed` |
 | POST | `jobs/{uuid}/reject` | agent | 120/min | `reason` | current `status` |
+| POST | `presence/{uuid}` | agent | 120/min | `link_token` | `status: confirmed`; 403 `wrong_account` when the check is another account's (the page is told), 403 `invalid_link_token`, 409 once answered or expired |
 
 `device` in the claim takes `platform` (`macos` / `windows`), `os_version`, `model`, `model_identifier`, `form_factor` (`laptop` / `desktop`), `label`, `hardware_id_hash` (64 hex chars, or null), `device_type` (a catalogue value; anything else becomes `other`, and agents that send none get one from `form_factor`), `chassis_type` (SMBIOS 1–127, or null) and `virtual` (bool). `protection` is `secure_enclave`, `tpm` or `software`; anything else becomes `software`.
 
@@ -277,6 +295,8 @@ These use the `web` group and the logged-in session, throttled to 120/min.
 |---|---|---|
 | GET | `jobs/{uuid}` | Job status for the overlay: `status`, `reason`, `device{label,protection}`. 404 for other users' jobs. |
 | POST | `skip` | "Sign in the browser instead" for `skip_ttl` seconds. 403 under `enforce`. |
+| POST | `presence` | Under `enforce`: starts a "this computer?" check. Returns `uuid`, `link`, `expires_in`; 409 `unpaired` with no paired computer; 404 outside `enforce`. |
+| GET | `presence/{uuid}` | `status`: `pending`, `confirmed`, `other_account` or `expired`. `confirmed` is remembered in the session. 404 for other users' checks. |
 
 ---
 
