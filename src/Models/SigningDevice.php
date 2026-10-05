@@ -40,22 +40,25 @@ class SigningDevice extends Model
         'revoked_at'    => 'datetime',
     ];
 
-    protected $hidden = ['public_key', 'session_public_key', 'hardware_id_hash', 'active_hardware_key'];
+    protected $hidden = ['public_key', 'session_public_key', 'hardware_id_hash', 'active_hardware_key', 'active_agent_user_key'];
 
     protected static function booted(): void
     {
-        // active_hardware_key carries the unique index behind "one active
-        // pairing per computer for this app". Recomputed only when what it
-        // depends on changes, so a routine save of an older duplicate (kept
-        // unkeyed on upgrade) never trips the index.
+        // active_hardware_key and active_agent_user_key carry the unique
+        // indexes behind "one active pairing per computer" and "one paired
+        // computer per account" for this app. Each is recomputed only when
+        // what it depends on changes, so a routine save of an older duplicate
+        // (kept unkeyed on upgrade) never trips an index.
         static::saving(function (SigningDevice $device): void {
-            if ($device->exists && ! $device->isDirty(['status', 'kind', 'hardware_id_hash'])) {
-                return;
+            $activeAgent = $device->kind === 'agent' && $device->status === 'active';
+
+            if (! $device->exists || $device->isDirty(['status', 'kind', 'hardware_id_hash'])) {
+                $device->active_hardware_key = $activeAgent && $device->hardware_id_hash ? $device->hardware_id_hash : null;
             }
 
-            $device->active_hardware_key = $device->kind === 'agent' && $device->status === 'active' && $device->hardware_id_hash
-                ? $device->hardware_id_hash
-                : null;
+            if (! $device->exists || $device->isDirty(['status', 'kind', 'user_id'])) {
+                $device->active_agent_user_key = $activeAgent ? $device->user_id : null;
+            }
         });
     }
 
