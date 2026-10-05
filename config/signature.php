@@ -48,48 +48,12 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Verification QR
-    |--------------------------------------------------------------------------
-    | A QR carrying the signer, the signature UUID and a verification URL is
-    | stamped to the right of each visible signature. It needs about another
-    | signature's width of clear space, so forms that place signatures side by
-    | side should turn it off rather than have it overlap the next block.
-    */
-    /*
-    |--------------------------------------------------------------------------
-    | Verification QR
-    |--------------------------------------------------------------------------
-    | A square barcode drawn on the stamp, encoding the URL of this package's
-    | public verification page. Scanning it from a printout answers the only
-    | question a person holding paper can otherwise not answer: is this mark
-    | real, and whose is it?
-    |
-    | It is drawn INSIDE the placement rectangle, taking a square off the right
-    | and leaving the rest to the signature — the same rule the caption follows.
-    | It used to be drawn beside the box, which put it wherever the form
-    | happened to have content.
-    |
-    | min_size: below this a phone will not decode it, so the QR stands down
-    |   rather than printing a barcode that cannot be scanned.
-    |
-    | max_size: an upper bound so it does not dominate a large placement.
-    |
-    | See the `verify` block for the page it points at.
-    */
-    'qr' => [
-        'enabled'  => env('SIGNATURE_QR_ENABLED', true),
-        'min_size' => env('SIGNATURE_QR_MIN_SIZE', 26),
-        'max_size' => env('SIGNATURE_QR_MAX_SIZE', 48),
-        'gap'      => env('SIGNATURE_QR_GAP', 2),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Public verification page
     |--------------------------------------------------------------------------
-    | Where the QR leads: GET /signature/verify/{uuid}.
+    | GET /signature/verify/{uuid}: answers whether a signature reference is
+    | real and still stands.
     |
-    | Deliberately public. It is scanned by whoever is holding the document —
+    | Deliberately public. It is opened by whoever is holding the document —
     | an auditor, a receiving office, a counterparty — and requiring an account
     | would make it useless to exactly those people.
     |
@@ -100,8 +64,7 @@ return [
     | same answer, so it cannot be used to probe whether a reference ever
     | existed.
     |
-    | Turn it off if your documents never leave an authenticated context; the
-    | QR then has nothing to point at and stands down with it.
+    | Turn it off if your documents never leave an authenticated context.
     */
     'verify' => [
         'enabled' => env('SIGNATURE_VERIFY_ENABLED', true),
@@ -111,66 +74,42 @@ return [
     |--------------------------------------------------------------------------
     | Signature caption
     |--------------------------------------------------------------------------
-    | A small block of readable provenance drawn under the signature image:
-    | who signed, when, and a reference to quote.
+    | The text drawn beside each stamped signature, following the example in
+    | COA Circular No. 2021-006, IV.C.13 — the signatory's full name next to
+    | an image of their handwritten signature:
     |
-    | Everything that binds a signature to its signer is already in the file —
-    | HMAC-signed chunks inside the PNG, a PKCS#7 block, the QR next to it —
-    | and none of it survives being printed and handed across a desk. These
-    | lines are the part a person can read without a verifier.
+    |     [signature]  Digitally signed
+    |                  by Juan DelaCruz
+    |                  Date: 2020.05.21
+    |                  19:37:33 +08'00'
     |
-    | The caption is carved OUT of the placement rectangle; the signature image
-    | shrinks to make room. It never grows the stamp, because that rectangle is
-    | where a signatory said their signature goes and whatever is underneath
-    | belongs to the form.
+    | The text is drawn at a FIXED size (font_pt) whatever size the box is, so
+    | resizing a placement scales the signature image only. It steps down only
+    | when a box is too small to hold it, never below min_font_pt, and the
+    | name is never truncated.
     |
-    | fields: which lines, in order. Available: signer, email, signed_at,
-    |   reference. Lines that do not fit the box are dropped from the bottom.
+    | Everything is carved OUT of the placement rectangle; the stamp never
+    | grows past the box a signatory or the form gave it.
     |
-    | height_ratio: the most of the box the caption may take. The rest is the
-    |   signature image.
+    | date_format / time_format: PHP formats for the two date lines. The UTC
+    | offset is always appended to the time as PDF readers print it (+08'00').
     |
-    | min_box_height: below this the caption stands down entirely. A signature
-    |   squeezed into nothing is worse than one with no caption under it.
-    |
-    | max_font_pt / min_font_pt: the driver picks the largest size in this
-    |   range that fits, then truncates with an ellipsis if even the smallest
-    |   is too wide.
+    | timezone: the zone the time is shown in. Null uses the app's timezone;
+    | set 'Asia/Manila' to print Philippine time regardless.
     */
     'caption' => [
-        'enabled'        => env('SIGNATURE_CAPTION_ENABLED', true),
-        'fields'         => ['signer', 'signed_at', 'reference'],
-
-        /*
-        | Tight leading and centred under the ink, so the block reads as part
-        | of the signature rather than a note floating in whatever the form
-        | has underneath it. 'L', 'C' or 'R'.
-        */
-        'align'          => env('SIGNATURE_CAPTION_ALIGN', 'C'),
-        'line_height'    => env('SIGNATURE_CAPTION_LINE_HEIGHT', 1.06),
-
-        /*
-        | Which side of the stamp the caption sits on: bottom, top, left or
-        | right. The default for new placements; a signatory can move it per
-        | signature while positioning, because a form dictates it — a signature
-        | line with the printed name already underneath has no room below and
-        | plenty beside it.
-        |
-        | width_ratio / min_box_width apply to the left and right positions,
-        | where the constraint is horizontal rather than vertical.
-        */
-        'position'       => env('SIGNATURE_CAPTION_POSITION', 'bottom'),
-        'width_ratio'    => env('SIGNATURE_CAPTION_WIDTH_RATIO', 0.42),
-        'min_box_width'  => env('SIGNATURE_CAPTION_MIN_BOX_WIDTH', 110),
-
-        'height_ratio'   => env('SIGNATURE_CAPTION_HEIGHT_RATIO', 0.38),
-        'min_box_height' => env('SIGNATURE_CAPTION_MIN_BOX_HEIGHT', 28),
-        'max_font_pt'    => env('SIGNATURE_CAPTION_MAX_FONT', 6),
-        'min_font_pt'    => env('SIGNATURE_CAPTION_MIN_FONT', 4),
-        'date_format'    => env('SIGNATURE_CAPTION_DATE_FORMAT', 'j M Y H:i'),
+        'enabled'     => env('SIGNATURE_CAPTION_ENABLED', true),
+        'label'       => env('SIGNATURE_CAPTION_LABEL', 'Digitally signed'),
+        'font_pt'     => env('SIGNATURE_CAPTION_FONT', 7),
+        'min_font_pt' => env('SIGNATURE_CAPTION_MIN_FONT', 4),
+        'line_height' => env('SIGNATURE_CAPTION_LINE_HEIGHT', 1.15),
+        'gap'         => env('SIGNATURE_CAPTION_GAP', 3),
+        'date_format' => env('SIGNATURE_CAPTION_DATE_FORMAT', 'Y.m.d'),
+        'time_format' => env('SIGNATURE_CAPTION_TIME_FORMAT', 'H:i:s'),
+        'timezone'    => env('SIGNATURE_CAPTION_TIMEZONE'),
 
         /** @var array{0:int,1:int,2:int} RGB for the caption text. */
-        'color' => [90, 90, 90],
+        'color' => [0, 0, 0],
     ],
 
     /*
