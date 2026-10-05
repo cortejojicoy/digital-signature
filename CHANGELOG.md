@@ -27,6 +27,7 @@ Upgrading: [UPGRADE-2.0.md](UPGRADE-2.0.md). New docs: [docs/integration](docs/i
 
 ### Changed
 
+- **Desktop agent: one computer per account.** An account can pair the agent with one computer per app. A second computer gets `409 account_already_paired` at claim, naming the account's own computer; lookup returns it as `agent_device` (plus `devices_url`) so the agent can refuse before any key or Touch ID prompt. Backed by a unique `active_agent_user_key` column. Accounts that already hold several computers keep them, but can't pair another until one is left. New config: `signature.devices.agent.devices_url` (`SIGNATURE_AGENT_DEVICES_URL`). A re-pair proves it's the same computer with a `rebind_agent` proof from the old session key (the claim's `replaces`), so computers without a hardware id can re-pair; firmware placeholder UUIDs (`AgentPairingService::PLACEHOLDER_UUIDS`) count as no hardware id.
 - **Breaking:** a signatory binding that resolves to a model that isn't a login is refused (routes as unassigned with a "has no login" message) unless a `SignatoryUserMapper` maps it. It was previously stored as a `user_id`.
 - **Breaking:** `RequestSignaturesAction` routes through `DocumentRouter`; its notifications use the new wording, and it refuses a required slot with nowhere to go.
 - **Breaking:** signed versions are written to `{signed_docs_path}/{session uuid}/{signature uuid}.pdf`, and base renders to `signing-sessions/{template}/{record}/{session uuid}/base.pdf`.
