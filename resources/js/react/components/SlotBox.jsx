@@ -17,6 +17,12 @@ import { StampPreview } from './StampPreview.jsx';
  * stamp that does not match the specimen on file, which is a problem with the
  * document rather than with the layout. So the ratio is kept by default and
  * distorting it has to be asked for.
+ *
+ * `reserveWidth` / `minHeight` describe a part of the box that does NOT scale
+ * — the printed name and date beside the ink. The ratio is then held on the
+ * ink alone: the box is always `reserveWidth` wider than the signature, and
+ * never shorter than the text, so dragging the handle grows the signature
+ * while the text stays the size it will print.
  */
 export function SlotBox({
     slotKey,
@@ -34,6 +40,8 @@ export function SlotBox({
                           //            preview the placed signature)
     aspect,               // optional width/height ratio to hold while resizing;
                           //          Shift overrides it for one drag
+    reserveWidth = 0,     // CSS px of fixed-size content beside the ink
+    minHeight = 0,        // CSS px the fixed-size content needs
     preview,              // optional composed stamp, already in CSS pixels —
                           //          see StampPreview. When given it replaces
                           //          the plain background image, so the box
@@ -87,35 +95,37 @@ export function SlotBox({
             };
         } else {
             // resize from bottom-right
-            let newWidth  = clamp(r.width  + dx, minSize, canvasWidth  - r.x);
-            let newHeight = clamp(r.height + dy, minSize, canvasHeight - r.y);
+            const reserve = Math.max(0, reserveWidth);
+            const floorH  = Math.max(minSize, minHeight);
+            const maxWidth  = canvasWidth  - r.x;
+            const maxHeight = canvasHeight - r.y;
+
+            let newWidth  = clamp(r.width  + dx, reserve + minSize, maxWidth);
+            let newHeight = clamp(r.height + dy, floorH, maxHeight);
 
             if (aspect && aspect > 0 && !e.shiftKey) {
-                // Drive the ratio from whichever axis the pointer moved more,
-                // so a mostly-horizontal drag doesn't feel like it is fighting
-                // a vertical correction. Re-clamp after: holding the ratio can
-                // push the other axis back outside the canvas.
-                if (Math.abs(dx) >= Math.abs(dy)) {
-                    newHeight = newWidth / aspect;
-                } else {
-                    newWidth = newHeight * aspect;
-                }
+                // Hold the ratio on the ink, not the box: the fixed-width
+                // text beside it does not scale. Drive it from whichever axis
+                // the pointer moved more, so a mostly-horizontal drag doesn't
+                // feel like it is fighting a vertical correction.
+                const inkHeight = r.height + dy;
+                let inkWidth = Math.abs(dx) >= Math.abs(dy)
+                    ? r.width + dx - reserve
+                    : inkHeight * aspect;
 
-                const maxWidth  = canvasWidth  - r.x;
-                const maxHeight = canvasHeight - r.y;
-                const overflow  = Math.max(newWidth / maxWidth, newHeight / maxHeight, 1);
-                newWidth  /= overflow;
-                newHeight /= overflow;
+                // Holding the ratio can push the other axis outside the
+                // canvas, so bound the ink by both.
+                const maxInk = Math.min(maxWidth - reserve, maxHeight * aspect);
+                inkWidth = clamp(inkWidth, minSize, Math.max(minSize, maxInk));
 
-                const shortfall = Math.max(minSize / newWidth, minSize / newHeight, 1);
-                newWidth  *= shortfall;
-                newHeight *= shortfall;
+                newWidth  = reserve + inkWidth;
+                newHeight = Math.min(Math.max(inkWidth / aspect, floorH), maxHeight);
             }
 
             next = { x: r.x, y: r.y, width: newWidth, height: newHeight };
         }
         onChange?.(next);
-    }, [mode, canvasWidth, canvasHeight, minSize, onChange, aspect]);
+    }, [mode, canvasWidth, canvasHeight, minSize, onChange, aspect, reserveWidth, minHeight]);
 
     const endInteraction = useCallback((e) => {
         if (!mode) return;
