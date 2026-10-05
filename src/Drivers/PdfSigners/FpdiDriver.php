@@ -79,9 +79,9 @@ class FpdiDriver implements PdfSignerDriver
                 // so flip it against this page's own height.
                 $topY = $sz['height'] - ($sigY + $sigH);
 
-                // Caption and QR on every appearance, not just the first: a
-                // stamp further down the document that says neither who made
-                // it nor how to check it is an unattributed mark.
+                // The name on every appearance, not just the first: a stamp
+                // further down the document that does not say who made it is
+                // an unattributed mark.
                 $this->drawStamp(
                     $pdf,
                     $disk->path($imagePath),
@@ -90,8 +90,6 @@ class FpdiDriver implements PdfSignerDriver
                     $sigW,
                     $sigH,
                     $caption,
-                    $qrPayload,
-                    $stamp['caption_position'] ?? null,
                 );
             }
         }
