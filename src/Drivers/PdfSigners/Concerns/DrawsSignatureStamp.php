@@ -5,27 +5,30 @@ namespace Kukux\DigitalSignature\Drivers\PdfSigners\Concerns;
 use TCPDF;
 
 /**
- * Draws one appearance of a signature: the ink, a verification QR, and the
- * small block of readable provenance under them.
+ * Draws one appearance of a signature in the format COA Circular No. 2021-006
+ * (IV.C.13) gives as its example: the handwritten signature, and beside it the
+ * signatory's full name and the moment of signing in readable form.
  *
- * **Everything fits inside the placement rectangle.** That rectangle is where a
- * signatory dropped their signature, sized to the line it belongs on; anything
- * outside it belongs to the form. The QR used to be drawn *beside* the box,
- * which put it wherever the form happened to have content — so it is now carved
- * out of the right-hand side, exactly as the caption is carved off the bottom.
+ *     ┌──────────────────┬──────────────────────┐
+ *     │                  │ Digitally signed     │
+ *     │  signature image │ by Juan DelaCruz     │
+ *     │                  │ Date: 2020.05.21     │
+ *     │                  │ 19:37:33 +08'00'     │
+ *     └──────────────────┴──────────────────────┘
  *
- * The layout, in one place, because two drivers doing this arithmetic
- * separately is two chances to disagree about where a signature goes:
+ * **Only the ink scales.** The text block is drawn at a fixed size, so the
+ * name reads the same on every stamp in the document whatever size each box
+ * was drawn at. Enlarging a placement enlarges the signature and nothing else.
  *
- *     ┌──────────────────────────┬──────┐
- *     │  signature image         │  QR  │
- *     ├──────────────────────────┴──────┤
- *     │  Name · Signed … · Ref …        │
- *     └─────────────────────────────────┘
+ * Everything fits inside the placement rectangle: that rectangle is where the
+ * signatory said their signature goes, and anything outside it belongs to the
+ * form. The text only shrinks below its configured size when the box cannot
+ * physically hold it — and never below `min_font_pt`, and never by cutting the
+ * name, because the full name is what the circular requires.
  *
- * Both extras stand down on a box too small to carry them. A signature
- * squeezed into nothing is worse than one without a caption, and a QR too
- * small to scan is worse than no QR at all.
+ * The layout lives in one place, because two drivers doing this arithmetic
+ * separately is two chances to disagree about where a signature goes. Its
+ * browser half is `resources/js/utils/stampLayout.js`.
  */
 trait DrawsSignatureStamp
 {
@@ -33,7 +36,6 @@ trait DrawsSignatureStamp
      * Draw a complete stamp with its top-left corner at ($x, $y).
      *
      * @param  array<int, string>  $captionLines
-     * @param  string  $captionPosition  bottom | top | left | right
      */
     protected function drawStamp(
         TCPDF $pdf,
@@ -43,16 +45,12 @@ trait DrawsSignatureStamp
         float $width,
         float $height,
         array $captionLines = [],
-        string $qrPayload = '',
-        ?string $captionPosition = null,
     ): void {
         $frame = $this->stampFrame(
             $pdf,
             $width,
             $height,
             $captionLines,
-            $qrPayload !== '',
-            $captionPosition ?? (string) config('signature.caption.position', 'bottom'),
             $this->imageAspect($imageFsPath),
         );
 
@@ -65,112 +63,51 @@ trait DrawsSignatureStamp
             'PNG',
         );
 
-        if ($frame['qr'] !== null) {
-            $pdf->write2DBarcode(
-                $qrPayload,
-                'QRCODE,M',
-                $x + $frame['qr']['x'],
-                $y + $frame['qr']['y'],
-                $frame['qr']['size'],
-                $frame['qr']['size'],
-                ['border' => false, 'padding' => 0],
-            );
-        }
-
         $this->drawCaption($pdf, $frame['caption'], $x, $y);
     }
 
     /**
-     * Divide the placement between the caption band, the QR and the ink.
+     * Divide the placement between the ink and the text block beside it.
      *
-     * Two rules do the work here:
+     * The text takes its natural width off the right; the ink is fitted, at
+     * its own proportions, into what is left. The two are then centred as one
+     * group so the name stays right next to the signature it belongs to at
+     * every box size, rather than drifting to the far edge as the box grows.
      *
-     *  1. **The ink keeps its own proportions.** A signature stretched to fill
-     *     whatever rectangle was drawn is a stamp that no longer matches the
-     *     specimen on file. It is fitted inside the space available, exactly as
-     *     the placement preview shows it.
-     *
-     *  2. **The caption hugs the ink, not the box.** Pinning it to the bottom
-     *     edge meant that enlarging the placement pushed the provenance further
-     *     and further from the signature it describes, until it read as a note
-     *     belonging to whatever the form had underneath. The two are drawn as
-     *     one group and centred together, so the gap between them stays the
-     *     same whatever size the box is.
-     *
-     * All coordinates are relative to the box's own top-left corner, so the
-     * caller adds its origin once and no arithmetic is repeated per element.
+     * All coordinates are relative to the box's own top-left corner.
      *
      * @param  array<int, string>  $lines
      * @param  float|null  $imageAspect  Natural width/height of the signature.
-     * @return array{image: array{x:float,y:float,w:float,h:float}, qr: array{x:float,y:float,size:float}|null, caption: array<string, mixed>}
+     * @return array{image: array{x:float,y:float,w:float,h:float}, caption: array<string, mixed>}
      */
     protected function stampFrame(
         TCPDF $pdf,
         float $width,
         float $height,
         array $lines,
-        bool $wantQr,
-        string $position = 'bottom',
         ?float $imageAspect = null,
     ): array {
-        $position = in_array($position, ['bottom', 'top', 'left', 'right'], true) ? $position : 'bottom';
-        $vertical = $position === 'left' || $position === 'right';
+        $caption = $this->layoutCaption($pdf, $lines, $width, $height);
 
-        $caption = $vertical
-            ? $this->layoutCaptionColumn($pdf, $lines, $width, $height)
-            : $this->layoutCaption($pdf, $lines, $width, $height);
+        $gap      = $caption['lines'] !== [] ? $this->captionGap() : 0.0;
+        $inkAreaW = max(0.0, $width - $caption['width'] - $gap);
+        $ink      = $this->fitWithin($imageAspect, $inkAreaW, $height);
 
-        $band = $vertical ? ($caption['width'] ?? 0.0) : $caption['height'];
-
-        // The slab left once the caption has taken its side.
-        $contentX = $position === 'left' ? $band : 0.0;
-        $contentW = $vertical ? $width - $band : $width;
-        $contentH = $vertical ? $height : $height - $band;
-
-        $qrSize = $this->qrSize($contentW, $contentH, $wantQr);
-        $gap    = $qrSize > 0 ? $this->qrGap() : 0.0;
-
-        $inkAreaW = $contentW - ($qrSize > 0 ? $qrSize + $gap : 0.0);
-        $ink      = $this->fitWithin($imageAspect, $inkAreaW, $contentH);
-
-        // Ink and caption travel together. Centring the pair — rather than the
-        // ink alone — is what keeps the provenance tucked under the signature
-        // at every box size.
-        $groupHeight = $vertical ? $ink['h'] : $ink['h'] + $caption['height'];
-        $groupTop    = max(0.0, ($height - $groupHeight) / 2);
-
-        $inkY = match (true) {
-            $vertical            => max(0.0, ($height - $ink['h']) / 2),
-            $position === 'top'  => $groupTop + $caption['height'],
-            default              => $groupTop,
-        };
-
-        $inkX = $contentX + max(0.0, ($inkAreaW - $ink['w']) / 2);
-
-        $captionBox = match ($position) {
-            'bottom' => ['x' => $contentX, 'y' => $inkY + $ink['h'], 'w' => $inkAreaW],
-            'top'    => ['x' => $contentX, 'y' => $groupTop,         'w' => $inkAreaW],
-            'left'   => ['x' => 0.0,       'y' => 0.0,               'w' => $band],
-            'right'  => ['x' => $width - $band, 'y' => 0.0,          'w' => $band],
-        };
-
-        // A column caption centres against the ink it sits beside.
-        if ($vertical && $caption['lines'] !== []) {
-            $captionBox['y'] = max(0.0, ($height - $caption['height']) / 2);
-        }
+        $groupW = $ink['w'] + $gap + $caption['width'];
+        $left   = max(0.0, ($width - $groupW) / 2);
 
         return [
-            'image' => ['x' => $inkX, 'y' => $inkY, 'w' => $ink['w'], 'h' => $ink['h']],
-            'qr' => $qrSize > 0
-                ? [
-                    'x'    => $contentX + $contentW - $qrSize,
-                    // Level with the ink, so the two read as one mark rather
-                    // than a barcode floating above a signature.
-                    'y'    => $inkY + max(0.0, ($ink['h'] - $qrSize) / 2),
-                    'size' => $qrSize,
-                ]
-                : null,
-            'caption' => $caption + $captionBox,
+            'image' => [
+                'x' => $left,
+                'y' => max(0.0, ($height - $ink['h']) / 2),
+                'w' => $ink['w'],
+                'h' => $ink['h'],
+            ],
+            'caption' => $caption + [
+                'x' => $left + $ink['w'] + $gap,
+                'y' => max(0.0, ($height - $caption['height']) / 2),
+                'w' => $caption['width'],
+            ],
         ];
     }
 
@@ -178,8 +115,7 @@ trait DrawsSignatureStamp
      * The largest rectangle of the given proportions that fits the space.
      *
      * With no aspect to honour — an unreadable file, a caller that did not
-     * supply one — the space is used as-is, which is what this did before
-     * proportions were respected at all.
+     * supply one — the space is used as-is.
      *
      * @return array{w: float, h: float}
      */
@@ -217,131 +153,19 @@ trait DrawsSignatureStamp
     }
 
     /**
-     * How big the verification QR may be, or 0 for "not on this stamp".
+     * Size the text block beside the signature.
      *
-     * Measured against the CONTENT area, not the whole box — a caption down
-     * one side has already taken its share, and sizing the QR against the
-     * original width would push it over the text.
+     * Drawn at `font_pt` regardless of the box — that is what keeps the name
+     * the same size on every stamp. It steps down only when the box cannot
+     * hold the block next to a usable sliver of ink, and stops at
+     * `min_font_pt`. Lines are never truncated: the full name is the point.
      *
-     * Square, and refused outright below a size no phone will decode: an
-     * unreadable barcode on a legal document is a promise the document cannot
-     * keep.
-     */
-    protected function qrSize(float $width, float $height, bool $wanted): float
-    {
-        if (! $wanted || ! config('signature.qr.enabled', true)) {
-            return 0.0;
-        }
-
-        $min = (float) config('signature.qr.min_size', 26);
-        $max = (float) config('signature.qr.max_size', 48);
-
-        // Never more than the content's own height, nor more than a third of
-        // its width — past that the signature stops being the main mark.
-        $size = min($height, $width / 3, $max);
-
-        return $size >= $min ? $size : 0.0;
-    }
-
-    protected function qrGap(): float
-    {
-        return (float) config('signature.qr.gap', 2);
-    }
-
-    /**
-     * Work out how much of the stamp the caption may take, and at what size.
-     *
-     * Returns the lines that actually fit, the font size to draw them at, and
-     * the height to reserve. An empty `lines` means "draw no caption" — the
-     * box is too short, or there was nothing to say.
-     *
-     * @param  array<int, string>  $lines
-     * @return array{lines: array<int, string>, size: float, height: float}
-     */
-    protected function layoutCaption(TCPDF $pdf, array $lines, float $boxWidth, float $boxHeight): array
-    {
-        $none = ['lines' => [], 'size' => 0.0, 'height' => 0.0];
-
-        $lines = array_values(array_filter(array_map('trim', $lines), fn (string $l): bool => $l !== ''));
-
-        if ($lines === [] || ! config('signature.caption.enabled', true)) {
-            return $none;
-        }
-
-        // Below this the signature itself stops being legible once anything is
-        // taken off it, so the caption stands down rather than ruining both.
-        if ($boxHeight < (float) config('signature.caption.min_box_height', 28)) {
-            return $none;
-        }
-
-        $maxSize = (float) config('signature.caption.max_font_pt', 6);
-        $minSize = (float) config('signature.caption.min_font_pt', 4);
-        $ratio   = (float) config('signature.caption.height_ratio', 0.38);
-
-        $available = $boxHeight * max(0.1, min(0.9, $ratio));
-
-        // Largest size that fits both the band and the widest line. Stepping
-        // down in quarter points rather than solving it directly keeps this
-        // readable, and the range is a couple of points wide.
-        for ($size = $maxSize; $size >= $minSize; $size -= 0.25) {
-            $lineHeight = $size * $this->lineHeightRatio();
-
-            $fitting = (int) floor($available / $lineHeight);
-
-            if ($fitting < 1) {
-                continue;
-            }
-
-            $candidate = array_slice($lines, 0, $fitting);
-            $widest = 0.0;
-
-            foreach ($candidate as $line) {
-                $widest = max($widest, (float) $pdf->GetStringWidth($line, 'helvetica', '', $size));
-            }
-
-            if ($widest <= $boxWidth) {
-                return [
-                    'lines'  => $candidate,
-                    'size'   => $size,
-                    'height' => count($candidate) * $lineHeight,
-                ];
-            }
-        }
-
-        // Nothing fit cleanly at any size. Rather than drop the provenance
-        // altogether, draw as much of it as the box can hold at the smallest
-        // size and let the ellipsis say the rest was cut.
-        $lineHeight = $minSize * $this->lineHeightRatio();
-        $fitting    = (int) floor($available / $lineHeight);
-
-        if ($fitting < 1) {
-            return $none;
-        }
-
-        $candidate = array_map(
-            fn (string $line): string => $this->truncateToWidth($pdf, $line, $boxWidth, $minSize),
-            array_slice($lines, 0, $fitting),
-        );
-
-        return [
-            'lines'  => $candidate,
-            'size'   => $minSize,
-            'height' => count($candidate) * $lineHeight,
-        ];
-    }
-
-    /**
-     * The same caption, stacked down a column beside the signature.
-     *
-     * Sized against the band's WIDTH rather than the box's, because that is
-     * the constraint here — a column is always narrow, and a line that fits
-     * the whole box tells you nothing about whether it fits the strip it is
-     * actually going in.
+     * An empty `lines` means "draw no text".
      *
      * @param  array<int, string>  $lines
      * @return array{lines: array<int, string>, size: float, height: float, width: float}
      */
-    protected function layoutCaptionColumn(TCPDF $pdf, array $lines, float $boxWidth, float $boxHeight): array
+    protected function layoutCaption(TCPDF $pdf, array $lines, float $boxWidth, float $boxHeight): array
     {
         $none = ['lines' => [], 'size' => 0.0, 'height' => 0.0, 'width' => 0.0];
 
@@ -351,63 +175,47 @@ trait DrawsSignatureStamp
             return $none;
         }
 
-        // Beside the signature the limit is horizontal: too narrow a box and
-        // the ink is left with a sliver rather than the caption going unread.
-        if ($boxWidth < (float) config('signature.caption.min_box_width', 110)) {
-            return $none;
-        }
+        $size    = (float) config('signature.caption.font_pt', 7);
+        $minSize = min($size, (float) config('signature.caption.min_font_pt', 4));
 
-        $maxSize = (float) config('signature.caption.max_font_pt', 6);
-        $minSize = (float) config('signature.caption.min_font_pt', 4);
-        $ratio   = max(0.1, min(0.9, (float) config('signature.caption.width_ratio', 0.42)));
+        // The text may crowd the ink, but not erase it.
+        $maxWidth = $boxWidth - $this->captionGap() - $boxWidth * 0.25;
 
-        $band = $boxWidth * $ratio;
+        for (; $size >= $minSize; $size -= 0.25) {
+            $block = $this->measureCaption($pdf, $lines, $size);
 
-        for ($size = $maxSize; $size >= $minSize; $size -= 0.25) {
-            $lineHeight = $size * $this->lineHeightRatio();
-
-            if (count($lines) * $lineHeight > $boxHeight) {
-                continue;
-            }
-
-            $widest = 0.0;
-            foreach ($lines as $line) {
-                $widest = max($widest, (float) $pdf->GetStringWidth($line, 'helvetica', '', $size));
-            }
-
-            if ($widest <= $band) {
-                return [
-                    'lines'  => $lines,
-                    'size'   => $size,
-                    'height' => count($lines) * $lineHeight,
-                    'width'  => $band,
-                ];
+            if ($block['width'] <= $maxWidth && $block['height'] <= $boxHeight) {
+                return ['lines' => $lines] + $block;
             }
         }
 
-        // Truncate rather than abandon the provenance, as the bottom band does.
-        $lineHeight = $minSize * $this->lineHeightRatio();
-        $fitting    = (int) floor($boxHeight / $lineHeight);
+        // An undersized box. Still draw the whole name at the smallest size;
+        // a stamp that names its signatory slightly outside a cramped box is
+        // better than one that does not name them.
+        return ['lines' => $lines] + $this->measureCaption($pdf, $lines, $minSize);
+    }
 
-        if ($fitting < 1) {
-            return $none;
+    /**
+     * @param  array<int, string>  $lines
+     * @return array{size: float, height: float, width: float}
+     */
+    protected function measureCaption(TCPDF $pdf, array $lines, float $size): array
+    {
+        $widest = 0.0;
+
+        foreach ($lines as $line) {
+            $widest = max($widest, (float) $pdf->GetStringWidth($line, 'helvetica', '', $size));
         }
-
-        $candidate = array_map(
-            fn (string $line): string => $this->truncateToWidth($pdf, $line, $band, $minSize),
-            array_slice($lines, 0, $fitting),
-        );
 
         return [
-            'lines'  => $candidate,
-            'size'   => $minSize,
-            'height' => count($candidate) * $lineHeight,
-            'width'  => $band,
+            'size'   => $size,
+            'height' => count($lines) * $size * $this->lineHeightRatio(),
+            'width'  => $widest,
         ];
     }
 
     /**
-     * Draw the caption block stampFrame() positioned, offset by the box's own
+     * Draw the text block stampFrame() positioned, offset by the box's own
      * origin.
      *
      * @param  array<string, mixed>  $caption
@@ -419,38 +227,34 @@ trait DrawsSignatureStamp
         }
 
         $lineHeight = $caption['size'] * $this->lineHeightRatio();
-        $align      = $this->captionAlign();
+
+        // No cell padding: the block was measured as bare text, and padding
+        // would push the last characters of a long name past its edge.
+        $padding = $pdf->getCellPaddings();
+        $pdf->setCellPaddings(0, 0, 0, 0);
 
         $pdf->SetFont('helvetica', '', $caption['size']);
         $pdf->SetTextColor(...$this->captionColour());
 
         foreach ($caption['lines'] as $index => $line) {
             $pdf->SetXY($originX + $caption['x'], $originY + $caption['y'] + ($index * $lineHeight));
-            $pdf->Cell($caption['w'], $lineHeight, $line, 0, 0, $align);
+            $pdf->Cell($caption['w'], $lineHeight, $line, 0, 0, 'L');
         }
 
         // Leave the document as it was found: anything drawn after this — a
-        // second stamp on the same page — would otherwise inherit 4pt grey.
+        // second stamp on the same page — would otherwise inherit both.
         $pdf->SetTextColor(0, 0, 0);
+        $pdf->setCellPaddings($padding['L'], $padding['T'], $padding['R'], $padding['B']);
     }
 
-    /**
-     * Leading as a multiple of the font size.
-     *
-     * Tight on purpose. The caption is a block of provenance attached to the
-     * signature above it, and loose leading makes it read as a separate note
-     * floating in whatever the form has underneath.
-     */
+    private function captionGap(): float
+    {
+        return max(0.0, (float) config('signature.caption.gap', 3));
+    }
+
     private function lineHeightRatio(): float
     {
-        return max(1.0, (float) config('signature.caption.line_height', 1.06));
-    }
-
-    private function captionAlign(): string
-    {
-        $align = strtoupper((string) config('signature.caption.align', 'C'));
-
-        return in_array($align, ['L', 'C', 'R'], true) ? $align : 'C';
+        return max(1.0, (float) config('signature.caption.line_height', 1.15));
     }
 
     /**
@@ -458,31 +262,12 @@ trait DrawsSignatureStamp
      */
     private function captionColour(): array
     {
-        $configured = config('signature.caption.color', [90, 90, 90]);
+        $configured = config('signature.caption.color', [0, 0, 0]);
 
         if (! is_array($configured) || count($configured) !== 3) {
-            return [90, 90, 90];
+            return [0, 0, 0];
         }
 
         return array_map(fn ($channel): int => max(0, min(255, (int) $channel)), array_values($configured));
-    }
-
-    private function truncateToWidth(TCPDF $pdf, string $line, float $width, float $size): string
-    {
-        if ((float) $pdf->GetStringWidth($line, 'helvetica', '', $size) <= $width) {
-            return $line;
-        }
-
-        // mb_* throughout: a signer's name is as likely to be "José Ramírez"
-        // as not, and cutting a multi-byte name mid-character would render as
-        // a replacement glyph in the middle of the provenance line.
-        $truncated = $line;
-
-        while ($truncated !== ''
-            && (float) $pdf->GetStringWidth($truncated.'…', 'helvetica', '', $size) > $width) {
-            $truncated = mb_substr($truncated, 0, mb_strlen($truncated) - 1);
-        }
-
-        return $truncated === '' ? '' : $truncated.'…';
     }
 }
