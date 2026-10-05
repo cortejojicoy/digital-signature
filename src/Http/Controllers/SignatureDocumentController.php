@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
+use Kukux\DigitalSignature\Agent\AgentPresenceService;
 use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
@@ -53,6 +54,7 @@ class SignatureDocumentController extends Controller
     public function __construct(
         protected SigningSessionManager $sessions,
         protected SignatureCaption $captions,
+        protected AgentPresenceService $presence,
     ) {
     }
 
@@ -111,6 +113,9 @@ class SignatureDocumentController extends Controller
                 'historyUrl' => $session?->uuid ? route('signature.documents.show', ['session' => $session->uuid]) : null,
             ],
             'signatures' => $this->library((int) $request->user_id),
+            // Under approval = enforce: whether this browser is on the
+            // computer the account is paired with, and how to check.
+            'agent'      => $settled ? ['required' => false] : $this->presence->state((int) $request->user_id),
         ]);
     }
 
@@ -220,6 +225,16 @@ class SignatureDocumentController extends Controller
             'signature_id' => ['sometimes', 'nullable', 'integer'],
             'caption_position' => ['sometimes', 'nullable', 'in:bottom,top,left,right'],
         ]);
+
+        // The page disables its Sign button in the same cases; this is the
+        // same rule for a client that does not.
+        if ($refusal = $this->presence->refusal((int) $request->user_id)) {
+            return response()->json([
+                'status' => 'prohibited',
+                'error'  => $refusal,
+                'signed' => [],
+            ], 403);
+        }
 
         $jobs = $this->resolveSigningJobs($request, $data);
 
