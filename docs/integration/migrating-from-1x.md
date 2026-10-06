@@ -69,11 +69,6 @@ If you published `config/signature.php` back in 1.x, it's missing two keys. The 
 'documents' => [
     'accomplishment-report' => \App\Signatures\AccomplishmentReportDocument::class,
 ],
-
-'signed' => [
-    'enabled' => env('SIGNATURE_SIGNED_ENABLED', true),
-    // … copy the rest from vendor/kukux/digital-signature/config/signature.php
-],
 ```
 
 > **Check for duplicate keys while you're in there.** Ours had `'launcher'` twice, because an old hand-edited block survived a later re-publish. PHP quietly keeps the **last** one, so the first block's offset had never applied. Run `grep -c "'launcher' =>" config/signature.php`; it should print `1`.

@@ -525,7 +525,7 @@ name to a `V3\…` or `V4\…` implementation, at register time. v5 maps to V4.
 Bridged this way: the `SignatureResource`; the `SignDocumentAction`,
 `SignDocumentHeaderAction`, `RequestSignaturesAction` and
 `RequestSignaturesTableAction` actions; the `PdfTemplateDesigner`,
-`PdfTemplateSigner`, `SignatureInbox` and (2.0) `SignedDocuments` pages; and
+`PdfTemplateSigner` and `SignatureInbox` pages; and
 (2.0) `RouteForSignaturesAction`, `ViewDocumentOfRecordAction`,
 `DownloadDocumentOfRecordAction` and `ViewDocumentHistoryAction`. Infolist
 entries (`SignatoryPanel`, `DocumentHistoryEntry`) need no bridge; see below.

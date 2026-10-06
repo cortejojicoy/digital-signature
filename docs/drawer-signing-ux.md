@@ -29,8 +29,9 @@ The settings you'll most likely touch:
 
 | Key | Env var | Default | What it does |
 |---|---|---|---|
-| `signature.launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `64rem` | Drawer width on desktop. |
-| `signature.launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `80rem` | Drawer width while **Manage signatures** is open. |
+| `signature.launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `56rem` | Drawer width on desktop. |
+| `signature.launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `72rem` | Drawer width while **Manage signatures** or **All documents I've signed** is open. |
+| `signature.launcher.customizable` | `SIGNATURE_LAUNCHER_CUSTOMIZABLE` | `true` | Shows the **Settings** tab, where each user moves their own button. |
 | `signature.launcher.replaces_navigation` | `SIGNATURE_LAUNCHER_REPLACES_NAV` | `true` | Hides the inbox and Signatures sidebar items. Both stay routable. |
 
 ```env

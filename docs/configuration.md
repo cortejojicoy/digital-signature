@@ -315,21 +315,6 @@ The text is drawn at a fixed size whatever size the box is, so resizing a placem
 
 ---
 
-## Documents I've signed (2.0)
-
-The *Signed by me* page: every signature the user has put on a routed document, with **the copy they signed** and **the current** document. Like the inbox, it leaves the sidebar while the launcher (which links to it) replaces navigation.
-
-| Key | Env | Default |
-|---|---|---|
-| `signed.enabled` | `SIGNATURE_SIGNED_ENABLED` | `true` |
-| `signed.navigation` | `SIGNATURE_SIGNED_NAV` | `true` |
-| `signed.navigation_label` | `SIGNATURE_SIGNED_LABEL` | `Signed by me` |
-| `signed.navigation_icon` | `SIGNATURE_SIGNED_ICON` | `heroicon-o-document-check` |
-| `signed.navigation_group` | `SIGNATURE_SIGNED_GROUP` | the inbox's group |
-| `signed.navigation_sort` | `SIGNATURE_SIGNED_SORT` | `null` |
-
----
-
 ## Full environment variable reference
 
 ```bash
@@ -382,8 +367,9 @@ SIGNATURE_LAUNCHER_POSITION=bottom-right
 SIGNATURE_LAUNCHER_LABEL=Signatures
 SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
-SIGNATURE_LAUNCHER_WIDTH=64rem
-SIGNATURE_LAUNCHER_MANAGE_WIDTH=80rem
+SIGNATURE_LAUNCHER_WIDTH=56rem
+SIGNATURE_LAUNCHER_MANAGE_WIDTH=72rem
+SIGNATURE_LAUNCHER_CUSTOMIZABLE=true  # per-user Settings tab
 SIGNATURE_LAUNCHER_AVOID_OVERLAP=true
 SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
 SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
@@ -401,14 +387,6 @@ SIGNATURE_CAPTION_GAP=3
 SIGNATURE_CAPTION_DATE_FORMAT="Y.m.d"
 SIGNATURE_CAPTION_TIME_FORMAT="H:i:s"
 SIGNATURE_CAPTION_TIMEZONE=Asia/Manila
-
-# Signed by me (2.0)
-SIGNATURE_SIGNED_ENABLED=true
-SIGNATURE_SIGNED_NAV=true
-SIGNATURE_SIGNED_LABEL="Signed by me"
-SIGNATURE_SIGNED_ICON=heroicon-o-document-check
-SIGNATURE_SIGNED_GROUP=
-SIGNATURE_SIGNED_SORT=
 
 # Optional features
 SIGNATURE_TSA_URL=                  # blank = disabled
@@ -492,7 +470,7 @@ library. On by default.
 
 The drawer is the signing surface, not a notification rail: opening a document
 renders the PDF inside it, and the signatory drags their signature onto the
-page. `width` is sized for that — `64rem` by default, wide enough to read a
+page. `width` is sized for that — `56rem` by default, wide enough to read a
 page. It accepts any plain CSS length, never exceeds the viewport, and goes
 full-bleed below 640px regardless.
 
@@ -506,8 +484,9 @@ full-bleed below 640px regardless.
 | `launcher.color` | `SIGNATURE_LAUNCHER_COLOR` | `null` (built-in neutral) |
 | `launcher.poll_seconds` | `SIGNATURE_LAUNCHER_POLL` | `60` |
 | `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
-| `launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `64rem` |
-| `launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `80rem` (drawer width while **Manage signatures** is open) |
+| `launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `56rem` |
+| `launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `72rem` (drawer width while **Manage signatures** or **All documents I've signed** is open) |
+| `launcher.customizable` | `SIGNATURE_LAUNCHER_CUSTOMIZABLE` | `true` (each user can move their own button from the drawer's **Settings** tab) |
 | `launcher.avoid_overlap` | `SIGNATURE_LAUNCHER_AVOID_OVERLAP` | `true` |
 | `launcher.offset.x` | `SIGNATURE_LAUNCHER_OFFSET_X` | `1.5rem` |
 | `launcher.offset.y` | `SIGNATURE_LAUNCHER_OFFSET_Y` | `1.5rem` |
@@ -518,6 +497,14 @@ full-bleed below 640px regardless.
 
 `position` accepts `bottom-right`, `bottom-left`, `top-right`, `top-left`. The
 slide-over enters from whichever side the button sits on.
+
+`position` and `offset` are the **default** placement. With `customizable` on,
+each user can pick their own corner and offsets from the drawer's **Settings**
+tab: the button moves as they choose, and the choice is saved per user (in
+`digital_signature_user_preferences`) and follows them to other devices.
+**Reset to default** goes back to the config. Set `customizable` to `false` to
+hide the tab and apply the config placement to everyone; saved choices are
+then ignored, not deleted.
 
 #### Not landing on the host app's own floating button
 

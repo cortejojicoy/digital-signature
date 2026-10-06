@@ -63,7 +63,9 @@ While the launcher is on, the inbox page and the Signatures resource drop out of
 
 ### Position and look
 
-Position, icon, label, colour, badge polling and drawer width are all config. See [Configuration](configuration.md#launcher).
+Icon, label, colour, badge polling and drawer width are config. Position and offsets in config are the default: each user can move their own button from the drawer's **Settings** tab (turn that off with `launcher.customizable => false`). See [Configuration](configuration.md#launcher).
+
+The Signed tab shows recent signatures. **All documents I've signed** widens the drawer into the full record, with a title filter and **Show more**, the same way **Manage signatures** does. There is no separate page.
 
 The button automatically moves out of the way of other things pinned in the same corner (your own FAB, a chat widget, a cookie bar). If it guesses wrong, use `launcher.avoid` / `launcher.ignore` to override specific selectors, or set `avoid_overlap => false` and place it with `launcher.offset`. See [Not landing on the host app's own floating button](configuration.md#not-landing-on-the-host-apps-own-floating-button).
 

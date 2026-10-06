@@ -91,7 +91,7 @@ The lookup calls the definition's `locate()`, which never creates a record, so l
 | `ViewDocumentHistoryAction` | a modal listing every version, with integrity and a link to each |
 | `DocumentHistoryEntry` | the same list as an infolist entry |
 | `DocumentOfRecordBanner::render($document)` | the one-line banner, as HTML |
-| "Signed by me" page + the launcher's **Signed** tab | each signature the user made, with **The copy I signed** and **Current** |
+| The launcher's **Signed** tab and **All documents I've signed** | each signature the user made, with **The copy I signed** and **Current** |
 
 On a record page they need no configuration. On a page that generates the document, say which document and what it's built from:
 
