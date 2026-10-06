@@ -22,7 +22,6 @@ use Kukux\DigitalSignature\Filament\Actions\RequestSignaturesTableResolver;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSignerResolver;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInboxResolver;
-use Kukux\DigitalSignature\Filament\Pages\SignedDocumentsResolver;
 use Kukux\DigitalSignature\Filament\Actions\DownloadDocumentOfRecordResolver;
 use Kukux\DigitalSignature\Filament\Actions\RouteForSignaturesResolver;
 use Kukux\DigitalSignature\Filament\Actions\ViewDocumentHistoryResolver;
@@ -88,7 +87,6 @@ class SignatureServiceProvider extends ServiceProvider
             PdfTemplateDesignerResolver::class,
             PdfTemplateSignerResolver::class,
             SignatureInboxResolver::class,
-            SignedDocumentsResolver::class,
             RouteForSignaturesResolver::class,
             ViewDocumentOfRecordResolver::class,
             DownloadDocumentOfRecordResolver::class,

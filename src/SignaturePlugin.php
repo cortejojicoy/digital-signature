@@ -14,7 +14,6 @@ use Closure;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateDesigner;
 use Kukux\DigitalSignature\Filament\Pages\PdfTemplateSigner;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
-use Kukux\DigitalSignature\Filament\Pages\SignedDocuments;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
@@ -306,12 +305,6 @@ class SignaturePlugin implements Plugin
         // where a signatory finds the documents waiting on them.
         if ($this->registerInbox ?? config('signature.inbox.enabled', true)) {
             $pages[] = SignatureInbox::class;
-        }
-
-        // The full record of what this user has signed. The launcher's Signed
-        // tab links here for anything older than its last fifty.
-        if (config('signature.signed.enabled', true)) {
-            $pages[] = SignedDocuments::class;
         }
 
         $panel->pages($pages);
