@@ -27,11 +27,19 @@
     $onLeft   = str_ends_with($settings['position'], '-left');
 @endphp
 
+{{--
+    The corner class and offsets are rendered for first paint, then owned by
+    Alpine (`pos`, `offX`, `offY`) so the Settings tab can move the button
+    live. The object form of x-bind:class is what lets Alpine remove the
+    server-rendered corner class when the user picks another.
+--}}
 <div
     class="dsig-launcher dsig-launcher--{{ $settings['position'] }}"
     style="--dsig-x: {{ $settings['offsetX'] }}; --dsig-y: {{ $settings['offsetY'] }}; --dsig-z: {{ $settings['zIndex'] }}; --dsig-w: {{ $settings['width'] }}; --dsig-w-manage: {{ $settings['manageWidth'] }}"
     data-dsig-loaded="{{ $this->loaded ? '1' : '0' }}"
-    x-data="dsigLauncher(@js($this->placement), @js($this->viewer))"
+    x-data="dsigLauncher(@js($this->placement), @js($this->viewer), @js($settings['customizable'] ? $this->placementChoice : null))"
+    x-bind:class="cornerClasses()"
+    x-bind:style="moved ? { '--dsig-x': offX + 'px', '--dsig-y': offY + 'px' } : {}"
     x-on:keydown.escape.window="escape()"
     @if ($settings['poll'] > 0) wire:poll.{{ $settings['poll'] }}s.visible @endif
 >
@@ -42,12 +50,27 @@
     would simply never run.
 --}}
 <script>
-    window.dsigLauncher = window.dsigLauncher ?? function (config, viewer) {
+    window.dsigLauncher = window.dsigLauncher ?? function (config, viewer, choice) {
         return {
             open: false,
             loaded: false,
             config,
             viewer,
+            // Where the button sits. Starts at what the server rendered; the
+            // Settings tab changes it in place. `moved` stays false until the
+            // user touches a control, so first paint keeps the config's own
+            // CSS lengths (which may be rem) instead of a pixel conversion.
+            choice,
+            pos: config.position,
+            offX: choice?.x ?? 0,
+            offY: choice?.y ?? 0,
+            moved: false,
+            // Which edge the drawer slides from. Follows the corner, but only
+            // when the drawer opens: moving the button from the Settings tab
+            // must not swing the drawer out from under the pointer.
+            panelLeft: config.position.endsWith('-left'),
+            saveTimer: null,
+            saved: false,
             // 'queue' | 'library'. Two tabs rather than two drawers: placing a
             // signature means reading the document and choosing the signature
             // at the same time, and a second overlay to hold the second half
@@ -57,9 +80,11 @@
             viewing: null,
             // Set while the viewer shows a template preview rather than a request.
             previewMeta: null,
-            // 'tabs' | 'manage'. Manage mode widens the drawer and replaces the
-            // tabs with the signature list and the selected signature's
-            // details — what the View Signature page used to be.
+            // 'tabs' | 'manage' | 'signed'. Manage mode widens the drawer and
+            // replaces the tabs with the signature list and the selected
+            // signature's details — what the View Signature page used to be.
+            // Signed mode does the same for "All documents I've signed", which
+            // used to be a page of its own.
             mode: 'tabs',
             // Status chip in manage mode's list: 'all' or a signature status.
             manageFilter: 'all',
@@ -109,6 +134,10 @@
 
                 this.schedule()
 
+                // place() stands down while the drawer is open, and the
+                // button may have moved corners meanwhile.
+                this.$watch('open', (open) => { if (! open) this.schedule() })
+
                 // Re-measure when the viewport changes, when Livewire swaps
                 // the page, and twice more shortly after load: chat widgets
                 // and cookie bars routinely mount a second or two late, and a
@@ -135,11 +164,14 @@
                 window.removeEventListener('dsig:signed', this.onSigned)
                 window.removeEventListener('sig:exported', this.onPadExport)
                 this.timers.forEach(clearTimeout)
+                clearTimeout(this.saveTimer)
                 clearTimeout(this.signedNotice)
                 this.observer?.disconnect()
             },
 
             toggle() {
+                if (! this.open) this.panelLeft = this.onLeft
+
                 this.open = ! this.open
 
                 if (this.open && ! this.loaded) {
@@ -183,9 +215,27 @@
                 this.mode = 'tabs'
             },
 
-            /** First Escape leaves manage mode; the next closes the drawer. */
+            /** Widen the drawer into the full record of what this user signed. */
+            openSigned() {
+                this.viewing = null
+                this.mode = 'signed'
+                this.loaded = true
+                this.$wire.openSigned()
+            },
+
+            get wide() {
+                return this.mode === 'manage' || this.mode === 'signed'
+            },
+
+            /** First Escape leaves manage or signed mode; the next closes the drawer. */
             escape() {
-                if (this.open && this.mode === 'manage') {
+                if (this.open && this.viewing && this.mode === 'signed') {
+                    this.viewing = null
+
+                    return
+                }
+
+                if (this.open && this.wide) {
                     this.leaveManage()
 
                     return
@@ -202,7 +252,9 @@
              * there is anything left to sign, and renders itself accordingly.
              */
             view(requestId) {
-                this.mode = 'tabs'
+                // From the signed list, stay in it: closing the document
+                // lands back on the list rather than on the tabs.
+                if (this.mode !== 'signed') this.mode = 'tabs'
                 this.previewMeta = null
                 this.viewing = requestId
             },
@@ -218,6 +270,60 @@
 
             url(template, requestId) {
                 return template.replace('__ID__', requestId)
+            },
+
+            cornerClasses() {
+                return {
+                    'dsig-launcher--bottom-right': this.pos === 'bottom-right',
+                    'dsig-launcher--bottom-left':  this.pos === 'bottom-left',
+                    'dsig-launcher--top-right':    this.pos === 'top-right',
+                    'dsig-launcher--top-left':     this.pos === 'top-left',
+                }
+            },
+
+            get onLeft() {
+                return this.pos.endsWith('-left')
+            },
+
+            /**
+             * Settings tab: move the button now, save shortly after. Sliders
+             * fire on every step, and one save per drag is enough.
+             */
+            setCorner(position) {
+                this.pos = position
+                this.moved = true
+                this.placementChanged()
+            },
+
+            placementChanged() {
+                this.moved = true
+                this.offX = Math.max(0, Math.min(400, parseInt(this.offX, 10) || 0))
+                this.offY = Math.max(0, Math.min(400, parseInt(this.offY, 10) || 0))
+                this.config.position = this.pos
+                this.saved = false
+
+                // The overlap pass measured the old corner; the new one may
+                // have its own neighbours.
+                this.$root.style.setProperty('--dsig-stack', '0px')
+                this.schedule()
+
+                clearTimeout(this.saveTimer)
+                this.saveTimer = setTimeout(() => {
+                    this.$wire.saveLauncherPlacement(this.pos, this.offX, this.offY)
+                        .then(() => { this.saved = true })
+                }, 400)
+            },
+
+            resetPlacement() {
+                const d = this.choice.default
+                this.pos = d.position
+                this.offX = d.x
+                this.offY = d.y
+                this.config.position = this.pos
+                this.saved = false
+                this.schedule()
+                clearTimeout(this.saveTimer)
+                this.$wire.resetLauncherPlacement().then(() => { this.saved = true })
             },
 
             schedule() {
@@ -508,6 +614,46 @@
             border-radius: 9999px; background: rgb(0 0 0 / 0.08); font-size: .6875rem;
         }
         .dark .dsig-tab__count { background: rgb(255 255 255 / 0.12); }
+
+        .dsig-more { display: flex; justify-content: center; margin: .5rem 0 1rem; }
+
+        /* ── All documents I've signed ─────────────────────────────────── */
+        .dsig-signed__search { max-width: 24rem; margin-bottom: 1rem; }
+        .dsig-signed__row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1rem; }
+        .dsig-signed__body { min-width: 0; flex: 1 1 16rem; }
+
+        /* ── Settings: a little screen with a target in each corner ────── */
+        .dsig-corners {
+            display: grid; grid-template-columns: 1fr 1fr; gap: .5rem;
+            max-width: 22rem; padding: .5rem; border-radius: .75rem;
+            border: 1px solid rgb(0 0 0 / 0.08); background: rgb(0 0 0 / 0.02);
+        }
+        .dark .dsig-corners { border-color: rgb(255 255 255 / 0.1); background: rgb(255 255 255 / 0.03); }
+        .dsig-corner {
+            display: flex; flex-direction: column; gap: .5rem; height: 4.5rem; padding: .5rem;
+            border: 1px solid rgb(0 0 0 / 0.1); border-radius: .5rem; cursor: pointer;
+            background: #fff; color: inherit; font-size: .75rem; font-weight: 600;
+        }
+        .dark .dsig-corner { background: rgb(255 255 255 / 0.04); border-color: rgb(255 255 255 / 0.12); }
+        .dsig-corner--top-left     { align-items: flex-start; justify-content: flex-start; }
+        .dsig-corner--top-right    { align-items: flex-end;   justify-content: flex-start; }
+        .dsig-corner--bottom-left  { align-items: flex-start; justify-content: flex-end; flex-direction: column-reverse; }
+        .dsig-corner--bottom-right { align-items: flex-end;   justify-content: flex-end; flex-direction: column-reverse; }
+        .dsig-corner__dot {
+            width: .9rem; height: .9rem; border-radius: 9999px;
+            border: 2px solid currentColor; opacity: .35;
+        }
+        .dsig-corner__label { opacity: .7; }
+        .dsig-corner:hover { border-color: rgb(0 0 0 / 0.25); }
+        .dark .dsig-corner:hover { border-color: rgb(255 255 255 / 0.3); }
+        .dsig-corner--on { border-color: var(--dsig-accent, #18181b); box-shadow: 0 0 0 1px var(--dsig-accent, #18181b); }
+        .dark .dsig-corner--on { border-color: var(--dsig-accent, #f4f4f5); box-shadow: 0 0 0 1px var(--dsig-accent, #f4f4f5); }
+        .dsig-corner--on .dsig-corner__dot { opacity: 1; background: currentColor; }
+        .dsig-corner--on .dsig-corner__label { opacity: 1; }
+        .dsig-corner:focus-visible { outline: 2px solid var(--dsig-accent, #18181b); outline-offset: 2px; }
+        .dsig-range { width: 100%; max-width: 22rem; accent-color: var(--dsig-accent, #18181b); }
+        .dark .dsig-range { accent-color: var(--dsig-accent, #f4f4f5); }
+        .dsig-settings__foot { display: flex; align-items: center; gap: .75rem; }
 
         /*
             Day heading in the signed history. Sticky because the whole point
@@ -841,7 +987,7 @@
         x-transition:leave-start="dsig-t-to"
         x-transition:leave-end="dsig-t-from"
         class="dsig-panel dsig-panel--{{ $onLeft ? 'left' : 'right' }}"
-        x-bind:class="mode === 'manage' ? 'dsig-panel--wide' : ''"
+        x-bind:class="{ 'dsig-panel--wide': wide, 'dsig-panel--left': panelLeft, 'dsig-panel--right': ! panelLeft }"
         style="display: none"
         role="dialog"
         aria-modal="true"
@@ -851,7 +997,7 @@
             <button
                 type="button"
                 class="dsig-panel__back"
-                x-show="mode === 'manage'"
+                x-show="wide && ! (mode === 'signed' && viewing)"
                 x-cloak
                 x-on:click="leaveManage()"
                 aria-label="Back"
@@ -862,7 +1008,8 @@
             <div>
                 <p class="dsig-panel__title">{{ $settings['label'] }}</p>
                 <p class="dsig-panel__sub" x-show="mode === 'manage'" x-cloak>Manage signatures</p>
-                <p class="dsig-panel__sub" x-show="mode !== 'manage'">
+                <p class="dsig-panel__sub" x-show="mode === 'signed'" x-cloak>All documents I've signed</p>
+                <p class="dsig-panel__sub" x-show="mode === 'tabs'">
                     @if ($count === 0)
                         Nothing awaiting your signature
                     @elseif ($count === 1)
@@ -935,6 +1082,20 @@
             >
                 Devices
             </button>
+
+            @if ($settings['customizable'])
+                <button
+                    type="button"
+                    role="tab"
+                    class="dsig-tab"
+                    x-bind:class="tab === 'settings' ? 'dsig-tab--on' : ''"
+                    x-bind:aria-selected="(tab === 'settings').toString()"
+                    x-on:click="tab = 'settings'"
+                    @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                >
+                    Settings
+                </button>
+            @endif
         </div>
 
         <div class="dsig-panel__body">
@@ -1122,10 +1283,12 @@
                         </div>
                     @endforelse
 
-                    @if ($history !== [] && $this->signedUrl)
-                        <p class="dsig-daygroup">
-                            <a href="{{ $this->signedUrl }}">All documents I've signed →</a>
-                        </p>
+                    @if ($history !== [])
+                        <div class="dsig-more">
+                            <button type="button" class="dsig-btn dsig-btn--ghost" x-on:click="openSigned()">
+                                All documents I've signed →
+                            </button>
+                        </div>
                     @endif
                 @endif
             </div>
@@ -1352,6 +1515,150 @@
                     <div class="dsig-skeleton"></div>
                 @else
                     @livewire('kukux-digital-signature.signing-devices', key('dsig-signing-devices'))
+                @endif
+            </div>
+
+            {{--
+                Button placement, per user. Each control moves the button at
+                once (it stays visible above the backdrop) and saves shortly
+                after; the config placement is what "Reset" returns to.
+            --}}
+            @if ($settings['customizable'])
+                <div x-show="! viewing && mode === 'tabs' && tab === 'settings'" x-cloak>
+                    <p class="dsig-section__title">Floating button</p>
+                    <p class="dsig-card__meta" style="margin-bottom: .75rem">
+                        Choose the corner your Signatures button sits in. It moves as you choose, and only for you.
+                    </p>
+
+                    <div class="dsig-corners" role="radiogroup" aria-label="Button corner">
+                        @foreach (['top-left' => 'Top left', 'top-right' => 'Top right', 'bottom-left' => 'Bottom left', 'bottom-right' => 'Bottom right'] as $corner => $cornerLabel)
+                            <button
+                                type="button"
+                                role="radio"
+                                class="dsig-corner dsig-corner--{{ $corner }}"
+                                x-bind:class="pos === '{{ $corner }}' ? 'dsig-corner--on' : ''"
+                                x-bind:aria-checked="(pos === '{{ $corner }}').toString()"
+                                x-on:click="setCorner('{{ $corner }}')"
+                                @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                            >
+                                <span class="dsig-corner__dot"></span>
+                                <span class="dsig-corner__label">{{ $cornerLabel }}</span>
+                            </button>
+                        @endforeach
+                    </div>
+
+                    <div class="dsig-form" style="margin-top: 1rem">
+                        <label for="dsig-offset-x">
+                            Distance from the side: <span x-text="offX + 'px'"></span>
+                        </label>
+                        <input
+                            id="dsig-offset-x"
+                            type="range" min="0" max="400" step="4"
+                            class="dsig-range"
+                            x-model.number="offX"
+                            x-on:input="placementChanged()"
+                        />
+
+                        <label for="dsig-offset-y">
+                            Distance from the <span x-text="pos.startsWith('top') ? 'top' : 'bottom'"></span>:
+                            <span x-text="offY + 'px'"></span>
+                        </label>
+                        <input
+                            id="dsig-offset-y"
+                            type="range" min="0" max="400" step="4"
+                            class="dsig-range"
+                            x-model.number="offY"
+                            x-on:input="placementChanged()"
+                        />
+
+                        <div class="dsig-settings__foot">
+                            <button type="button" class="dsig-btn dsig-btn--ghost" x-on:click="resetPlacement()">
+                                Reset to default
+                            </button>
+                            <span class="dsig-card__meta" x-show="saved" x-cloak>Saved</span>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
+            {{--
+                All documents I've signed: the full record, widened like Manage
+                signatures. It replaces the Signed by me page, so nothing here
+                navigates away — "The copy I signed" opens in the document pane,
+                and closing it comes back to this list.
+            --}}
+            <div x-show="! viewing && mode === 'signed'" x-cloak>
+                @if (! $this->signedLoaded)
+                    <div class="dsig-skeleton"></div>
+                    <div class="dsig-skeleton"></div>
+                @else
+                    @php
+                        $all     = $this->allSigned;
+                        $hasMore = $all->count() > $this->signedLimit;
+                        $all     = $all->take($this->signedLimit);
+                    @endphp
+
+                    <input
+                        type="search"
+                        class="dsig-input dsig-signed__search"
+                        placeholder="Filter by document title"
+                        aria-label="Filter by document title"
+                        wire:model.live.debounce.300ms="signedSearch"
+                    />
+
+                    @forelse ($all as $request)
+                        @php $session = $request->session; @endphp
+
+                        <div class="dsig-card dsig-signed__row" wire:key="dsig-all-signed-{{ $request->id }}">
+                            <div class="dsig-signed__body">
+                                <p class="dsig-card__title">{{ $this::titleOf($request) }}</p>
+                                <p class="dsig-card__meta">
+                                    Signed as <strong>{{ $request->role }}</strong>
+                                    @if ($request->responded_at)
+                                        · {{ $request->responded_at->format('j M Y, g:i a') }}
+                                    @endif
+                                    @if ($session && ! $session->isComplete())
+                                        · {{ $session->isOpen() ? 'awaiting others' : 'routing '.$session->status }}
+                                    @endif
+                                </p>
+                            </div>
+
+                            <div class="dsig-card__actions" style="margin-top: 0">
+                                <button
+                                    type="button"
+                                    class="dsig-btn dsig-btn--ghost"
+                                    x-on:click="view({{ $request->id }})"
+                                >
+                                    The copy I signed
+                                </button>
+
+                                @if ($session?->uuid)
+                                    <a
+                                        class="dsig-btn dsig-btn--ghost"
+                                        href="{{ route('signature.documents.show', ['session' => $session->uuid]) }}"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        Current
+                                    </a>
+                                @endif
+                            </div>
+                        </div>
+                    @empty
+                        <div class="dsig-empty">
+                            <x-filament::icon icon="heroicon-o-document-check" />
+                            <p>{{ $this->signedSearch === '' ? 'Nothing signed yet' : 'No signed document matches that' }}</p>
+                            <p>Documents you sign are kept here.</p>
+                        </div>
+                    @endforelse
+
+                    @if ($hasMore)
+                        <div class="dsig-more">
+                            <button type="button" class="dsig-btn dsig-btn--ghost" wire:click="showMoreSigned">
+                                Show more
+                            </button>
+                        </div>
+                    @endif
                 @endif
             </div>
 
