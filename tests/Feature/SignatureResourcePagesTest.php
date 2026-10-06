@@ -150,10 +150,10 @@ describe('signature resource without a View page', function () {
 });
 
 /**
- * "Signed by me": a real panel page listing what this user has signed, each
- * with the copy they signed and the document as it stands now.
+ * "All documents I've signed": the full record, opened inside the launcher
+ * drawer. It replaced the Signed by me page.
  */
-describe('signed documents page', function () {
+describe('all documents I have signed, in the drawer', function () {
 
     beforeEach(function () {
         Storage::fake('testing');
@@ -180,12 +180,16 @@ describe('signed documents page', function () {
 
         $this->actingAs(\Kukux\DigitalSignature\Tests\Support\TestUser::find($this->juana->user_id));
 
-        Livewire::test(\Kukux\DigitalSignature\Filament\Pages\SignedDocuments::class)
-            ->assertOk()
+        Livewire::test(\Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher::class)
+            ->call('openSigned')
+            ->assertSet('signedLoaded', true)
             ->assertSee('Leave form #'.$form->id)
             ->assertSee('The copy I signed')
-            ->assertSee(route('signature.request.document', ['signatureRequest' => $request->id]))
-            ->set('search', 'nothing like it')
-            ->assertDontSee('Leave form #'.$form->id);
+            // Opens in the drawer's own document pane, not a new page.
+            ->assertSeeHtml('x-on:click="view('.$request->id.')"')
+            ->set('signedSearch', 'nothing like it')
+            // The Signed tab's short list still holds it; the filtered record does not.
+            ->assertSee('No signed document matches that')
+            ->assertDontSeeHtml('wire:key="dsig-all-signed-'.$request->id.'"');
     });
 });

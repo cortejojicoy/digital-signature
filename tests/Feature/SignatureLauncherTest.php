@@ -280,7 +280,57 @@ describe('floating launcher component', function () {
             ->and($html)->toContain('Today')
             // The copy this signatory signed, and the document as it stands now.
             ->and($html)->toContain('The copy I signed')
-            ->and($html)->toContain('/signature/documents/');
+            ->and($html)->toContain('/signature/documents/')
+            // The full record opens in the drawer, not on a page of its own.
+            ->and($html)->toContain('x-on:click="openSigned()"')
+            ->and($html)->not->toContain('signed-documents');
+    });
+
+    it('defers the full signed record until it is opened', function () {
+        launcherSession();
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        SignatureRequest::where('user_id', 11)
+            ->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        expect((new SignatureLauncher)->getAllSignedProperty())->toHaveCount(0);
+
+        Livewire::test(SignatureLauncher::class)
+            ->call('openSigned')
+            ->assertSet('loaded', true)
+            ->assertSet('signedLoaded', true)
+            ->assertSee('Signed as');
+    });
+
+    it('never shows one signatory another signatory’s full record', function () {
+        launcherSession();
+
+        SignatureRequest::query()->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        $component = new SignatureLauncher;
+        $component->openSigned();
+
+        expect($component->getAllSignedProperty())->toHaveCount(1)
+            ->and($component->getAllSignedProperty()->first()->user_id)->toBe(11);
+    });
+
+    it('pages the full signed record', function () {
+        launcherSession();
+
+        SignatureRequest::query()->update(['state' => RouteState::Signed, 'responded_at' => now()]);
+
+        $this->actingAs(TestUser::findOrFail(11));
+
+        Livewire::test(SignatureLauncher::class)
+            ->set('signedLimit', 0)
+            ->call('openSigned')
+            ->assertSee('Show more')
+            ->call('showMoreSigned')
+            ->assertSet('signedLimit', 100)
+            ->assertDontSee('Show more');
     });
 
     it('hides the button entirely when configured to and nothing is waiting', function () {
@@ -506,13 +556,13 @@ describe('launcher placement', function () {
     it('defaults the drawer wide enough to read a document in', function () {
         // The drawer is no longer a notification rail — it holds the PDF the
         // signatory is being asked to sign.
-        expect(LauncherSettings::width())->toBe('64rem');
+        expect(LauncherSettings::width())->toBe('56rem');
     });
 
     it('refuses a drawer width that is not a plain CSS length', function () {
         config()->set('signature.launcher.width', '80rem; position: static');
 
-        expect(LauncherSettings::width())->toBe('64rem');
+        expect(LauncherSettings::width())->toBe('56rem');
     });
 
     it('widens further while managing signatures', function () {
@@ -523,11 +573,11 @@ describe('launcher placement', function () {
     });
 
     it('defaults the manage width and refuses one that is not a plain CSS length', function () {
-        expect(LauncherSettings::manageWidth())->toBe('80rem');
+        expect(LauncherSettings::manageWidth())->toBe('72rem');
 
         config()->set('signature.launcher.manage_width', '90rem; display: none');
 
-        expect(LauncherSettings::manageWidth())->toBe('80rem');
+        expect(LauncherSettings::manageWidth())->toBe('72rem');
     });
 
     it('refuses an offset that is not a plain CSS length', function () {
@@ -612,5 +662,82 @@ describe('launcher navigation suppression', function () {
 
         expect($plugin->hasLauncherOverride())->toBeTrue()
             ->and($plugin->wantsLauncher())->toBeFalse();
+    });
+});
+
+describe('moving the button from the Settings tab', function () {
+
+    beforeEach(function () {
+        Storage::fake('testing');
+    });
+
+    it('offers the Settings tab with the placement in effect', function () {
+        config()->set('signature.launcher.position', 'top-left');
+        config()->set('signature.launcher.offset', ['x' => '1rem', 'y' => '10px']);
+
+        $this->actingAs(makeUser(41, 'Mover'));
+
+        $component = new SignatureLauncher;
+
+        expect($component->getPlacementChoiceProperty())->toBe([
+            'position' => 'top-left',
+            'x'        => 16,
+            'y'        => 10,
+            'default'  => ['position' => 'top-left', 'x' => 16, 'y' => 10],
+        ])->and(Livewire::test(SignatureLauncher::class)->html())->toContain("tab === 'settings'");
+    });
+
+    it('saves a user’s own corner and offsets, over the config default', function () {
+        $this->actingAs(makeUser(42, 'Mover'));
+
+        Livewire::test(SignatureLauncher::class)
+            ->call('saveLauncherPlacement', 'top-left', 40, 1000);
+
+        $html = Livewire::test(SignatureLauncher::class)->html();
+
+        expect($html)->toContain('dsig-launcher--top-left')
+            ->and($html)->toContain('--dsig-x: 40px')
+            // Clamped, so a hand-crafted call cannot push it off screen.
+            ->and($html)->toContain('--dsig-y: 400px')
+            ->and((new SignatureLauncher)->getPlacementProperty()['position'])->toBe('top-left');
+
+        // Only for that user.
+        $this->actingAs(makeUser(43, 'Bystander'));
+
+        expect(Livewire::test(SignatureLauncher::class)->html())->toContain('dsig-launcher--bottom-right');
+    });
+
+    it('refuses a corner that is not one of the four', function () {
+        $this->actingAs(makeUser(44, 'Mover'));
+
+        Livewire::test(SignatureLauncher::class)
+            ->call('saveLauncherPlacement', 'middle; position: static', 10, 10);
+
+        expect(\Kukux\DigitalSignature\Models\UserPreference::count())->toBe(0);
+    });
+
+    it('goes back to the config default on reset', function () {
+        $this->actingAs(makeUser(45, 'Mover'));
+
+        Livewire::test(SignatureLauncher::class)
+            ->call('saveLauncherPlacement', 'top-left', 40, 40)
+            ->call('resetLauncherPlacement');
+
+        expect(Livewire::test(SignatureLauncher::class)->html())
+            ->toContain('dsig-launcher--bottom-right')
+            ->toContain('--dsig-x: 1.5rem');
+    });
+
+    it('ignores saved choices and hides the tab when customising is off', function () {
+        $this->actingAs(makeUser(46, 'Mover'));
+
+        Livewire::test(SignatureLauncher::class)->call('saveLauncherPlacement', 'top-left', 40, 40);
+
+        config()->set('signature.launcher.customizable', false);
+
+        $html = Livewire::test(SignatureLauncher::class)->html();
+
+        expect($html)->toContain('dsig-launcher--bottom-right')
+            ->and($html)->not->toContain("tab === 'settings'");
     });
 });
