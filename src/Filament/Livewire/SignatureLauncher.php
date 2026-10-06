@@ -5,13 +5,15 @@ namespace Kukux\DigitalSignature\Filament\Livewire;
 use Filament\Facades\Filament;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Collection as BaseCollection;
 use Kukux\DigitalSignature\Filament\Concerns\ActsOnSignatureRequests;
 use Kukux\DigitalSignature\Filament\Concerns\ManagesSignatures;
 use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
-use Kukux\DigitalSignature\Filament\Pages\SignedDocuments;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Models\SignatureRequest;
+use Kukux\DigitalSignature\Models\UserPreference;
 use Kukux\DigitalSignature\Support\LauncherSettings;
 use Kukux\DigitalSignature\Support\ViewerAssets;
 use Livewire\Component;
@@ -52,9 +54,93 @@ class SignatureLauncher extends Component
 
     public ?string $newCertificatePassword = null;
 
+    /**
+     * "All documents I've signed": the full record, opened as its own wide
+     * drawer view like Manage signatures. Deferred until first opened, for the
+     * same reason the queue is.
+     */
+    public bool $signedLoaded = false;
+
+    public string $signedSearch = '';
+
+    public int $signedLimit = 100;
+
+    /** This request's preferences, loaded once — see preferences(). */
+    protected ?array $preferences = null;
+
     public function loadRequests(): void
     {
         $this->loaded = true;
+    }
+
+    public function openSigned(): void
+    {
+        $this->loaded = true;
+        $this->signedLoaded = true;
+    }
+
+    public function showMoreSigned(): void
+    {
+        $this->signedLimit += 100;
+    }
+
+    /**
+     * Save where this user wants their launcher. The browser has already
+     * moved the button; this makes it stick across pages and devices.
+     * Anything invalid is dropped rather than stored, so a bad value can
+     * never reach a style attribute later.
+     */
+    public function saveLauncherPlacement(string $position, int $offsetX, int $offsetY): void
+    {
+        $userId = $this->currentUserId();
+
+        if (! $userId || ! LauncherSettings::customizable()) {
+            return;
+        }
+
+        if (! in_array($position, LauncherSettings::POSITIONS, true)) {
+            return;
+        }
+
+        $clamp = static fn (int $px): string => max(0, min(400, $px)).'px';
+
+        $row = UserPreference::query()->firstOrNew(['user_id' => $userId]);
+        $preferences = is_array($row->preferences) ? $row->preferences : [];
+
+        $preferences['launcher'] = [
+            'position' => $position,
+            'offset_x' => $clamp($offsetX),
+            'offset_y' => $clamp($offsetY),
+        ];
+
+        $row->preferences = $preferences;
+        $row->save();
+
+        $this->preferences = $preferences;
+    }
+
+    /** Forget this user's placement, so the config default applies again. */
+    public function resetLauncherPlacement(): void
+    {
+        $userId = $this->currentUserId();
+
+        if (! $userId) {
+            return;
+        }
+
+        $row = UserPreference::query()->where('user_id', $userId)->first();
+
+        if ($row === null) {
+            return;
+        }
+
+        $preferences = is_array($row->preferences) ? $row->preferences : [];
+        unset($preferences['launcher']);
+
+        $row->preferences = $preferences;
+        $row->save();
+
+        $this->preferences = $preferences;
     }
 
     /**
@@ -160,14 +246,54 @@ class SignatureLauncher extends Component
     // in the footer, never break the launcher on every page of the app.
     // -------------------------------------------------------------------------
 
+    /**
+     * Everything this user has signed, newest first, for the "All documents
+     * I've signed" view. One more row than the limit is fetched so the view
+     * knows whether to offer "Show more".
+     *
+     * The search runs over document titles in PHP, because a title comes from
+     * the host's signable (getSignableTitle()) rather than a column, so it
+     * filters what has been loaded so far.
+     *
+     * @return BaseCollection<int, SignatureRequest>
+     */
+    public function getAllSignedProperty(): BaseCollection
+    {
+        $userId = $this->currentUserId();
+
+        if (! $userId || ! $this->signedLoaded) {
+            return collect();
+        }
+
+        $requests = SignatureRequest::query()
+            ->signedFor((int) $userId)
+            ->with(['session.signable'])
+            ->limit($this->signedLimit + 1)
+            ->get();
+
+        $needle = mb_strtolower(trim($this->signedSearch));
+
+        if ($needle === '') {
+            return $requests;
+        }
+
+        return $requests
+            ->filter(fn (SignatureRequest $request): bool => str_contains(mb_strtolower(static::titleOf($request)), $needle))
+            ->values();
+    }
+
+    public static function titleOf(SignatureRequest $request): string
+    {
+        $document = $request->session?->signable;
+
+        return $document && method_exists($document, 'getSignableTitle')
+            ? $document->getSignableTitle()
+            : ($request->session?->template_key ?? 'Document');
+    }
+
     public function getInboxUrlProperty(): ?string
     {
         return $this->safeUrl(fn () => SignatureInbox::getUrl());
-    }
-
-    public function getSignedUrlProperty(): ?string
-    {
-        return $this->safeUrl(fn () => SignedDocuments::getUrl());
     }
 
     public function getRegisterUrlProperty(): ?string
@@ -195,8 +321,10 @@ class SignatureLauncher extends Component
      */
     public function getSettingsProperty(): array
     {
+        $preferences = $this->preferences();
+
         return [
-            'position'      => LauncherSettings::position(),
+            'position'      => LauncherSettings::position($preferences),
             'icon'          => LauncherSettings::icon(),
             'label'         => LauncherSettings::label(),
             'color'         => LauncherSettings::color(),
@@ -204,10 +332,45 @@ class SignatureLauncher extends Component
             'hideWhenEmpty' => LauncherSettings::hideWhenEmpty(),
             'width'         => LauncherSettings::width(),
             'manageWidth'   => LauncherSettings::manageWidth(),
-            'offsetX'       => LauncherSettings::offsetX(),
-            'offsetY'       => LauncherSettings::offsetY(),
+            'offsetX'       => LauncherSettings::offsetX($preferences),
+            'offsetY'       => LauncherSettings::offsetY($preferences),
             'zIndex'        => LauncherSettings::zIndex(),
+            'customizable'  => LauncherSettings::customizable(),
         ];
+    }
+
+    /**
+     * What the Settings tab starts from: the placement in effect, as slider
+     * values, plus the config default that "Reset" goes back to.
+     *
+     * @return array<string, mixed>
+     */
+    public function getPlacementChoiceProperty(): array
+    {
+        $preferences = $this->preferences();
+
+        return [
+            'position' => LauncherSettings::position($preferences),
+            'x'        => LauncherSettings::toPixels(LauncherSettings::offsetX($preferences)),
+            'y'        => LauncherSettings::toPixels(LauncherSettings::offsetY($preferences)),
+            'default'  => [
+                'position' => LauncherSettings::defaultPosition(),
+                'x'        => LauncherSettings::toPixels(LauncherSettings::offsetX()),
+                'y'        => LauncherSettings::toPixels(LauncherSettings::offsetY()),
+            ],
+        ];
+    }
+
+    /**
+     * The signed-in user's saved preferences, read once per request: the
+     * launcher renders on every panel page and re-renders on each poll, and
+     * settings, placement and the Settings tab all need them.
+     *
+     * @return array<string, mixed>
+     */
+    protected function preferences(): array
+    {
+        return $this->preferences ??= UserPreference::for($this->currentUserId());
     }
 
     /**
@@ -220,7 +383,7 @@ class SignatureLauncher extends Component
     {
         return [
             'enabled'  => LauncherSettings::avoidOverlap(),
-            'position' => LauncherSettings::position(),
+            'position' => LauncherSettings::position($this->preferences()),
             'gap'      => LauncherSettings::gap(),
             'avoid'    => LauncherSettings::avoidSelectors(),
             'ignore'   => LauncherSettings::ignoreSelectors(),
