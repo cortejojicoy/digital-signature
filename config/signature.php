@@ -378,24 +378,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Documents I've signed
-    |--------------------------------------------------------------------------
-    | The "Signed by me" page: every signature the user has put on a routed
-    | document, with the copy they signed and the document as it stands now.
-    | Like the inbox, it leaves the sidebar while the launcher (which links to
-    | it) is on.
-    */
-    'signed' => [
-        'enabled'          => env('SIGNATURE_SIGNED_ENABLED', true),
-        'navigation'       => env('SIGNATURE_SIGNED_NAV', true),
-        'navigation_label' => env('SIGNATURE_SIGNED_LABEL', 'Signed by me'),
-        'navigation_icon'  => env('SIGNATURE_SIGNED_ICON', 'heroicon-o-document-check'),
-        'navigation_group' => env('SIGNATURE_SIGNED_GROUP'),
-        'navigation_sort'  => env('SIGNATURE_SIGNED_SORT'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Floating launcher
     |--------------------------------------------------------------------------
     | A floating button, pinned to a corner of every panel page, that opens a
@@ -437,9 +419,17 @@ return [
     |   panel never exceeds the viewport, and below 640px it goes full-bleed
     |   regardless.
     |
-    | manage_width: how wide the slide-over grows while "Manage signatures" is
-    |   open, where the signature list sits beside the selected signature's
-    |   details. Same rules as `width`.
+    | manage_width: how wide the slide-over grows while "Manage signatures" or
+    |   "All documents I've signed" is open. Same rules as `width`.
+    |
+    | customizable: show a Settings tab in the drawer where each user moves
+    |   their own button — corner and offsets — and sees it move as they
+    |   choose. Their choice is saved per user and wins over `position` and
+    |   `offset` below, which remain the default for everyone who hasn't
+    |   chosen. Set false to hide the tab and apply the config to everyone.
+    |
+    | position: the default corner — bottom-right, bottom-left, top-right or
+    |   top-left. Users can change their own from the Settings tab.
     |
     | offset: distance from the corner before any stacking. Any CSS length.
     |
@@ -464,8 +454,9 @@ return [
         'color'               => env('SIGNATURE_LAUNCHER_COLOR'),
         'poll_seconds'        => env('SIGNATURE_LAUNCHER_POLL', 60),
         'hide_when_empty'     => env('SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY', false),
-        'width'               => env('SIGNATURE_LAUNCHER_WIDTH', '64rem'),
-        'manage_width'        => env('SIGNATURE_LAUNCHER_MANAGE_WIDTH', '80rem'),
+        'width'               => env('SIGNATURE_LAUNCHER_WIDTH', '56rem'),
+        'manage_width'        => env('SIGNATURE_LAUNCHER_MANAGE_WIDTH', '72rem'),
+        'customizable'        => env('SIGNATURE_LAUNCHER_CUSTOMIZABLE', true),
 
         'avoid_overlap'       => env('SIGNATURE_LAUNCHER_AVOID_OVERLAP', true),
         'offset'              => [
