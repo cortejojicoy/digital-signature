@@ -88,8 +88,9 @@ If anything of yours parsed those file names, read the paths from the database i
 | `SignatoryRoute` has a new trailing `?Model $tagged` property | Only affects code that constructs routes by hand (named arguments are unaffected). |
 | `SignatoryRoute::signerName()` falls back to the tagged person's name, and reads `full_name` / `getSignatoryName()` as well as `name` | None. |
 | `CallableResolver` returns `null` (and reports) when the closure throws | A closure binding that hits a null no longer breaks routing. |
-| New config keys `documents` and `signed` | Add them to a published `config/signature.php` if you want to set them there; defaults apply otherwise. |
-| A new *Signed by me* page is registered on each panel | Off with `SIGNATURE_SIGNED_ENABLED=false`. |
+| New config keys `documents` and `launcher.customizable` | Add them to a published `config/signature.php` if you want to set them there; defaults apply otherwise. |
+| New table `digital_signature_user_preferences` (each user's launcher placement) | Run `php artisan migrate`. Until then the launcher uses the config placement. |
+| Launcher drawer defaults are narrower: `width` `56rem`, `manage_width` `72rem` | Set `SIGNATURE_LAUNCHER_WIDTH` / `SIGNATURE_LAUNCHER_MANAGE_WIDTH` to keep the old sizes. |
 
 ---
 
