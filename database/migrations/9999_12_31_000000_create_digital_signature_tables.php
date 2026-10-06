@@ -533,6 +533,19 @@ return new class extends Migration
             });
         }
 
+        // Per-user choices that are the user's to make rather than the host
+        // app's — today, where their floating launcher sits. One row per user,
+        // created the first time they change something; absent means "use
+        // the package config".
+        if (! Schema::hasTable('digital_signature_user_preferences')) {
+            Schema::create('digital_signature_user_preferences', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
+                $t->text('preferences')->nullable();
+                $t->timestamps();
+            });
+        }
+
         $this->addColumnsMissingFromEarlierReleases();
 
         // Primary (reusable) signatures — those with no signable_id — were
@@ -555,6 +568,7 @@ return new class extends Migration
             return;
         }
 
+        Schema::dropIfExists('digital_signature_user_preferences');
         Schema::dropIfExists('digital_signature_agent_jobs');
         Schema::dropIfExists('digital_signature_agent_tokens');
         Schema::dropIfExists('digital_signature_agent_pairings');
