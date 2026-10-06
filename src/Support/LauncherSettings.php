@@ -10,10 +10,16 @@ use Throwable;
  * Resolved settings for the floating launcher.
  *
  * Every reader goes through here rather than touching config directly,
- * because two sources can answer and they have to be consulted in a fixed
+ * because several sources can answer and they have to be consulted in a fixed
  * order: the plugin instance registered on the *current* panel first (so
  * `SignaturePlugin::make()->withoutFloatingLauncher()` wins on that panel
  * alone), then the package config as the app-wide default.
+ *
+ * Placement — the corner and the offsets — has one more layer in front: the
+ * signed-in user's own choice from the drawer's Settings tab. Those readers
+ * take the user's preferences (UserPreference::for()) as an argument rather
+ * than looking them up, so the caller loads them once per request and this
+ * class stays free of auth and query state.
  *
  * The plugin lookup is deliberately forgiving. These settings are read from
  * static navigation methods on pages and resources, which Filament also calls
@@ -49,14 +55,40 @@ final class LauncherSettings
         return (bool) config('signature.launcher.replaces_navigation', true);
     }
 
-    /** One of: bottom-right, bottom-left, top-right, top-left. */
-    public static function position(): string
+    public const POSITIONS = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
+
+    /**
+     * Whether users may move their own launcher from the drawer's Settings
+     * tab. When off, the tab is hidden and saved choices are ignored, so the
+     * config placement applies to everyone again.
+     */
+    public static function customizable(): bool
+    {
+        return (bool) config('signature.launcher.customizable', true);
+    }
+
+    /**
+     * One of POSITIONS: the user's choice, else config.
+     *
+     * @param  array<string, mixed>  $preferences
+     */
+    public static function position(array $preferences = []): string
+    {
+        $chosen = self::preference($preferences, 'position');
+
+        if (is_string($chosen) && in_array($chosen, self::POSITIONS, true)) {
+            return $chosen;
+        }
+
+        return self::defaultPosition();
+    }
+
+    /** The config placement, ignoring any user choice. */
+    public static function defaultPosition(): string
     {
         $position = (string) config('signature.launcher.position', 'bottom-right');
 
-        return in_array($position, ['bottom-right', 'bottom-left', 'top-right', 'top-left'], true)
-            ? $position
-            : 'bottom-right';
+        return in_array($position, self::POSITIONS, true) ? $position : 'bottom-right';
     }
 
     public static function icon(): string
@@ -105,7 +137,7 @@ final class LauncherSettings
      */
     public static function width(): string
     {
-        return self::cssLength(config('signature.launcher.width'), '64rem');
+        return self::cssLength(config('signature.launcher.width'), '56rem');
     }
 
     /**
@@ -117,7 +149,7 @@ final class LauncherSettings
      */
     public static function manageWidth(): string
     {
-        return self::cssLength(config('signature.launcher.manage_width'), '80rem');
+        return self::cssLength(config('signature.launcher.manage_width'), '72rem');
     }
 
     /**
@@ -133,15 +165,58 @@ final class LauncherSettings
         return (bool) config('signature.launcher.avoid_overlap', true);
     }
 
-    /** Distance from the corner before any stacking. Any CSS length. */
-    public static function offsetX(): string
+    /**
+     * Distance from the corner before any stacking: the user's choice, else
+     * config. Any CSS length.
+     *
+     * @param  array<string, mixed>  $preferences
+     */
+    public static function offsetX(array $preferences = []): string
     {
-        return self::cssLength(config('signature.launcher.offset.x'), '1.5rem');
+        return self::cssLength(
+            self::preference($preferences, 'offset_x'),
+            self::cssLength(config('signature.launcher.offset.x'), '1.5rem'),
+        );
     }
 
-    public static function offsetY(): string
+    /** @param  array<string, mixed>  $preferences */
+    public static function offsetY(array $preferences = []): string
     {
-        return self::cssLength(config('signature.launcher.offset.y'), '1.5rem');
+        return self::cssLength(
+            self::preference($preferences, 'offset_y'),
+            self::cssLength(config('signature.launcher.offset.y'), '1.5rem'),
+        );
+    }
+
+    /**
+     * A CSS length as whole pixels, for the Settings tab's sliders. rem and
+     * em count as 16px — the browser default, and what the config's own
+     * defaults assume.
+     */
+    public static function toPixels(string $length): int
+    {
+        if (preg_match('/^(-?\d*\.?\d+)(px|rem|em)?$/', $length, $m) !== 1) {
+            return 24;
+        }
+
+        $factor = in_array($m[2] ?? '', ['rem', 'em'], true) ? 16 : 1;
+
+        return (int) round((float) $m[1] * $factor);
+    }
+
+    /**
+     * A user's launcher choice, or null when there is none or the host has
+     * turned customising off.
+     *
+     * @param  array<string, mixed>  $preferences
+     */
+    private static function preference(array $preferences, string $key): mixed
+    {
+        if (! self::customizable()) {
+            return null;
+        }
+
+        return $preferences['launcher'][$key] ?? null;
     }
 
     /** Pixels between the button and whatever it stacks above. */
