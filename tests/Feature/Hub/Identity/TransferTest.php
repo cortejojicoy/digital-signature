@@ -23,6 +23,8 @@ use Livewire\Livewire;
 uses(HubIdentityTestCase::class);
 
 beforeEach(function () {
+    $this->skipBelowFilament4();
+
     $this->hubPanels();
 
     $this->notifier = Mockery::mock(HubNotifier::class);

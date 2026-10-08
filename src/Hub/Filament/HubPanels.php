@@ -19,6 +19,8 @@ use Kukux\DigitalSignature\Hub\Identity\Http\Controllers\LandingRedirectControll
 use Kukux\DigitalSignature\Hub\Identity\Http\Middleware\EnsureIdentified;
 use Kukux\DigitalSignature\Hub\Identity\HubRedirector;
 use Kukux\DigitalSignature\SignaturePlugin;
+use Kukux\DigitalSignature\Support\FilamentVersion;
+use LogicException;
 
 /**
  * Hub mode: what SignaturePlugin::hubPersonPanel() and hubAdminPanel()
@@ -42,6 +44,13 @@ final class HubPanels
 
     public static function register(Panel $panel, SignaturePlugin $plugin): void
     {
+        // The pages declare Filament 4's instance $view (Filament 3's is
+        // static, so loading one there is a fatal error), and the person
+        // panel relies on ->topbar(false), which Filament 3 doesn't have.
+        if ($plugin->getHubPanel() !== null && FilamentVersion::major() < 4) {
+            throw new LogicException('The hub panels need Filament 4 or 5; this app runs Filament '.FilamentVersion::major().'. See docs/hub/panels.md.');
+        }
+
         match ($plugin->getHubPanel()) {
             'person' => self::person($panel),
             'admin'  => self::admin($panel, $plugin),

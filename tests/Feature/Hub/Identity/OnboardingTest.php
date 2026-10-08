@@ -20,6 +20,8 @@ use Kukux\DigitalSignature\Tests\Feature\Hub\Identity\Support\HubTestUser;
 uses(HubIdentityTestCase::class);
 
 beforeEach(function () {
+    $this->skipBelowFilament4();
+
     $this->hubPanels();
 });
 
