@@ -17,6 +17,8 @@ use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
 use Kukux\DigitalSignature\Signatories\SignatoryResolverFactory;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
+use Kukux\DigitalSignature\Hub\Filament\HubPanels;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Support\ViewerAssets;
 
 class SignaturePlugin implements Plugin
@@ -42,6 +44,9 @@ class SignaturePlugin implements Plugin
     protected ?bool $registerInbox = null;
 
     protected ?bool $registerLauncher = null;
+
+    /** Hub mode: which of the hub's two panels this is (null = neither). */
+    protected ?string $hubPanel = null;
 
     // -------------------------------------------------------------------------
     // Factory
@@ -245,6 +250,35 @@ class SignaturePlugin implements Plugin
         return $this->registerLauncher ?? (bool) config('signature.launcher.enabled', true);
     }
 
+    /**
+     * Hub mode: make this the person panel (path "/", no topbar, no sidebar):
+     * the landing page with "Pair this computer", "Who are you?" and the
+     * Profile. No launcher, no inbox, no Signatures resource. The panel
+     * provider adds ->topbar(false)->navigation(false). See docs/hub/panels.md.
+     */
+    public function hubPersonPanel(): static
+    {
+        $this->hubPanel = 'person';
+
+        return $this;
+    }
+
+    /**
+     * Hub mode: make this the admin panel (default Filament layout with a
+     * sidebar), for super_admin: Personnel, Pending claims, Audit log, Apps.
+     */
+    public function hubAdminPanel(): static
+    {
+        $this->hubPanel = 'admin';
+
+        return $this;
+    }
+
+    public function getHubPanel(): ?string
+    {
+        return $this->hubPanel;
+    }
+
     // -------------------------------------------------------------------------
     // Getters (used by SignatureResource to read resolved values)
     // -------------------------------------------------------------------------
@@ -280,7 +314,16 @@ class SignaturePlugin implements Plugin
 
     public function register(Panel $panel): void
     {
-        if ($this->registerResource && config('signature.resource.enabled', true)) {
+        // The hub's two panels are assembled by Hub\Filament\HubPanels.
+        if ($this->hubPanel !== null) {
+            HubPanels::register($panel, $this);
+
+            return;
+        }
+
+        // Client mode: a person's signature is managed only at the hub, so the
+        // Signatures resource is never registered here (docs/hub/client.md).
+        if ($this->registerResource && config('signature.resource.enabled', true) && ! SignatureMode::isClient()) {
             $panel->resources([SignatureResource::class]);
         }
 
@@ -344,7 +387,8 @@ class SignaturePlugin implements Plugin
 
     protected function deviceAttestationMeta(): string
     {
-        if (! config('signature.devices.enabled', true) || ! auth()->check()) {
+        // Client mode registers no device routes: the hub holds devices.
+        if (SignatureMode::isClient() || ! config('signature.devices.enabled', true) || ! auth()->check()) {
             return '';
         }
 

@@ -65,6 +65,14 @@ use Kukux\DigitalSignature\DocumentOfRecord\DocumentOfRecordResolver;
 use Kukux\DigitalSignature\Services\DocumentRegistry;
 use Kukux\DigitalSignature\Services\DocumentRouter;
 use Kukux\DigitalSignature\Signatories\IdentityUserMapper;
+use Kukux\DigitalSignature\Client\ClientServiceProvider;
+use Kukux\DigitalSignature\Contracts\DeferredPdfSigner as DeferredPdfSignerContract;
+use Kukux\DigitalSignature\Contracts\DigestSigner;
+use Kukux\DigitalSignature\Drivers\PdfSigners\DeferredPdfSigner;
+use Kukux\DigitalSignature\Hub\Cms\CmsSigner;
+use Kukux\DigitalSignature\Hub\HubApiServiceProvider;
+use Kukux\DigitalSignature\Hub\HubIdentityServiceProvider;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Livewire\Livewire;
 
 class SignatureServiceProvider extends ServiceProvider
@@ -190,6 +198,22 @@ class SignatureServiceProvider extends ServiceProvider
                 $app->make(SignatureMetadataService::class),
             );
         });
+
+        // Hash-only signing (docs/hub/deferred-signing.md): the hub turns a
+        // digest into a CMS; a client stamps and later injects it.
+        $this->app->bindIf(DigestSigner::class, CmsSigner::class);
+        $this->app->bindIf(DeferredPdfSignerContract::class, DeferredPdfSigner::class);
+
+        // Hub and client mode live in their own providers so standalone
+        // installs never load them (docs/hub/index.md).
+        match (SignatureMode::current()) {
+            SignatureMode::HUB => array_map(fn (string $p) => $this->app->register($p), [
+                HubApiServiceProvider::class,
+                HubIdentityServiceProvider::class,
+            ]),
+            SignatureMode::CLIENT => $this->app->register(ClientServiceProvider::class),
+            default => null,
+        };
     }
 
     public function boot(): void
@@ -238,6 +262,23 @@ class SignatureServiceProvider extends ServiceProvider
         // app-wide: lang/vendor/signature/{locale}/routing.php.
         $this->loadTranslationsFrom(__DIR__ . '/../lang', 'signature');
 
+        $this->registerDeviceAndAgentRoutes();
+
+        $this->registerSharedRoutes();
+
+        $this->registerPublishing();
+    }
+
+    /**
+     * Browser device keys, pairing and the desktop agent. Not in client mode:
+     * there the hub holds every device and the agent pairs with it alone.
+     */
+    protected function registerDeviceAndAgentRoutes(): void
+    {
+        if (SignatureMode::isClient()) {
+            return;
+        }
+
         // Route for receiving the browser device fingerprint and storing it in session
         Route::post('/signature/device-fingerprint', [DeviceFingerprintController::class, 'store'])
             ->middleware(['web'])
@@ -280,7 +321,13 @@ class SignatureServiceProvider extends ServiceProvider
                 });
             });
 
-        // The browser waiting on an approval. Session-authenticated.
+    }
+
+    protected function registerSharedRoutes(): void
+    {
+        // The browser waiting on an approval. Session-authenticated. Kept in
+        // client mode: there the job is the hub's, and AgentWebController
+        // asks the hub for its status.
         Route::prefix('signature/agent-web')
             ->middleware(['web', 'throttle:120,1'])
             ->name('signature.agent.web.')
@@ -390,7 +437,10 @@ class SignatureServiceProvider extends ServiceProvider
                 Route::post('{template}/sign/{signature}/finalize', [PdfTemplateSignerController::class, 'finalize'])
                     ->name('signer.finalize');
             });
+    }
 
+    protected function registerPublishing(): void
+    {
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/signature.php' => config_path('signature.php'),
