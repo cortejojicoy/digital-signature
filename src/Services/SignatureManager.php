@@ -5,6 +5,8 @@ namespace Kukux\DigitalSignature\Services;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Kukux\DigitalSignature\Client\Exceptions\SignatureManagedAtHubException;
+use Kukux\DigitalSignature\Client\HubSigning;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Events\DocumentSigned;
 use Kukux\DigitalSignature\Events\SignatureRevoked;
@@ -19,6 +21,7 @@ use Kukux\DigitalSignature\Security\DeviceRegistry;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Security\DuplicateSignatureGuard;
 use Kukux\DigitalSignature\Security\SignatureMetadataService;
+use Kukux\DigitalSignature\Support\SignatureMode;
 
 class SignatureManager
 {
@@ -66,6 +69,16 @@ class SignatureManager
         string $signerName = '',
         ?string $certificatePassword = null,
     ): Signature {
+        // ── Client mode ───────────────────────────────────────────────────────
+        //     A person's signature is created and changed only at the hub; this
+        //     app holds a read-only mirror written by HubSignatureSync. Nothing
+        //     may register one here directly (docs/hub/client.md).
+        if (SignatureMode::isClient()) {
+            throw new SignatureManagedAtHubException(
+                'Signatures are managed at UPLB Signature. Add or change yours there.'
+            );
+        }
+
         // ── 0. Single-primary-signature guard ─────────────────────────────────
         //     A "primary" signature is one not tied to a specific Signable —
         //     i.e. the user's reusable signature image. Each user may have at
@@ -227,7 +240,31 @@ class SignatureManager
         // drawn on, which $source keeps. Both facts matter. With a paired
         // computer, this is where signing pauses for its approval of exactly
         // this document (AgentApprovalRequiredException).
-        $device = $this->devices()->forSigning($signerUserId, $source, $documentHash, $signable);
+        //
+        // Client mode has no devices here: the hub signs, after the signer
+        // approves on the computer paired with it. This is where that pauses
+        // instead (HubApprovalRequiredException, the same exception to every
+        // caller), and it returns only once the hub's signature is in hand
+        // for embedAndFinalize() to inject.
+        if (SignatureMode::isClient()) {
+            app(HubSigning::class)->awaitSignature(
+                source:         $source,
+                userId:         $signerUserId,
+                signable:       $signable,
+                sourcePdfPath:  $sourcePdfPath ?? $signable->getSignablePdfPath(),
+                sourceHash:     $documentHash,
+                position:       $position,
+                extraPositions: $extraPositions ?? [],
+                chain:          $chain,
+            );
+
+            // A 409 may have refreshed the mirror in place while waiting.
+            $source->refresh();
+
+            $device = null;
+        } else {
+            $device = $this->devices()->forSigning($signerUserId, $source, $documentHash, $signable);
+        }
 
         $sig = Signature::create(array_merge([
             'uuid' => (string) Str::uuid(),
@@ -414,6 +451,14 @@ class SignatureManager
         string $userPassword,
         ?string $sourcePdfPath = null,
     ): void {
+        // Client mode: no certificate is ever issued here. The hub's CMS,
+        // fetched by storeForDocument(), goes into the prepared PDF instead.
+        if (SignatureMode::isClient()) {
+            app(HubSigning::class)->finalize($signature);
+
+            return;
+        }
+
         $cert = $this->certService->getOrCreate($signature->user_id, $userPassword);
         $certData = $this->certService->load($cert, $userPassword);
 
@@ -436,6 +481,14 @@ class SignatureManager
 
     public function revoke(Signature $signature): void
     {
+        // A hub mirror is revoked at the hub, which tells this app; revoking
+        // only the copy here would just hide it until the next sync.
+        if (SignatureMode::isClient() && $signature->source === 'hub' && $signature->isPrimary()) {
+            throw new SignatureManagedAtHubException(
+                'This signature comes from UPLB Signature. Revoke or change it there.'
+            );
+        }
+
         $signature->update(['status' => 'revoked', 'revoked_at' => now()]);
         event(new SignatureRevoked($signature));
     }
