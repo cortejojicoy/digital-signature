@@ -2,6 +2,27 @@
 
 All notable changes to `kukux/digital-signature`. Versions follow [semver](https://semver.org).
 
+## 2.1.0 (unreleased)
+
+The signature hub: one place (`signature.uplb.edu.ph`) where signatures are created, paired and revoked, and apps that use it. `SIGNATURE_MODE` chooses `standalone` (the default, unchanged), `hub` or `client`. Docs: [docs/hub](docs/hub/index.md). Design: [plans/signature-hub.md](plans/signature-hub.md).
+
+### Added
+
+- **Modes.** `config('signature.mode')`, the `signature.hub.*` block, `Support\SignatureMode`. Hub and client code lives in `Hub\HubApiServiceProvider`, `Hub\HubIdentityServiceProvider` and `Client\ClientServiceProvider`, loaded only in their mode.
+- **Hub sign-in without UP Mail.** "Pair this computer" creates a provisional account and pairs the agent with the existing protocol; "Who are you?" links it to a personnel record (`Contracts\PersonnelDirectory`, default `Hub\Identity\EloquentPersonnelDirectory` over the Kafka-fed model); an admin verifies the claim. Later sign-ins are usernameless agent approvals with a match code (`kukuxsign://login/…`, `POST signature/agent/logins/{uuid}/claim`). Moving to a new computer is a `transfer` the old computer (or an admin) approves.
+- **Hub panels.** `SignaturePlugin::hubPersonPanel()` (landing, identify, Profile; no topbar or sidebar) and `hubAdminPanel()` (Personnel, Pending claims, Audit log with CSV export, Apps). `HubRedirector` sends a super_admin to `/admin` and everyone else to their Profile, after any intended app sign-in. Break-glass admin login with TOTP.
+- **Hub API.** Built-in OAuth for apps (client credentials; authorization code + PKCE) and `userinfo`; people, signature, image (ETag, holders only), certificate and health endpoints; sign requests approved on the person's agent; webhooks from a durable outbox with HMAC and back-off (`signature:hub-webhooks`); revocation that deletes every app's mirror; `signature:hub-app`, `signature:hub-audit-mirrors`.
+- **Hash-only signing.** `Contracts\DigestSigner` / `Hub\Cms\CmsSigner` builds a detached CMS over a digest (RSA or EC, optional RFC 3161 timestamp); `Contracts\DeferredPdfSigner` / `Drivers\PdfSigners\DeferredPdfSigner` stamps, reserves the signature and injects the CMS. The PDF never leaves the app.
+- **Client mode.** Sign in with the hub; a read-only mirror of each person's image (`Client\HubSignatureSync`) feeds the drag tray and the stamp; signing goes through the hub (`Client\HubSigning`) and resumes the existing approval overlay; webhook receiver; `Signatories\HubUserMapper`; certificate status from the hub on the verification page; `signature:install --mode=client`, `signature:hub-sync`, `signature:hub-retry`.
+- **RustFS / S3.** `Support\LocalCopy` lets the drivers stamp images from an S3 disk; mirrors and specimens can live on `rustfs.uplb.edu.ph` (`hub.mirror_disk`, `hub.specimen_disk`, `hub.mirrors_disk`).
+- **Agent jobs** carry `requesting_app` and a purpose-specific block; `AgentJobService::create()` handles any purpose (`sign_receipt`, `login`, `transfer`).
+
+### Changed
+
+- New tables (`digital_signature_identities`, `…_transfers`, `…_hub_*`) and columns (`digital_signatures.hub_*`, `digital_signature_agent_jobs.requesting_app` / `meta`, `digital_signature_audits.app` / `personnel_key`), all in the one package migration and created in every mode.
+- `FpdiDriver` / `TcpdfDriver` read the stamp image through `LocalCopy`; the import-and-stamp loop moved to `Concerns\StampsImportedPages`. Output on local disks is unchanged.
+- `phpunit.xml.dist` raises `memory_limit` to 512M for the larger suite.
+
 ## 2.0.0 (unreleased)
 
 Routing a document for signatures moves into the package, built on contracts an app implements and binds. Every routed document gets a **document of record**: its signed versions, kept and verifiable, served instead of a re-render. Filament 3, 4 and 5 remain supported.
