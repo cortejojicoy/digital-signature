@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Agent\AgentPresenceService;
+use Kukux\DigitalSignature\Client\HubLinks;
+use Kukux\DigitalSignature\Client\HubSignatureSync;
 use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
@@ -19,6 +21,7 @@ use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\SigningSession;
 use Kukux\DigitalSignature\Services\SignatureCaption;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -79,6 +82,12 @@ class SignatureDocumentController extends Controller
         // left to place, so the client renders it without the signing surface.
         $settled = $request->state->isTerminal();
 
+        // Client mode: a mirror older than hub.stale_after is checked with the
+        // hub before the tray is built, in case a webhook was missed (R6).
+        if (SignatureMode::isClient() && ! $settled) {
+            app(HubSignatureSync::class)->staleCheck((int) $request->user_id);
+        }
+
         return response()->json([
             // The request named in the URL. The client opens on it, but it is
             // rarely the only one: the same person is routinely both "Prepared
@@ -116,7 +125,25 @@ class SignatureDocumentController extends Controller
             // Under approval = enforce: whether this browser is on the
             // computer the account is paired with, and how to check.
             'agent'      => $settled ? ['required' => false] : $this->presence->state((int) $request->user_id),
-        ]);
+        ] + $this->hubMeta());
+    }
+
+    /**
+     * Client mode only: where the tray's empty state sends someone with no
+     * signature yet, since signatures are added at the hub.
+     *
+     * @return array<string, mixed>
+     */
+    protected function hubMeta(): array
+    {
+        if (! SignatureMode::isClient()) {
+            return [];
+        }
+
+        return ['hub' => [
+            'libraryUrl' => HubLinks::profile(url()->previous()),
+            'label'      => 'Add your signature at UPLB Signature',
+        ]];
     }
 
     /**
@@ -247,6 +274,22 @@ class SignatureDocumentController extends Controller
         // and a sequential session would refuse them in any other order
         // anyway.
         foreach ($jobs as $job) {
+            // Client mode: each slot is its own approval at the hub, so a
+            // batch is signed over several retries of this same call. A slot
+            // an earlier round already signed is reported, not signed again.
+            if (SignatureMode::isClient() && $job['request']->isSigned() && $job['request']->signature) {
+                $last = $job['request']->signature;
+                $signed[] = [
+                    'request_id'     => $job['request']->id,
+                    'slot'           => $job['request']->slot_key,
+                    'role'           => $job['request']->role,
+                    'signature_uuid' => $last->uuid,
+                    'stamps'         => 1 + count($job['extra']),
+                ];
+
+                continue;
+            }
+
             try {
                 $last = $this->sessions->signAt(
                     request:         $job['request'],
@@ -497,9 +540,10 @@ class SignatureDocumentController extends Controller
      */
     protected function library(int $userId): array
     {
+        // primary(): in client mode, only the hub's mirror.
         return Signature::query()
             ->where('user_id', $userId)
-            ->whereNull('signable_id')
+            ->primary()
             ->where('status', 'active')
             ->latest('id')
             ->limit(12)

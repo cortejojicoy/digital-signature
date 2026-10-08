@@ -33,20 +33,40 @@ class AgentJobService
      */
     public function createForDocument(int $userId, string $documentHash, ?Signable $signable = null): array
     {
+        return $this->create($userId, 'sign_receipt', $signable?->getSignableTitle() ?: 'Document', $documentHash, [
+            'signable' => $signable,
+        ]);
+    }
+
+    /**
+     * Any job the agent approves with its identity key.
+     *
+     *   sign_receipt  a document hash (above, and hub sign requests)
+     *   login         hub sign-in (Hub\HubLoginService)
+     *   transfer      moving a signature to a new computer (Hub\IdentityTransfer)
+     *
+     * @param  array{signable?: ?Signable, requesting_app?: ?string, meta?: array<string, mixed>, ttl?: int}  $options
+     * @return array{0: AgentJob, 1: string}  The job and its kukuxsign:// link.
+     */
+    public function create(int $userId, string $purpose, string $title, string $payloadHash, array $options = []): array
+    {
         $token = AgentServer::token();
+        $signable = $options['signable'] ?? null;
 
         $job = AgentJob::create([
             'uuid'            => (string) Str::uuid(),
             'user_id'         => $userId,
-            'purpose'         => 'sign_receipt',
-            'title'           => Str::limit($signable?->getSignableTitle() ?: 'Document', 250, '…'),
+            'purpose'         => $purpose,
+            'title'           => Str::limit($title, 250, '…'),
             'signable_type'   => $signable ? get_class($signable) : null,
             'signable_id'     => $signable?->getSignableId(),
-            'payload_hash'    => $documentHash,
+            'payload_hash'    => $payloadHash,
             'nonce'           => AgentServer::token(),
             'link_token_hash' => hash('sha256', $token),
             'status'          => 'pending',
-            'expires_at'      => now()->addSeconds((int) config('signature.devices.agent.job_ttl', 300)),
+            'requesting_app'  => $options['requesting_app'] ?? null,
+            'meta'            => $options['meta'] ?? null,
+            'expires_at'      => now()->addSeconds((int) ($options['ttl'] ?? config('signature.devices.agent.job_ttl', 300))),
         ]);
 
         return [$job, $this->link($job, $token)];
@@ -86,20 +106,48 @@ class AgentJobService
 
             event(new AgentJobUpdated($job));
 
-            $signer = $job->user;
-
-            return [
-                'uuid'         => $job->uuid,
-                'purpose'      => $job->purpose,
-                'status'       => $job->status,
-                'nonce'        => $job->nonce,
-                'user_id'      => (string) $job->user_id,
-                'payload_hash' => $job->payload_hash,
-                'document'     => ['title' => $job->title],
-                'signer'       => ['name' => (string) ($signer->name ?? $signer->email ?? '')],
-                'expires_at'   => $job->expires_at->toIso8601String(),
-            ];
+            return $this->payload($job);
         });
+    }
+
+    /**
+     * What the agent receives for a claimed job. `requesting_app` and the
+     * purpose's extra block (login, transfer) appear only when set, so a
+     * standalone server's payload is exactly what it always was.
+     *
+     * @return array<string, mixed>
+     */
+    public function payload(AgentJob $job): array
+    {
+        $signer = $job->user;
+
+        $payload = [
+            'uuid'         => $job->uuid,
+            'purpose'      => $job->purpose,
+            'status'       => $job->status,
+            'nonce'        => $job->nonce,
+            'user_id'      => (string) $job->user_id,
+            'payload_hash' => $job->payload_hash,
+            'document'     => ['title' => $job->title],
+            'signer'       => ['name' => (string) ($signer->name ?? $signer->email ?? '')],
+            'expires_at'   => $job->expires_at->toIso8601String(),
+        ];
+
+        if (filled($job->requesting_app)) {
+            $payload['requesting_app'] = ['name' => (string) $job->requesting_app];
+        }
+
+        $meta = (array) ($job->meta ?? []);
+
+        if ($job->purpose === 'login' && isset($meta['login'])) {
+            $payload['login'] = $meta['login'];
+        }
+
+        if ($job->purpose === 'transfer' && isset($meta['transfer'])) {
+            $payload['transfer'] = $meta['transfer'];
+        }
+
+        return $payload;
     }
 
     /**
@@ -197,6 +245,7 @@ class AgentJobService
     {
         $job = AgentJob::query()
             ->where('user_id', $userId)
+            ->where('purpose', 'sign_receipt')
             ->where('status', 'completed')
             ->where('payload_hash', $documentHash)
             ->whereNull('consumed_at')
