@@ -22,6 +22,7 @@ use Kukux\DigitalSignature\Models\AgentPairing;
 use Kukux\DigitalSignature\Models\Identity;
 use Kukux\DigitalSignature\Security\DeviceProofVerifier;
 use Kukux\DigitalSignature\SignaturePlugin;
+use Kukux\DigitalSignature\Support\FilamentVersion;
 use Kukux\DigitalSignature\Tests\Feature\Hub\Identity\Support\HubTestPersonnel;
 use Kukux\DigitalSignature\Tests\Feature\Hub\Identity\Support\HubTestUser;
 use ReflectionClass;
@@ -74,6 +75,18 @@ trait HubIdentityTestCase
             'active'   => 'is_active',
         ]);
         $app['config']->set('app.name', 'UPLB Signature');
+    }
+
+    /**
+     * The hub panels need Filament 4 or 5 (HubPanels::register refuses 3),
+     * and every identity test boots them. First line of each file's
+     * beforeEach, before anything loads a hub page class.
+     */
+    public function skipBelowFilament4(): void
+    {
+        if (FilamentVersion::major() < 4) {
+            $this->markTestSkipped('The hub panels need Filament 4 or 5.');
+        }
     }
 
     protected function defineDatabaseMigrations(): void

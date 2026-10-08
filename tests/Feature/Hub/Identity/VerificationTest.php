@@ -21,6 +21,8 @@ use Livewire\Livewire;
 uses(HubIdentityTestCase::class);
 
 beforeEach(function () {
+    $this->skipBelowFilament4();
+
     $this->hubPanels();
 
     $this->admin = $this->hubUser(1, 'Ada Admin', ['roles' => 'super_admin']);

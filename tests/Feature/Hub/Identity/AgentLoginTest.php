@@ -20,6 +20,8 @@ uses(HubIdentityTestCase::class);
 const HUB_CHROME_ON_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
 
 beforeEach(function () {
+    $this->skipBelowFilament4();
+
     $this->hubPanels();
 
     $this->juan = $this->hubUser(42, 'Juan Dela Cruz');
