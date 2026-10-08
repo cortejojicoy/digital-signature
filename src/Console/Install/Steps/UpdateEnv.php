@@ -49,7 +49,9 @@ class UpdateEnv implements InstallStep
         $example = new EnvFile($context->path('.env.example'));
         $exampleBlock = $example->exists() ? $example->missingBlock($this->groups($context, forExample: true), self::HEADING) : '';
 
-        if (($env->get('SIGNATURE_TSA_URL') ?? '') === '') {
+        if ($context->clientMode()) {
+            $this->clientNotes($context, $env);
+        } elseif (($env->get('SIGNATURE_TSA_URL') ?? '') === '') {
             $context->next[] = 'Set SIGNATURE_TSA_URL if you want trusted timestamps';
         }
 
@@ -83,10 +85,41 @@ class UpdateEnv implements InstallStep
     }
 
     /**
+     * Client mode: what the app still needs before it can sign anyone in.
+     */
+    protected function clientNotes(InstallContext $context, EnvFile $env): void
+    {
+        $mode = $env->get('SIGNATURE_MODE');
+
+        if ($mode !== null && $mode !== 'client') {
+            $context->next[] = "SIGNATURE_MODE is already \"{$mode}\" in .env: change it to client by hand";
+        }
+
+        $blank = array_filter(
+            ['SIGNATURE_HUB_URL', 'SIGNATURE_HUB_CLIENT_ID', 'SIGNATURE_HUB_CLIENT_SECRET', 'SIGNATURE_HUB_WEBHOOK_SECRET'],
+            fn (string $key) => ($env->get($key) ?? '') === '',
+        );
+
+        if ($blank !== []) {
+            $context->next[] = 'Fill in '.implode(', ', $blank).' in .env (from the hub admin panel)';
+        }
+
+        $app = rtrim((string) ($env->get('APP_URL') ?: config('app.url')), '/');
+
+        $context->next[] = 'Register this app as a client in the hub admin panel '
+            ."(redirect URI {$app}/signature/hub/callback, webhook URL {$app}/signature/hub/webhook)";
+        $context->next[] = 'Schedule php artisan signature:hub-retry every five minutes';
+    }
+
+    /**
      * @return list<array{comment: list<string>, keys: array<string, string>}>
      */
     protected function groups(InstallContext $context, bool $forExample): array
     {
+        if ($context->clientMode()) {
+            return $this->clientGroups();
+        }
+
         $groups = [
             [
                 'comment' => ['Certificates and signed PDFs. Must be a PRIVATE disk; `local` is', 'storage/app/private. Never `public`.'],
@@ -129,5 +162,47 @@ class UpdateEnv implements InstallStep
         }
 
         return $groups;
+    }
+
+    /**
+     * Client mode: no certificates, CRL, timestamps or agent here (the hub
+     * signs), so only the disk, routing and the hub connection. Secrets are
+     * left blank: they come from the hub admin panel.
+     *
+     * @return list<array{comment: list<string>, keys: array<string, string>}>
+     */
+    protected function clientGroups(): array
+    {
+        return [
+            [
+                'comment' => ['Signatures, devices and certificates are managed at the UPLB Signature', 'hub; this app signs through it (docs/hub/client.md).'],
+                'keys'    => ['SIGNATURE_MODE' => 'client'],
+            ],
+            [
+                'comment' => ['From the hub admin panel (Apps). Fill these in before serving requests:', 'a client app without them refuses to boot.'],
+                'keys'    => [
+                    'SIGNATURE_HUB_URL'            => '',
+                    'SIGNATURE_HUB_CLIENT_ID'      => '',
+                    'SIGNATURE_HUB_CLIENT_SECRET'  => '',
+                    'SIGNATURE_HUB_WEBHOOK_SECRET' => '',
+                ],
+            ],
+            [
+                'comment' => ['Where signature mirrors are kept. Blank = SIGNATURE_DISK; `rustfs` (an s3', 'disk) keeps the images off this server.'],
+                'keys'    => ['SIGNATURE_HUB_MIRROR_DISK' => ''],
+            ],
+            [
+                'comment' => ['Signed PDFs. Must be a PRIVATE disk; `local` is storage/app/private.'],
+                'keys'    => ['SIGNATURE_DISK' => 'local'],
+            ],
+            [
+                'comment' => ['Consent. `approval` never signs on someone\'s behalf.'],
+                'keys'    => ['SIGNATURE_AUTO_AFFIX_MODE' => 'approval', 'SIGNATURE_ALLOW_IMPLICIT_AFFIX' => 'false', 'SIGNATURE_AUTO_AFFIX_NOTIFY' => 'true'],
+            ],
+            [
+                'comment' => ['Signing order (sequential | parallel) and progressive | incremental.'],
+                'keys'    => ['SIGNATURE_SEQUENCE_MODE' => 'sequential', 'SIGNATURE_MULTI_MODE' => 'progressive'],
+            ],
+        ];
     }
 }

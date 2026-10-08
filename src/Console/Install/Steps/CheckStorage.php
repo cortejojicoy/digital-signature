@@ -53,7 +53,33 @@ class CheckStorage implements InstallStep
 
         $root = isset($config['root']) ? ' ('.$context->relative((string) $config['root']).')' : '';
 
-        return StepResult::done(["disk \"{$disk}\"{$root} is private"]);
+        $details = ["disk \"{$disk}\"{$root} is private"];
+
+        // Client mode: signature mirrors are held to the same rule.
+        $mirror = $context->clientMode()
+            ? (new EnvFile($context->path('.env')))->get('SIGNATURE_HUB_MIRROR_DISK') ?: config('signature.hub.mirror_disk')
+            : null;
+
+        if (is_string($mirror) && $mirror !== '' && $mirror !== $disk) {
+            $mirrorConfig = config("filesystems.disks.{$mirror}");
+
+            if (! is_array($mirrorConfig)) {
+                return StepResult::failed([
+                    "SIGNATURE_HUB_MIRROR_DISK is \"{$mirror}\", but config/filesystems.php has no such disk.",
+                ], halt: true);
+            }
+
+            if ($this->isPublic($mirror, $mirrorConfig)) {
+                return StepResult::failed([
+                    "SIGNATURE_HUB_MIRROR_DISK is \"{$mirror}\", which is publicly readable.",
+                    'Signature images would be downloadable by URL. Use a private disk (RustFS with visibility private).',
+                ], halt: true);
+            }
+
+            $details[] = "mirror disk \"{$mirror}\" is private";
+        }
+
+        return StepResult::done($details);
     }
 
     /** @param  array<string, mixed>  $config */
