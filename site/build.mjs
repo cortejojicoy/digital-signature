@@ -96,6 +96,19 @@ const NAV = [
         ],
     },
     {
+        title: 'Signature hub',
+        items: [
+            { file: 'hub/index.md', label: 'Overview' },
+            { file: 'hub/identity.md', label: 'Identity and sign-in' },
+            { file: 'hub/panels.md', label: 'Panels' },
+            { file: 'hub/api.md', label: 'Hub API' },
+            { file: 'hub/client.md', label: 'Client mode' },
+            { file: 'hub/deferred-signing.md', label: 'Hash-only signing' },
+            { file: 'hub/rustfs.md', label: 'RustFS' },
+            { file: 'hub/contracts.md', label: 'Contracts' },
+        ],
+    },
+    {
         title: 'Reference',
         items: [
             { file: 'security.md', label: 'Security' },
