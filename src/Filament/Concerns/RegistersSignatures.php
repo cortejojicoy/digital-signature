@@ -3,10 +3,12 @@
 namespace Kukux\DigitalSignature\Filament\Concerns;
 
 use Filament\Notifications\Notification;
+use Kukux\DigitalSignature\Client\Exceptions\SignatureManagedAtHubException;
 use Kukux\DigitalSignature\Exceptions\PrimarySignatureExistsException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Services\SignatureManager;
+use Kukux\DigitalSignature\Support\SignatureMode;
 
 /**
  * Register a reusable signature for the signed-in user.
@@ -42,6 +44,17 @@ trait RegistersSignatures
     ): ?Signature {
         $userId = auth()->id();
 
+        // Client mode: signatures are created only at the hub. Said before
+        // anything else, so nobody draws one only to be refused after.
+        if (SignatureMode::isClient()) {
+            $this->signatureFailure(
+                'Managed at UPLB Signature',
+                'Add or change your signature at UPLB Signature. It appears here on its own.',
+            );
+
+            return null;
+        }
+
         if (! $userId) {
             $this->signatureFailure('Not authenticated', 'You must be signed in to register a signature.');
 
@@ -72,6 +85,10 @@ trait RegistersSignatures
                 source: $source,
                 certificatePassword: $certificatePassword,
             );
+        } catch (SignatureManagedAtHubException $e) {
+            $this->signatureFailure('Managed at UPLB Signature', $e->getMessage());
+
+            return null;
         } catch (PrimarySignatureExistsException $e) {
             // The visibility check and the submit are separated by however long
             // the user spent drawing, which is plenty of time to have created
@@ -104,9 +121,15 @@ trait RegistersSignatures
      *
      * One active primary at a time: document-signing paths default to "the
      * user's signature", and that phrase has to name exactly one row.
+     *
+     * Never in client mode: the hub is where signatures are registered.
      */
     protected function canRegisterSignature(): bool
     {
+        if (SignatureMode::isClient()) {
+            return false;
+        }
+
         $userId = auth()->id();
 
         return $userId
