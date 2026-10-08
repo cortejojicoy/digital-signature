@@ -5,6 +5,7 @@ namespace Kukux\DigitalSignature\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
+use Kukux\DigitalSignature\Client\MirrorStorage;
 use Kukux\DigitalSignature\Models\Signature;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -27,7 +28,9 @@ class SignatureAssetController extends Controller
     {
         abort_unless($digitalSignature->image_path, 404);
 
-        $disk = Storage::disk(config('signature.storage_disk'));
+        // A hub mirror (and a document row copied from one) may live on its
+        // own disk, RustFS in production; everything else on storage_disk.
+        $disk = Storage::disk(MirrorStorage::diskNameFor($digitalSignature));
 
         abort_unless($disk->exists($digitalSignature->image_path), 404);
 

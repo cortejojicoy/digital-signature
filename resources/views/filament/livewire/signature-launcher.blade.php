@@ -1141,7 +1141,11 @@
                         <div class="dsig-note">
                             You have no registered signature yet, so documents can reach you but
                             you can't sign them.
-                            <a href="#" x-on:click.prevent="tab = 'library'">Add one now →</a>
+                            @if ($this->hub['enabled'])
+                                <a href="{{ $this->hub['profileUrl'] }}" target="_blank" rel="noopener">Add one at UPLB Signature →</a>
+                            @else
+                                <a href="#" x-on:click.prevent="tab = 'library'">Add one now →</a>
+                            @endif
                         </div>
                     @endif
 
@@ -1299,6 +1303,33 @@
                 @else
                     @php $signatures = $this->signatures; @endphp
 
+                    @if ($this->hub['enabled'])
+                        {{--
+                            Client mode: the signature is the hub's, mirrored
+                            here read-only. No pad, no upload, no manage:
+                            changing it happens at the hub, and the mirror
+                            follows.
+                        --}}
+                        @if ($signatures->isNotEmpty())
+                            <div class="dsig-lib">
+                                @foreach ($signatures as $signature)
+                                    <div class="dsig-lib__item" wire:key="dsig-sig-{{ $signature->id }}">
+                                        <img src="{{ $signature->getTemporaryImageUrl() }}" alt="Your signature from UPLB Signature" />
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endif
+
+                        <div class="dsig-note">
+                            @if ($signatures->isEmpty())
+                                You don't have a signature yet.
+                            @else
+                                This is your signature from UPLB Signature.
+                            @endif
+                            <a href="{{ $this->hub['profileUrl'] }}" target="_blank" rel="noopener">Change it at UPLB Signature →</a>
+                        </div>
+                    @else
+                    {{-- Standalone and hub: the library, and the form to add one. --}}
                     @if ($signatures->isNotEmpty())
                         <div class="dsig-lib">
                             @foreach ($signatures as $signature)
@@ -1502,6 +1533,7 @@
                             before registering another.
                         </div>
                     @endif
+                    @endif
                 @endif
             </div>
 
@@ -1513,6 +1545,12 @@
             <div x-show="! viewing && mode === 'tabs' && tab === 'devices'" x-cloak>
                 @if (! $this->loaded)
                     <div class="dsig-skeleton"></div>
+                @elseif ($this->hub['enabled'])
+                    {{-- Client mode: the agent pairs with the hub alone. --}}
+                    <div class="dsig-note">
+                        Your signing computer is managed at UPLB Signature.
+                        <a href="{{ $this->hub['profileUrl'] }}" target="_blank" rel="noopener">Manage it there →</a>
+                    </div>
                 @else
                     @livewire('kukux-digital-signature.signing-devices', key('dsig-signing-devices'))
                 @endif
@@ -1680,8 +1718,10 @@
             what the user is already looking at. The page stays routable for
             hosts that want it in their navigation.
         --}}
-        <div class="dsig-panel__foot" x-show="! viewing && mode === 'tabs'">
-            <button type="button" class="dsig-linkbtn" x-on:click="manage()">Manage signatures</button>
-        </div>
+        @unless ($this->hub['enabled'])
+            <div class="dsig-panel__foot" x-show="! viewing && mode === 'tabs'">
+                <button type="button" class="dsig-linkbtn" x-on:click="manage()">Manage signatures</button>
+            </div>
+        @endunless
     </div>
 </div>

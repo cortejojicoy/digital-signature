@@ -33,13 +33,29 @@ class InstallCommand extends Command
         {--no-policy : Skip the signature policy}
         {--publish-migrations : Publish the migration to database/migrations instead of running it from vendor/}
         {--agent : Also enable the desktop agent, pinning its server ID and salt}
+        {--mode=standalone : standalone, or client for an app whose signatures come from the UPLB Signature hub}
         {--dry-run : Show what each step would do, change nothing}';
 
     protected $description = 'Install Digital Signature: config, .env, assets, migration, panel plugin and policy';
 
     public function handle(): int
     {
+        $mode = (string) $this->option('mode');
+
+        // Hub mode is the hub's own deployment, set up by hand (docs/hub).
+        if (! in_array($mode, ['standalone', 'client'], true)) {
+            $this->components->error("--mode must be standalone or client, not \"{$mode}\".");
+
+            return self::FAILURE;
+        }
+
+        // Client apps hold no keys and pair no computers: the hub does both.
+        if ($mode === 'client' && $this->option('agent')) {
+            $this->components->warn('--agent is ignored with --mode=client: the agent pairs with the hub.');
+        }
+
         $context = new InstallContext($this, $this->laravel->basePath(), [
+            'mode'               => $mode,
             'force'              => (bool) $this->option('force'),
             'no-migrate'         => (bool) $this->option('no-migrate'),
             'no-assets'          => (bool) $this->option('no-assets'),
@@ -47,7 +63,7 @@ class InstallCommand extends Command
             'panel'              => $this->option('panel'),
             'no-policy'          => (bool) $this->option('no-policy'),
             'publish-migrations' => (bool) $this->option('publish-migrations'),
-            'agent'              => (bool) $this->option('agent'),
+            'agent'              => (bool) $this->option('agent') && $mode !== 'client',
             'dry-run'            => (bool) $this->option('dry-run'),
             'interactive'        => $this->input->isInteractive(),
         ]);

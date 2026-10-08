@@ -17,10 +17,12 @@ class AgentJob extends Model
         'purpose', 'title', 'signable_type', 'signable_id',
         'payload_hash', 'nonce', 'link_token_hash',
         'status', 'reason',
+        'requesting_app', 'meta',
         'claimed_at', 'completed_at', 'consumed_at', 'expires_at',
     ];
 
     protected $casts = [
+        'meta'         => 'array',
         'claimed_at'   => 'datetime',
         'completed_at' => 'datetime',
         'consumed_at'  => 'datetime',

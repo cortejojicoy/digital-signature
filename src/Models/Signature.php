@@ -28,12 +28,16 @@ class Signature extends Model
         'source', 'status', 'certificate_fingerprint',
         'certificate_password', // Encrypted certificate password
         'pades_info', 'signed_at', 'revoked_at',
+        // Client mode: a read-only mirror of the hub's image (source = 'hub').
+        // Hub mode: hub_version_id is the specimen's RustFS object version.
+        'hub_uuid', 'hub_image_hash', 'hub_synced_at', 'hub_version_id',
     ];
 
     protected $casts = [
         'pades_info' => 'array',
         'signed_at' => 'datetime',
         'revoked_at' => 'datetime',
+        'hub_synced_at' => 'datetime',
         'sequence' => 'integer',
     ];
 
@@ -121,10 +125,18 @@ class Signature extends Model
      * they are the user's registered, document-agnostic signature image.
      * Document signing creates additional Signature rows with signable_id set;
      * those are not "primary" and are not counted against the one-per-user limit.
+     *
+     * Hub mirrors (`source = hub`) are the only primaries in client mode, and
+     * are ignored in the other modes, so flipping SIGNATURE_MODE back to
+     * standalone rolls back cleanly (docs/hub/client.md).
      */
     public function scopePrimary(Builder $query): Builder
     {
-        return $query->whereNull('signable_id');
+        $query->whereNull('signable_id');
+
+        return \Kukux\DigitalSignature\Support\SignatureMode::isClient()
+            ? $query->where('source', 'hub')
+            : $query->where('source', '!=', 'hub');
     }
 
     public function scopeActive(Builder $query): Builder
@@ -258,12 +270,16 @@ class Signature extends Model
         $ttl = $ttlMinutes ?? (int) config('signature.preview_url_ttl', 5);
         $expires = now()->addMinutes($ttl);
 
-        try {
-            return Storage::disk(config('signature.storage_disk'))
-                ->temporaryUrl($this->image_path, $expires);
-        } catch (\RuntimeException) {
-            // Driver doesn't support native temporary URLs (e.g. local).
-            // Fall through to the signed-route fallback below.
+        // A hub mirror is only ever served through the signed route, never
+        // as a presigned link to the object store it lives on (R4).
+        if ($this->source !== 'hub') {
+            try {
+                return Storage::disk(config('signature.storage_disk'))
+                    ->temporaryUrl($this->image_path, $expires);
+            } catch (\RuntimeException) {
+                // Driver doesn't support native temporary URLs (e.g. local).
+                // Fall through to the signed-route fallback below.
+            }
         }
 
         return URL::temporarySignedRoute(

@@ -6,6 +6,7 @@ use Filament\Facades\Filament;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Collection as BaseCollection;
+use Kukux\DigitalSignature\Client\HubLinks;
 use Kukux\DigitalSignature\Filament\Concerns\ActsOnSignatureRequests;
 use Kukux\DigitalSignature\Filament\Concerns\ManagesSignatures;
 use Kukux\DigitalSignature\Filament\Concerns\RegistersSignatures;
@@ -15,6 +16,7 @@ use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\UserPreference;
 use Kukux\DigitalSignature\Support\LauncherSettings;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Support\ViewerAssets;
 use Livewire\Component;
 use Throwable;
@@ -209,13 +211,29 @@ class SignatureLauncher extends Component
             return Signature::query()->whereRaw('1 = 0')->get();
         }
 
+        // primary(): in client mode, only the hub's mirror.
         return Signature::query()
             ->where('user_id', $userId)
-            ->whereNull('signable_id')
+            ->primary()
             ->where('status', 'active')
             ->latest('id')
             ->limit(12)
             ->get();
+    }
+
+    /**
+     * Client mode: signatures and signing computers are managed at the hub,
+     * so the Library and Devices tabs show what's here and link there.
+     *
+     * @return array{enabled: bool, profileUrl: ?string}
+     */
+    public function getHubProperty(): array
+    {
+        if (! SignatureMode::isClient()) {
+            return ['enabled' => false, 'profileUrl' => null];
+        }
+
+        return ['enabled' => true, 'profileUrl' => HubLinks::profile()];
     }
 
     /**

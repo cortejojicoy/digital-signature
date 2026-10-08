@@ -546,6 +546,251 @@ return new class extends Migration
             });
         }
 
+        // ── Hub and client mode (docs/hub/index.md) ─────────────────────
+        // Created in every mode, so switching an app between standalone and
+        // client never needs a migration. Standalone never writes to them.
+
+        // ── Hub: who a paired account is ─────────────────────────────────
+        // One row per hub account. A provisional account (created by "Pair
+        // this computer") is `unidentified` until its owner picks their
+        // personnel record; `personnel_key` is the OIDC `sub` apps see.
+        if (! Schema::hasTable('digital_signature_identities')) {
+            Schema::create('digital_signature_identities', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
+                $t->string('personnel_key', 64)->nullable();
+                // unidentified | pending_verification | verified | rejected | retired | separated
+                $t->string('status', 24)->default('unidentified');
+                // Hash of the browser session that started the pairing: only
+                // that browser may confirm it and sign in as the account.
+                $t->string('session_hash', 64)->nullable();
+                $t->unsignedSmallInteger('search_count')->default(0);
+                $t->timestamp('claimed_at')->nullable();
+                $t->foreignId('verified_by')->nullable()->constrained('users')->nullOnDelete();
+                $t->timestamp('verified_at')->nullable();
+                $t->string('retired_reason', 64)->nullable();
+                $t->timestamps();
+
+                $t->index(['personnel_key', 'status']);
+                $t->index('status');
+            });
+        }
+
+        // A move of a person's signature to a new computer (account).
+        if (! Schema::hasTable('digital_signature_transfers')) {
+            Schema::create('digital_signature_transfers', function (Blueprint $t) {
+                $t->id();
+                $t->uuid('uuid')->unique();
+                $t->string('personnel_key', 64);
+                $t->foreignId('from_user_id')->constrained('users')->cascadeOnDelete();
+                $t->foreignId('to_user_id')->constrained('users')->cascadeOnDelete();
+                // The agent job sent to the old computer, when it is still around.
+                $t->foreignId('agent_job_id')->nullable()->constrained('digital_signature_agent_jobs')->nullOnDelete();
+                // pending | approved | rejected | expired
+                $t->string('status', 16)->default('pending');
+                $t->foreignId('decided_by')->nullable()->constrained('users')->nullOnDelete();
+                $t->timestamp('decided_at')->nullable();
+                $t->timestamps();
+
+                $t->index(['personnel_key', 'status']);
+            });
+        }
+
+        // Computers refused after a rejected claim (R8), by hardware id hash.
+        if (! Schema::hasTable('digital_signature_hub_blocks')) {
+            Schema::create('digital_signature_hub_blocks', function (Blueprint $t) {
+                $t->id();
+                $t->string('hardware_id_hash', 64)->index();
+                $t->string('reason', 64);
+                $t->timestamp('until');
+                $t->timestamps();
+            });
+        }
+
+        // "Sign in with your computer": a usernameless challenge the agent
+        // claims, bound to the browser session that asked.
+        if (! Schema::hasTable('digital_signature_hub_logins')) {
+            Schema::create('digital_signature_hub_logins', function (Blueprint $t) {
+                $t->id();
+                $t->uuid('uuid')->unique();
+                $t->string('session_hash', 64);
+                $t->string('match_code', 8);
+                $t->string('link_token_hash', 64)->nullable();
+                // Set when an agent claims it: whose computer answered.
+                $t->foreignId('user_id')->nullable()->constrained()->cascadeOnDelete();
+                $t->foreignId('agent_job_id')->nullable()->constrained('digital_signature_agent_jobs')->nullOnDelete();
+                // pending | claimed | approved | rejected | expired | consumed
+                $t->string('status', 16)->default('pending');
+                $t->string('ip', 45)->nullable();
+                $t->text('user_agent')->nullable();
+                $t->timestamp('expires_at');
+                $t->timestamp('approved_at')->nullable();
+                $t->timestamp('consumed_at')->nullable();
+                $t->timestamps();
+            });
+        }
+
+        // ── Hub: apps that use it ────────────────────────────────────────
+        if (! Schema::hasTable('digital_signature_hub_apps')) {
+            Schema::create('digital_signature_hub_apps', function (Blueprint $t) {
+                $t->id();
+                $t->string('client_id', 64)->unique();      // e.g. "performance"
+                $t->string('name');
+                $t->string('secret_hash', 64);
+                $t->text('webhook_url')->nullable();
+                $t->text('webhook_secret')->nullable();       // encrypted
+                $t->text('redirect_uris')->nullable();        // JSON array
+                $t->text('scopes')->nullable();               // JSON array
+                // Prefix of this app's mirrors on the shared mirrors disk.
+                $t->string('mirror_prefix', 64)->nullable();
+                $t->boolean('active')->default(true);
+                $t->timestamps();
+            });
+        }
+
+        // Access tokens (client credentials, or a person via authorization code).
+        if (! Schema::hasTable('digital_signature_hub_tokens')) {
+            Schema::create('digital_signature_hub_tokens', function (Blueprint $t) {
+                $t->id();
+                $t->string('token_hash', 64)->unique();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->foreignId('user_id')->nullable()->constrained()->cascadeOnDelete();
+                $t->text('scopes')->nullable();
+                $t->timestamp('expires_at');
+                $t->timestamp('revoked_at')->nullable();
+                $t->timestamps();
+            });
+        }
+
+        if (! Schema::hasTable('digital_signature_hub_codes')) {
+            Schema::create('digital_signature_hub_codes', function (Blueprint $t) {
+                $t->id();
+                $t->string('code_hash', 64)->unique();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->foreignId('user_id')->constrained()->cascadeOnDelete();
+                $t->text('redirect_uri');
+                $t->string('code_challenge', 128);
+                $t->timestamp('expires_at');
+                $t->timestamp('used_at')->nullable();
+                $t->timestamps();
+            });
+        }
+
+        // Which apps hold a mirror of whose signature: webhooks go only to
+        // them, and the image endpoint serves only them (least data).
+        if (! Schema::hasTable('digital_signature_hub_holders')) {
+            Schema::create('digital_signature_hub_holders', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->string('personnel_key', 64);
+                $t->timestamp('linked_at')->nullable();      // signed in / named
+                $t->timestamp('last_pulled_at')->nullable();
+                $t->timestamps();
+
+                $t->unique(['app_id', 'personnel_key']);
+            });
+        }
+
+        // A hash an app asked the hub to sign.
+        if (! Schema::hasTable('digital_signature_hub_sign_requests')) {
+            Schema::create('digital_signature_hub_sign_requests', function (Blueprint $t) {
+                $t->id();
+                $t->uuid('uuid')->unique();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->string('personnel_key', 64);
+                $t->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
+                $t->foreignId('signature_id')->nullable()->constrained('digital_signatures')->nullOnDelete();
+                $t->foreignId('agent_job_id')->nullable()->constrained('digital_signature_agent_jobs')->nullOnDelete();
+                $t->string('idempotency_key', 128)->nullable();
+                $t->string('document_hash', 64);
+                $t->string('specimen_hash', 64);
+                $t->string('title');
+                $t->string('slot', 128)->nullable();
+                $t->string('capacity')->nullable();
+                // pending | approved | signed | declined | refused | expired | failed
+                $t->string('status', 16)->default('pending');
+                $t->string('refusal_reason', 64)->nullable();
+                $t->longText('cms')->nullable();               // base64 DER
+                $t->string('certificate_fingerprint', 64)->nullable();
+                $t->timestamp('signed_at')->nullable();
+                $t->timestamp('expires_at');
+                $t->timestamps();
+
+                $t->unique(['app_id', 'idempotency_key']);
+                $t->index(['personnel_key', 'status']);
+            });
+        }
+
+        // Outbox: every webhook is written here first, then delivered.
+        if (! Schema::hasTable('digital_signature_hub_webhooks')) {
+            Schema::create('digital_signature_hub_webhooks', function (Blueprint $t) {
+                $t->id();
+                $t->uuid('uuid')->unique();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->string('event', 64);
+                $t->longText('payload');                        // JSON
+                $t->unsignedSmallInteger('attempts')->default(0);
+                $t->timestamp('next_attempt_at')->nullable();
+                $t->timestamp('delivered_at')->nullable();
+                $t->unsignedSmallInteger('last_status')->nullable();
+                $t->text('last_error')->nullable();
+                $t->timestamps();
+
+                $t->index(['delivered_at', 'next_attempt_at']);
+                $t->index(['app_id', 'delivered_at']);
+            });
+        }
+
+        // ── Client: this app's link to the hub ───────────────────────────
+        // A local user ↔ hub person. A package table so client mode never
+        // alters the host's users table (decision D8).
+        if (! Schema::hasTable('digital_signature_hub_accounts')) {
+            Schema::create('digital_signature_hub_accounts', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
+                $t->string('sub', 64)->unique();
+                $t->text('claims')->nullable();                 // JSON: name, emp_no, unit…
+                $t->timestamp('linked_at')->nullable();
+                $t->timestamps();
+            });
+        }
+
+        // A signature this app is waiting on the hub for.
+        if (! Schema::hasTable('digital_signature_hub_pending_signs')) {
+            Schema::create('digital_signature_hub_pending_signs', function (Blueprint $t) {
+                $t->id();
+                $t->uuid('hub_request_id')->nullable()->unique();
+                $t->string('agent_job_uuid', 36)->nullable()->index();
+                $t->foreignId('user_id')->constrained()->cascadeOnDelete();
+                $t->foreignId('signature_request_id')->nullable()->constrained('digital_signature_requests')->nullOnDelete();
+                $t->string('idempotency_key', 64)->unique();
+                $t->string('document_hash', 64);               // digest sent to the hub
+                $t->string('source_hash', 64)->nullable();     // the document before stamping
+                $t->string('specimen_hash', 64);
+                $t->string('prepared_path')->nullable();       // stamped PDF with placeholder
+                $t->text('payload')->nullable();               // JSON: title, slot, capacity…
+                // pending | approved | signed | declined | refused | expired | failed | unsent | done
+                $t->string('status', 16)->default('unsent');
+                $t->string('reason', 64)->nullable();
+                $t->longText('cms')->nullable();
+                $t->unsignedSmallInteger('attempts')->default(0);
+                $t->timestamps();
+
+                $t->index(['user_id', 'status']);
+                $t->index(['user_id', 'source_hash']);
+            });
+        }
+
+        // Webhook ids already handled (dedupe).
+        if (! Schema::hasTable('digital_signature_hub_events')) {
+            Schema::create('digital_signature_hub_events', function (Blueprint $t) {
+                $t->id();
+                $t->string('event_id', 64)->unique();
+                $t->string('event', 64);
+                $t->timestamp('received_at');
+            });
+        }
+
         $this->addColumnsMissingFromEarlierReleases();
 
         // Primary (reusable) signatures — those with no signable_id — were
@@ -568,6 +813,19 @@ return new class extends Migration
             return;
         }
 
+        Schema::dropIfExists('digital_signature_hub_events');
+        Schema::dropIfExists('digital_signature_hub_pending_signs');
+        Schema::dropIfExists('digital_signature_hub_accounts');
+        Schema::dropIfExists('digital_signature_hub_webhooks');
+        Schema::dropIfExists('digital_signature_hub_sign_requests');
+        Schema::dropIfExists('digital_signature_hub_holders');
+        Schema::dropIfExists('digital_signature_hub_codes');
+        Schema::dropIfExists('digital_signature_hub_tokens');
+        Schema::dropIfExists('digital_signature_hub_apps');
+        Schema::dropIfExists('digital_signature_hub_logins');
+        Schema::dropIfExists('digital_signature_hub_blocks');
+        Schema::dropIfExists('digital_signature_transfers');
+        Schema::dropIfExists('digital_signature_identities');
         Schema::dropIfExists('digital_signature_user_preferences');
         Schema::dropIfExists('digital_signature_agent_jobs');
         Schema::dropIfExists('digital_signature_agent_tokens');
@@ -590,6 +848,47 @@ return new class extends Migration
      */
     protected function addColumnsMissingFromEarlierReleases(): void
     {
+        // Hub / client mode. A mirror is a digital_signatures row with
+        // source = 'hub'; the hub's master rows keep the RustFS version id.
+        foreach ([
+            'hub_uuid'       => fn (Blueprint $t) => $t->uuid('hub_uuid')->nullable()->index(),
+            'hub_image_hash' => fn (Blueprint $t) => $t->string('hub_image_hash', 64)->nullable(),
+            'hub_synced_at'  => fn (Blueprint $t) => $t->timestamp('hub_synced_at')->nullable(),
+            'hub_version_id' => fn (Blueprint $t) => $t->string('hub_version_id', 128)->nullable(),
+        ] as $column => $add) {
+            if (! Schema::hasColumn('digital_signatures', $column)) {
+                Schema::table('digital_signatures', $add);
+            }
+        }
+
+        // Which app asked (shown by the agent), and what a purpose needs
+        // (a login's match code, a transfer's new computer).
+        if (! Schema::hasColumn('digital_signature_agent_jobs', 'requesting_app')) {
+            Schema::table('digital_signature_agent_jobs', function (Blueprint $t) {
+                $t->string('requesting_app', 128)->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('digital_signature_agent_jobs', 'meta')) {
+            Schema::table('digital_signature_agent_jobs', function (Blueprint $t) {
+                $t->text('meta')->nullable();
+            });
+        }
+
+        // The hub's audit trail: which app, and which person across accounts.
+        if (! Schema::hasColumn('digital_signature_audits', 'app')) {
+            Schema::table('digital_signature_audits', function (Blueprint $t) {
+                $t->string('app', 64)->nullable()->index();
+            });
+        }
+
+        if (! Schema::hasColumn('digital_signature_audits', 'personnel_key')) {
+            Schema::table('digital_signature_audits', function (Blueprint $t) {
+                $t->string('personnel_key', 64)->nullable();
+                $t->index(['personnel_key', 'created_at'], 'dsa_personnel_created_idx');
+            });
+        }
+
         if (! Schema::hasColumn('signature_positions', 'caption_position')) {
             Schema::table('signature_positions', function (Blueprint $t) {
                 $t->string('caption_position', 10)->nullable()->after('label');

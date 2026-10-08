@@ -8,7 +8,9 @@ use Illuminate\Routing\Controller;
 use Kukux\DigitalSignature\Contracts\PdfTemplate;
 use Kukux\DigitalSignature\Contracts\RendersSamplePageImage;
 use Kukux\DigitalSignature\Contracts\Signable;
+use Kukux\DigitalSignature\Client\Exceptions\HubApprovalRequiredException;
 use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -186,7 +188,8 @@ class PdfTemplateSignerController extends Controller
         }
 
         $password = $sig->getCertificatePassword();
-        if (! $password) {
+        // Client mode signs at the hub: there is no certificate here to unlock.
+        if (! $password && ! SignatureMode::isClient()) {
             return response()->json([
                 'error' => 'No certificate password is stored for this signature — re-create the signature and provide a certificate password.',
             ], 422);
@@ -208,8 +211,11 @@ class PdfTemplateSignerController extends Controller
                 ],
             );
 
-            $this->signatureManager->embedAndFinalize($signed, $password);
+            $this->signatureManager->embedAndFinalize($signed, (string) $password);
             $signed->refresh();
+        } catch (HubApprovalRequiredException $e) {
+            // Client mode: waiting on the signer's computer, via the hub.
+            return $e->toJsonResponse();
         } catch (\Throwable $e) {
             report($e);
             return response()->json([

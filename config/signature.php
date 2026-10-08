@@ -584,4 +584,116 @@ return [
         'cache_ttl_hours' => 24,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Mode: standalone, hub or client
+    |--------------------------------------------------------------------------
+    | standalone  Today's behaviour: this app owns its signatures, devices and
+    |             certificates. The default; nothing below applies.
+    | hub         signature.uplb.edu.ph: everything standalone does, plus the
+    |             hub API, sign requests, agent sign-in and the hub panels.
+    | client      An app that uses the hub: no local signatures, devices or
+    |             certificates; signing goes through the hub and the drag tray
+    |             reads a read-only mirror of each person's image.
+    |
+    | See docs/hub/index.md.
+    */
+    'mode' => env('SIGNATURE_MODE', 'standalone'),
+
+    'hub' => [
+        // ── client mode ──────────────────────────────────────────────────
+        'url'            => env('SIGNATURE_HUB_URL'),
+        'client_id'      => env('SIGNATURE_HUB_CLIENT_ID'),
+        'client_secret'  => env('SIGNATURE_HUB_CLIENT_SECRET'),
+        'webhook_secret' => env('SIGNATURE_HUB_WEBHOOK_SECRET'),
+
+        // Where mirrors are kept. Null = signature.storage_disk. 'rustfs' (an
+        // s3 disk on rustfs.uplb.edu.ph) keeps images off this server.
+        'mirror_disk'    => env('SIGNATURE_HUB_MIRROR_DISK'),
+        // Folder for mirrors on a local disk; on RustFS the disk's own root
+        // (the app's prefix) is used and this is ignored.
+        'mirror_dir'     => 'signatures/hub',
+
+        // Re-check a mirror's status when the viewer opens it and it is older
+        // than this many seconds, in case a webhook was missed.
+        'stale_after'    => (int) env('SIGNATURE_HUB_STALE_AFTER', 86400),
+
+        // HTTP timeout and circuit breaker for calls to the hub.
+        'timeout'        => (int) env('SIGNATURE_HUB_TIMEOUT', 10),
+        'breaker'        => [
+            'failures' => 3,     // consecutive failures that open the breaker
+            'cooldown' => 60,    // seconds before trying again
+        ],
+
+        // Create a local user on first hub sign-in when no user matches by
+        // hub link or email.
+        'create_users'   => (bool) env('SIGNATURE_HUB_CREATE_USERS', true),
+
+        // Where "Change it at the hub" links point (person panel path).
+        'profile_path'   => '/',
+
+        // Webhook receiver: accepted clock skew, in seconds.
+        'webhook_tolerance' => 300,
+
+        // ── hub mode ─────────────────────────────────────────────────────
+        // Master specimen images. Null = signature.storage_disk.
+        'specimen_disk'  => env('SIGNATURE_HUB_SPECIMEN_DISK'),
+        // Disk holding every app's mirror prefix, so the hub can delete a
+        // revoked person's images itself (RustFS 'signature-mirrors').
+        // Null = don't (rely on webhooks).
+        'mirrors_disk'   => env('SIGNATURE_HUB_MIRRORS_DISK'),
+
+        // Who people are: an Eloquent model fed from the HR Kafka topics.
+        // Map its columns here, or bind Contracts\PersonnelDirectory yourself.
+        'personnel' => [
+            'model'   => env('SIGNATURE_HUB_PERSONNEL_MODEL'),
+            'columns' => [
+                'key'      => 'uuid',          // stable id; becomes the OIDC `sub`
+                'emp_no'   => 'employee_number',
+                'name'     => 'full_name',
+                'email'    => 'email',
+                'unit'     => 'unit_name',
+                'position' => 'position_title',
+                'active'   => 'is_active',
+            ],
+            'min_search'   => 3,   // characters before the identify form searches
+            'max_results'  => 10,
+            'search_quota' => 20,  // searches per provisional account
+        ],
+
+        // Sign-in, pairing and verification.
+        'login_ttl'          => 120,     // seconds a sign-in challenge lives
+        'require_verification' => true,  // D9: admin verifies each claim
+        'block_days'         => 30,      // how long a rejected computer is refused
+        'super_admin_role'   => 'super_admin',
+        'admin_path'         => '/admin',
+        'pair_rate_limit'    => 10,      // "Pair this computer" per IP per hour
+        'transfer_ttl'       => 86400,   // seconds the old computer has to approve a move
+
+        // Break-glass sign-in to the admin panel only (D10): email + password
+        // + TOTP, from allowlisted IPs, every use audited and alerted. At most
+        // two people: 'users' => ['admin@uplb.edu.ph' => '<base32 TOTP secret>'].
+        'break_glass' => [
+            'enabled' => (bool) env('SIGNATURE_HUB_BREAK_GLASS', false),
+            'users'   => [],
+            'ips'     => array_values(array_filter(array_map('trim', explode(',', (string) env('SIGNATURE_HUB_BREAK_GLASS_IPS', ''))))),
+        ],
+
+        // OAuth for apps (authorization code + PKCE, and client credentials).
+        'token_ttl'      => 3600,
+        'code_ttl'       => 60,
+
+        // Webhooks to apps: retries back off from 1 minute up to 24 hours.
+        'webhook_max_attempts' => 12,
+
+        // Sign requests the agent must approve within this many seconds.
+        'sign_request_ttl' => 300,
+
+        // Agent download links on the landing page.
+        'downloads' => [
+            'mac'     => env('SIGNATURE_HUB_AGENT_MAC_URL'),
+            'windows' => env('SIGNATURE_HUB_AGENT_WINDOWS_URL'),
+        ],
+    ],
+
 ];

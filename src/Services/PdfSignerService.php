@@ -50,6 +50,16 @@ class PdfSignerService
     }
 
     /**
+     * Keep a PDF signed some other way (client mode: the hub's CMS injected
+     * by DeferredPdfSigner) as this signature's version, by the same rules
+     * as sign().
+     */
+    public function keepSignedVersion(Signature $signature, string $output): string
+    {
+        return $this->keepAsVersion($signature, $output);
+    }
+
+    /**
      * Move the driver's output to a path that belongs to this signature alone.
      *
      * Each signed file is a version in the document's history: the copy that

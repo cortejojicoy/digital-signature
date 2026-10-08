@@ -6,6 +6,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
+use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
 use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
@@ -108,7 +109,8 @@ trait SignsDocuments
 
         $signingPassword = $signature->getCertificatePassword();
 
-        if (! $signingPassword) {
+        // Client mode signs at the hub: there is no certificate here to unlock.
+        if (! $signingPassword && ! SignatureMode::isClient()) {
             $this->fail(
                 'Certificate password missing',
                 'This signature has no stored certificate password. Re-create it from the Signatures page.',
@@ -138,9 +140,9 @@ trait SignsDocuments
             );
 
             if ($this->queued) {
-                $manager->sign($documentSignature, $signingPassword);
+                $manager->sign($documentSignature, (string) $signingPassword);
             } else {
-                $manager->embedAndFinalize($documentSignature, $signingPassword);
+                $manager->embedAndFinalize($documentSignature, (string) $signingPassword);
             }
 
             Notification::make()

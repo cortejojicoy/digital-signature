@@ -51,6 +51,12 @@ final class InstallContext
         return (bool) $this->option('force', false);
     }
 
+    /** --mode=client: an app whose signatures, devices and keys are the hub's. */
+    public function clientMode(): bool
+    {
+        return $this->option('mode') === 'client';
+    }
+
     public function interactive(): bool
     {
         return (bool) $this->option('interactive', false);

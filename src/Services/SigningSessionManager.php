@@ -29,6 +29,7 @@ use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\SigningSession;
 use Kukux\DigitalSignature\Security\DocumentIntegrity;
 use Kukux\DigitalSignature\Signatories\RouteState;
+use Kukux\DigitalSignature\Support\SignatureMode;
 
 /**
  * Drives a document through several signatories.
@@ -386,9 +387,20 @@ class SigningSessionManager
             ));
         }
 
+        // Client mode signs at the hub, with no certificate here and so no
+        // password; the hub needs its owner's approval on their computer,
+        // which a delegate can't give.
+        $client = SignatureMode::isClient();
+
+        if ($client && $delegated) {
+            throw new SignatoryNotReadyException(
+                'Signing on someone\'s behalf is not available while signatures are managed at UPLB Signature.'
+            );
+        }
+
         $signingPassword = $password ?? $signature->getCertificatePassword();
 
-        if (! $signingPassword) {
+        if (! $signingPassword && ! $client) {
             throw new SignatoryNotReadyException(
                 'No certificate password is stored for this signature, and none was supplied.'
             );
@@ -430,7 +442,7 @@ class SigningSessionManager
                 extraPositions: $extraPositions,
             );
 
-        $this->signatures->embedAndFinalize($documentSignature, $signingPassword, $sourcePath);
+        $this->signatures->embedAndFinalize($documentSignature, (string) $signingPassword, $sourcePath);
 
         $documentSignature->refresh();
 

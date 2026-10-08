@@ -6,7 +6,11 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Cache;
+use Kukux\DigitalSignature\Client\Exceptions\HubException;
+use Kukux\DigitalSignature\Client\HubClient;
 use Kukux\DigitalSignature\Models\Signature;
+use Kukux\DigitalSignature\Support\SignatureMode;
 
 /**
  * What the QR on a signed page resolves to.
@@ -29,6 +33,13 @@ use Kukux\DigitalSignature\Models\Signature;
  * guessable and there is nothing to enumerate. An unknown one gets the same
  * shaped answer as a revoked one: "no valid signature", with no hint as to
  * which of the two it was.
+ *
+ * **Client mode.** The certificate behind a signature is the hub's, so its
+ * status is asked of the hub (cached briefly). A certificate the hub has
+ * revoked makes the answer "no valid signature", the same shape again. When
+ * the hub can't be reached the local answer stands, marked `certificate:
+ * unchecked`; signatures made before the app moved to the hub are unknown
+ * there and keep their local answer.
  */
 class SignatureVerificationController extends Controller
 {
@@ -48,6 +59,15 @@ class SignatureVerificationController extends Controller
             && ! $signature->isRevoked()
             && $signature->status === 'signed';
 
+        $certificate = $valid && SignatureMode::isClient()
+            ? $this->hubCertificateStatus($signature->certificate_fingerprint)
+            : null;
+
+        if ($certificate === 'revoked') {
+            $valid = false;
+            $certificate = null;
+        }
+
         $payload = [
             'valid'     => $valid,
             'reference' => substr($uuid, 0, 8),
@@ -57,10 +77,34 @@ class SignatureVerificationController extends Controller
             'complete'  => $valid ? (bool) $signature->session?->isComplete() : null,
         ];
 
+        if ($certificate !== null) {
+            $payload['certificate'] = $certificate;
+        }
+
         if ($request->wantsJson()) {
             return response()->json($payload, $valid ? 200 : 404);
         }
 
         return view('signature::verify', $payload);
+    }
+
+    /**
+     * valid | revoked | unknown, or unchecked when the hub can't be asked.
+     */
+    protected function hubCertificateStatus(?string $fingerprint): string
+    {
+        if ($fingerprint === null || $fingerprint === '') {
+            return 'unknown';
+        }
+
+        try {
+            return Cache::remember('signature:hub:certificate:'.$fingerprint, 300, function () use ($fingerprint) {
+                $status = app(HubClient::class)->certificate($fingerprint)['status'] ?? 'unknown';
+
+                return in_array($status, ['valid', 'revoked', 'unknown'], true) ? $status : 'unknown';
+            });
+        } catch (HubException) {
+            return 'unchecked';
+        }
     }
 }

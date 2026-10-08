@@ -3,6 +3,7 @@
 namespace Kukux\DigitalSignature\Filament\Fields;
 
 use Filament\Forms\Components\Field;
+use Kukux\DigitalSignature\Support\SignatureMode;
 
 class SignaturePad extends Field
 {
@@ -26,6 +27,12 @@ class SignaturePad extends Field
         $this->dehydrateStateUsing(fn (?string $state): ?string =>
             ($state === '' || $state === null) ? null : $state
         );
+
+        // Client mode: signatures are drawn only at the hub, so the field is
+        // a link there instead of a pad (docs/hub/client.md).
+        if (SignatureMode::isClient()) {
+            $this->view('signature::client.signature-pad');
+        }
     }
 
     public function canvasWidth(int $width): static
