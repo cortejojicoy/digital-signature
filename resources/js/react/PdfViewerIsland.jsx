@@ -642,6 +642,16 @@ function PdfViewerIsland({ el }) {
             {!readOnly && noSigs && (
                 <p className="dsig-viewer__msg dsig-viewer__msg--warn">
                     You have no registered signature yet, so there is nothing to place.
+                    {/* Client mode: signatures are added at the hub, not here. */}
+                    {meta?.hub?.libraryUrl && (
+                        <>
+                            {' '}
+                            <a href={meta.hub.libraryUrl} target="_blank" rel="noopener">
+                                {meta.hub.label ?? 'Add your signature at UPLB Signature'}
+                            </a>
+                            .
+                        </>
+                    )}
                 </p>
             )}
             {error  && <p className="dsig-viewer__msg dsig-viewer__msg--error">{error}</p>}
