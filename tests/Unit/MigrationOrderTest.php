@@ -89,8 +89,27 @@ describe('migration ordering', function () {
         preg_match_all('/Schema::table\(\s*[\'"]([^\'"]+)[\'"]/', $source, $alters);
 
         foreach ($alters[1] as $table) {
-            expect($source)->toMatch("/Schema::hasColumn\\('{$table}'/");
+            expect($source)->toMatch("/Schema::has(Column|Index)\\('{$table}'/");
         }
+    });
+
+    it('names every index and foreign key within the 64 characters MySQL allows', function () {
+        // SQLite takes a name of any length; MySQL and MariaDB refuse one past
+        // 64, which is how 3.0.0 failed on them. SQLite reports foreign keys
+        // unnamed, so those are named the way Laravel names them.
+        $names = [];
+
+        foreach (packageTables() as $table) {
+            foreach (Schema::getIndexes($table) as $index) {
+                $names[] = $index['name'];
+            }
+
+            foreach (Schema::getForeignKeys($table) as $foreignKey) {
+                $names[] = $table.'_'.implode('_', $foreignKey['columns']).'_foreign';
+            }
+        }
+
+        expect(array_values(array_filter($names, fn (string $name) => strlen($name) > 64)))->toBe([]);
     });
 
     it('drops every table it creates in down()', function () {
@@ -171,6 +190,22 @@ describe('running on an existing install', function () {
             ->and(DB::table('digital_signature_devices')->where('status', 'active')->count())->toBe(2)
             ->and(DB::table('digital_signature_devices')->where('id', $newer)->value('active_hardware_key'))->toBe(str_repeat('ab', 32))
             ->and(DB::table('digital_signature_devices')->where('id', $older)->value('active_hardware_key'))->toBeNull();
+    });
+
+    it('adds the sign-request indexes that a failed 3.0.x run on MySQL left out', function () {
+        // On MySQL and MariaDB, 3.0.0 and 3.0.1 created this table, then
+        // stopped at an index name past 64 characters, before any index.
+        Schema::table('digital_signature_hub_sign_requests', function ($t) {
+            $t->dropUnique(['uuid']);
+            $t->dropUnique('dshsr_app_idempotency_unique');
+            $t->dropIndex(['personnel_key', 'status']);
+        });
+
+        packageMigration()->up();
+
+        expect(Schema::hasIndex('digital_signature_hub_sign_requests', ['uuid'], 'unique'))->toBeTrue()
+            ->and(Schema::hasIndex('digital_signature_hub_sign_requests', ['app_id', 'idempotency_key'], 'unique'))->toBeTrue()
+            ->and(Schema::hasIndex('digital_signature_hub_sign_requests', ['personnel_key', 'status']))->toBeTrue();
     });
 
     it('does not drop tables on rollback that the pre-consolidation migrations created', function () {
