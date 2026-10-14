@@ -50,6 +50,52 @@ class CrlValidator
         }
     }
 
+    /**
+     * The certificate's status by its CRLs, for a caller that must tell "not
+     * revoked" from "couldn't tell" (Agent\AgentCertificateService). Unlike
+     * validate() it runs whatever `crl.enabled` says, never throws, and with
+     * an issuer only believes a CRL that issuer signed.
+     *
+     * @return 'good'|'revoked'|'unknown'  unknown: no CRL URL, or no CRL could be fetched, read and verified.
+     */
+    public function status(string $certPem, ?string $issuerPem = null): string
+    {
+        $parsed = openssl_x509_parse($certPem);
+        $serial = strtolower((string) ($parsed['serialNumberHex'] ?? ''));
+
+        if (! is_array($parsed) || $serial === '') {
+            return 'unknown';
+        }
+
+        $answered = false;
+        $ttlSeconds = (int) config('signature.crl.cache_ttl_hours', 24) * 3600;
+
+        foreach ($this->extractCrlUrls($parsed) as $url) {
+            // Only a list that was read (and verified) is cached: an outage
+            // must not pass for "not revoked" for a day.
+            $cacheKey = 'sig_crl_status_' . md5($url . '|' . ($issuerPem === null ? '' : openssl_x509_fingerprint($issuerPem, 'sha256')));
+            $revokedSerials = Cache::get($cacheKey);
+
+            if (! is_array($revokedSerials)) {
+                $revokedSerials = $this->fetchRevokedSerials($url, $issuerPem);
+
+                if ($revokedSerials === null) {
+                    continue;
+                }
+
+                Cache::put($cacheKey, $revokedSerials, $ttlSeconds);
+            }
+
+            if (in_array($serial, $revokedSerials, true)) {
+                return 'revoked';
+            }
+
+            $answered = true;
+        }
+
+        return $answered ? 'good' : 'unknown';
+    }
+
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
@@ -71,7 +117,7 @@ class CrlValidator
         $ttlSeconds = (int) config('signature.crl.cache_ttl_hours', 24) * 3600;
 
         $revokedSerials = Cache::remember($cacheKey, $ttlSeconds, function () use ($url): array {
-            return $this->fetchRevokedSerials($url);
+            return $this->fetchRevokedSerials($url) ?? [];
         });
 
         if (in_array($serial, $revokedSerials, true)) {
@@ -85,15 +131,16 @@ class CrlValidator
      * Download a CRL (DER or PEM), write to a temp file, parse revoked serials via
      * `openssl crl -text -noout`, and return a lowercase-hex array.
      *
-     * Returns an empty array on any I/O or parse error so the signing can proceed
-     * rather than hard-failing due to a network blip.
+     * Returns null on any I/O or parse error, or when $issuerPem is given and
+     * did not sign the CRL. validate() treats that as an empty list so the
+     * signing can proceed rather than hard-failing due to a network blip.
      */
-    private function fetchRevokedSerials(string $url): array
+    protected function fetchRevokedSerials(string $url, ?string $issuerPem = null): ?array
     {
-        $der = @file_get_contents($url);
+        $der = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 10]]));
 
         if ($der === false || $der === '') {
-            return [];
+            return null;
         }
 
         // Detect PEM vs DER and normalise to PEM
@@ -105,18 +152,30 @@ class CrlValidator
 
         $crlFile = tempnam(sys_get_temp_dir(), 'sig_crl_');
         file_put_contents($crlFile, $pem);
+        $issuerFile = null;
+
+        if ($issuerPem !== null) {
+            $issuerFile = tempnam(sys_get_temp_dir(), 'sig_crl_ca_');
+            file_put_contents($issuerFile, $issuerPem);
+        }
 
         try {
-            return $this->parseRevokedSerials($crlFile);
+            return $this->parseRevokedSerials($crlFile, $issuerFile);
         } finally {
             @unlink($crlFile);
+
+            if ($issuerFile !== null) {
+                @unlink($issuerFile);
+            }
         }
     }
 
     /**
      * Run `openssl crl -text -noout` and extract every "Serial Number: ..." line.
+     * With $issuerFile, the CRL's signature is checked against it too
+     * (`-CAfile`, which reports "verify OK").
      */
-    private function parseRevokedSerials(string $crlFile): array
+    private function parseRevokedSerials(string $crlFile, ?string $issuerFile = null): ?array
     {
         $descriptors = [
             0 => ['pipe', 'r'],
@@ -124,18 +183,24 @@ class CrlValidator
             2 => ['pipe', 'w'],
         ];
 
-        $cmd     = sprintf('openssl crl -text -noout -in %s', escapeshellarg($crlFile));
+        $cmd     = sprintf('openssl crl -text -noout -in %s', escapeshellarg($crlFile))
+            . ($issuerFile === null ? '' : ' -CAfile ' . escapeshellarg($issuerFile));
         $process = proc_open($cmd, $descriptors, $pipes);
 
         if (!is_resource($process)) {
-            return [];
+            return null;
         }
 
         fclose($pipes[0]);
         $output = stream_get_contents($pipes[1]);
+        $errors = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        proc_close($process);
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0 || ($issuerFile !== null && !str_contains($output . $errors, 'verify OK'))) {
+            return null;
+        }
 
         // Serial Number lines look like:
         //   Serial Number: 0A1B2C or Serial Number: 0A:1B:2C
