@@ -89,8 +89,27 @@ describe('migration ordering', function () {
         preg_match_all('/Schema::table\(\s*[\'"]([^\'"]+)[\'"]/', $source, $alters);
 
         foreach ($alters[1] as $table) {
-            expect($source)->toMatch("/Schema::hasColumn\\('{$table}'/");
+            expect($source)->toMatch("/Schema::has(Column|Index)\\('{$table}'/");
         }
+    });
+
+    it('names every index and foreign key within the 64 characters MySQL allows', function () {
+        // SQLite takes a name of any length; MySQL and MariaDB refuse one past
+        // 64, which is how 3.0.0 failed on them. SQLite reports foreign keys
+        // unnamed, so those are named the way Laravel names them.
+        $names = [];
+
+        foreach (packageTables() as $table) {
+            foreach (Schema::getIndexes($table) as $index) {
+                $names[] = $index['name'];
+            }
+
+            foreach (Schema::getForeignKeys($table) as $foreignKey) {
+                $names[] = $table.'_'.implode('_', $foreignKey['columns']).'_foreign';
+            }
+        }
+
+        expect(array_values(array_filter($names, fn (string $name) => strlen($name) > 64)))->toBe([]);
     });
 
     it('drops every table it creates in down()', function () {
@@ -173,25 +192,20 @@ describe('running on an existing install', function () {
             ->and(DB::table('digital_signature_devices')->where('id', $older)->value('active_hardware_key'))->toBeNull();
     });
 
-    it('adds the certificate columns, with existing agents as platform keys', function () {
-        makeFakeUser();
-
-        Schema::table('digital_signature_devices', fn ($t) => $t->dropIndex('dsd_certificate_fingerprint_idx'));
-        Schema::table('digital_signature_devices', fn ($t) => $t->dropColumn([
-            'key_source', 'certificate_fingerprint', 'certificate_serial', 'certificate_issuer', 'certificate_subject',
-            'certificate_not_after', 'certificate_chain', 'certificate_checked_at', 'certificate_status',
-        ]));
-
-        $id = DB::table('digital_signature_devices')->insertGetId([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(), 'user_id' => 1, 'label' => 'Mac',
-            'public_key' => 'pem', 'key_fingerprint' => str_repeat('1', 64), 'algorithm' => 'ES256',
-            'kind' => 'agent', 'status' => 'active',
-        ]);
+    it('adds the sign-request indexes that a failed 3.0.x run on MySQL left out', function () {
+        // On MySQL and MariaDB, 3.0.0 and 3.0.1 created this table, then
+        // stopped at an index name past 64 characters, before any index.
+        Schema::table('digital_signature_hub_sign_requests', function ($t) {
+            $t->dropUnique(['uuid']);
+            $t->dropUnique('dshsr_app_idempotency_unique');
+            $t->dropIndex(['personnel_key', 'status']);
+        });
 
         packageMigration()->up();
 
-        expect(Schema::hasColumns('digital_signature_devices', ['key_source', 'certificate_fingerprint', 'certificate_chain', 'certificate_status']))->toBeTrue()
-            ->and(DB::table('digital_signature_devices')->where('id', $id)->value('key_source'))->toBe('platform');
+        expect(Schema::hasIndex('digital_signature_hub_sign_requests', ['uuid'], 'unique'))->toBeTrue()
+            ->and(Schema::hasIndex('digital_signature_hub_sign_requests', ['app_id', 'idempotency_key'], 'unique'))->toBeTrue()
+            ->and(Schema::hasIndex('digital_signature_hub_sign_requests', ['personnel_key', 'status']))->toBeTrue();
     });
 
     it('does not drop tables on rollback that the pre-consolidation migrations created', function () {

@@ -731,7 +731,7 @@ return new class extends Migration
                 $t->timestamp('expires_at');
                 $t->timestamps();
 
-                $t->unique(['app_id', 'idempotency_key']);
+                $t->unique(['app_id', 'idempotency_key'], 'dshsr_app_idempotency_unique');
                 $t->index(['personnel_key', 'status']);
             });
         }
@@ -751,7 +751,7 @@ return new class extends Migration
                 $t->text('last_error')->nullable();
                 $t->timestamps();
 
-                $t->index(['delivered_at', 'next_attempt_at']);
+                $t->index(['delivered_at', 'next_attempt_at'], 'dshw_delivery_due_idx');
                 $t->index(['app_id', 'delivered_at']);
             });
         }
@@ -989,6 +989,21 @@ return new class extends Migration
                     ->constrained('digital_signature_devices')
                     ->nullOnDelete();
             });
+        }
+
+        // 3.0.0 and 3.0.1 gave this table's unique index a generated name past
+        // MySQL's 64-character limit. On MySQL and MariaDB the table was created,
+        // that index failed, and the migration stopped before its other two
+        // indexes, so a rerun skips the table without all three. Matched by
+        // columns: PostgreSQL truncated the long name instead of failing.
+        foreach ([
+            [['uuid'], 'unique', fn (Blueprint $t) => $t->unique('uuid')],
+            [['app_id', 'idempotency_key'], 'unique', fn (Blueprint $t) => $t->unique(['app_id', 'idempotency_key'], 'dshsr_app_idempotency_unique')],
+            [['personnel_key', 'status'], null, fn (Blueprint $t) => $t->index(['personnel_key', 'status'])],
+        ] as [$columns, $type, $add]) {
+            if (! Schema::hasIndex('digital_signature_hub_sign_requests', $columns, $type)) {
+                Schema::table('digital_signature_hub_sign_requests', $add);
+            }
         }
     }
 

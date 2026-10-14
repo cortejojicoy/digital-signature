@@ -2,6 +2,12 @@
 
 All notable changes to `kukux/digital-signature`. Versions follow [semver](https://semver.org).
 
+## Unreleased
+
+### Fixed
+
+- **The migration failed on MySQL and MariaDB** (3.0.0, 3.0.1). Two hub indexes had generated names one character past MySQL's 64-character limit, so `migrate` stopped after creating `digital_signature_hub_sign_requests` without its indexes. They now have short names (`dshsr_app_idempotency_unique`, `dshw_delivery_due_idx`), and rerunning `php artisan migrate` on a database where it failed adds the three indexes that run left out. PostgreSQL truncated the long names instead of failing, so it is unaffected. A new test keeps every index and foreign key name within 64 characters, since the suite runs on SQLite, which accepts any length.
+
 ## 2.1.0 (unreleased)
 
 The signature hub: one place (`signature.uplb.edu.ph`) where signatures are created, paired and revoked, and apps that use it. `SIGNATURE_MODE` chooses `standalone` (the default, unchanged), `hub` or `client`. Docs: [docs/hub](docs/hub/index.md). Design: [plans/signature-hub.md](plans/signature-hub.md).
