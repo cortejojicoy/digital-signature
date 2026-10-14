@@ -173,6 +173,27 @@ describe('running on an existing install', function () {
             ->and(DB::table('digital_signature_devices')->where('id', $older)->value('active_hardware_key'))->toBeNull();
     });
 
+    it('adds the certificate columns, with existing agents as platform keys', function () {
+        makeFakeUser();
+
+        Schema::table('digital_signature_devices', fn ($t) => $t->dropIndex('dsd_certificate_fingerprint_idx'));
+        Schema::table('digital_signature_devices', fn ($t) => $t->dropColumn([
+            'key_source', 'certificate_fingerprint', 'certificate_serial', 'certificate_issuer', 'certificate_subject',
+            'certificate_not_after', 'certificate_chain', 'certificate_checked_at', 'certificate_status',
+        ]));
+
+        $id = DB::table('digital_signature_devices')->insertGetId([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(), 'user_id' => 1, 'label' => 'Mac',
+            'public_key' => 'pem', 'key_fingerprint' => str_repeat('1', 64), 'algorithm' => 'ES256',
+            'kind' => 'agent', 'status' => 'active',
+        ]);
+
+        packageMigration()->up();
+
+        expect(Schema::hasColumns('digital_signature_devices', ['key_source', 'certificate_fingerprint', 'certificate_chain', 'certificate_status']))->toBeTrue()
+            ->and(DB::table('digital_signature_devices')->where('id', $id)->value('key_source'))->toBe('platform');
+    });
+
     it('does not drop tables on rollback that the pre-consolidation migrations created', function () {
         // A published copy of the old create migration, as a host records it.
         app('migration.repository')->log('2026_03_31_101500_create_digital_signatures_table', 1);

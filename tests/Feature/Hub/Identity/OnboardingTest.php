@@ -43,6 +43,22 @@ describe('Pair this computer', function () {
             ->and($this->browserUserId('a'))->toBeNull();
     });
 
+    it('keeps the agent lookup open while the browser polls from the same IP', function () {
+        // A guest browser and the agent on one computer (or behind one NAT)
+        // share an IP. Unprefixed throttles share one counter per IP, so the
+        // page's polling used up lookup's 10 a minute and the agent got 429.
+        $started = $this->fromBrowser('a', 'POST', '/signature/hub/pairings')->json();
+
+        foreach (range(1, 15) as $poll) {
+            $this->fromBrowser('a', 'GET', "/signature/hub/pairings/{$started['pairing']}")->assertOk();
+        }
+
+        $this->agentClaims($started['user_code']);
+
+        $this->fromBrowser('a', 'GET', "/signature/hub/pairings/{$started['pairing']}")
+            ->assertJsonPath('status', 'awaiting_confirmation');
+    });
+
     it('lets only the browser that started it see and confirm the claimed computer, then signs it in', function () {
         $started = $this->fromBrowser('a', 'POST', '/signature/hub/pairings')->json();
 
