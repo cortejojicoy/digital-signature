@@ -28,7 +28,7 @@ Route::prefix('signature/hub')->name('signature.hub.')->group(function () use ($
         ->name('oauth.token');
 
     Route::get('oauth/authorize', [OAuthController::class, 'authorize'])
-        ->middleware(['web', 'throttle:60,1'])
+        ->middleware(['web', 'throttle:60,1,signature-hub-authorize'])
         ->name('oauth.authorize');
 
     Route::get('userinfo', [OAuthController::class, 'userinfo'])
@@ -40,7 +40,7 @@ Route::prefix('signature/hub')->name('signature.hub.')->group(function () use ($
 
         // For the uptime monitor (R1, R13). No auth; booleans only.
         Route::get('health', HealthController::class)
-            ->middleware('throttle:60,1')
+            ->middleware('throttle:60,1,signature-hub-health')
             ->name('health');
 
         Route::middleware([AuthenticateHubToken::class.':app,signatures.read', 'throttle:signature-hub-api'])->group(function () use ($sub) {

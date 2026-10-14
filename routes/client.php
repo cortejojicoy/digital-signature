@@ -13,7 +13,7 @@ use Kukux\DigitalSignature\Client\Http\HubWebhookController;
 
 // "Sign in with UPLB Signature": authorization code + PKCE against the hub.
 Route::prefix('signature/hub')
-    ->middleware(['web', 'throttle:30,1'])
+    ->middleware(['web', 'throttle:30,1,signature-hub-sso'])
     ->name('signature.hub.')
     ->group(function () {
         Route::get('login', [HubLoginController::class, 'redirect'])->name('login');
@@ -23,5 +23,5 @@ Route::prefix('signature/hub')
 // Events from the hub. Deliberately NOT in the `web` group: the hub has no
 // session or CSRF token; the HMAC signature and timestamp are its trust.
 Route::post('signature/hub/webhook', HubWebhookController::class)
-    ->middleware('throttle:240,1')
+    ->middleware('throttle:240,1,signature-hub-webhook')
     ->name('signature.hub.webhook');
