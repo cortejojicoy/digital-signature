@@ -43,6 +43,9 @@ class SignatureAudit extends Model
     /** An admin freed a computer from the account it was paired with. */
     public const AGENT_RELEASED = 'agent.released';
 
+    /** The issuer revoked a computer's imported certificate: the device was revoked with it. */
+    public const AGENT_CERTIFICATE_REVOKED = 'agent.certificate_revoked';
+
     // ── Hub mode (docs/hub/index.md) ──────────────────────────────────────
     public const IDENTITY_CLAIMED = 'identity.claimed';
 
