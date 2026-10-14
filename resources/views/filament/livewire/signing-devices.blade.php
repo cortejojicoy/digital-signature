@@ -98,6 +98,9 @@
                         @endif
                         · {{ $device->last_used_at ? 'last used '.$device->last_used_at->diffForHumans() : 'not used yet' }}
                     </p>
+                    @if ($device->usesCertificate())
+                        <p class="dsd-meta">{{ $device->certificateSummary() }} · issued by {{ $device->certificateIssuerName() }}</p>
+                    @endif
                     <p class="dsd-meta dsd-mono">{{ $device->shortFingerprint() }}</p>
 
                     <div class="dsd-badges">
@@ -183,6 +186,9 @@
                     {{ $claim['platform'] }} · {{ $claim['protection'] }}{{ $claim['presence'] ? ' · Touch ID / Windows Hello' : ' · no user presence' }}
                     · Kukux Sign Agent {{ $claim['version'] }}
                 </p>
+                @if ($claim['certificate'] ?? null)
+                    <p class="dsd-meta">Certificate: {{ $claim['certificate'] }}</p>
+                @endif
 
                 <label class="dsd-field">
                     <span>This computer is a</span>

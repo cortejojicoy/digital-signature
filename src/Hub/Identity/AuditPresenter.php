@@ -22,6 +22,7 @@ final class AuditPresenter
         SignatureAudit::AGENT_PAIRED       => 'Paired a computer',
         SignatureAudit::AGENT_REBOUND      => 'Re-paired a computer',
         SignatureAudit::AGENT_RELEASED     => 'Computer released',
+        SignatureAudit::AGENT_CERTIFICATE_REVOKED => 'Certificate revoked',
         SignatureAudit::AGENT_APPROVED     => 'Approved on computer',
         SignatureAudit::IDENTITY_CLAIMED   => 'Claimed identity',
         SignatureAudit::IDENTITY_VERIFIED  => 'Identity verified',

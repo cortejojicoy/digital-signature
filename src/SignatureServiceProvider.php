@@ -287,7 +287,7 @@ class SignatureServiceProvider extends ServiceProvider
         // Signing-device key attestation — see DeviceController. `web` only,
         // like the endpoints below, with the controller checking auth itself.
         Route::prefix('signature/devices')
-            ->middleware(['web', 'throttle:60,1'])
+            ->middleware(['web', 'throttle:60,1,signature-devices'])
             ->name('signature.devices.')
             ->group(function () {
                 Route::post('challenge', [DeviceController::class, 'challenge'])->name('challenge');
@@ -305,13 +305,13 @@ class SignatureServiceProvider extends ServiceProvider
             ->name('signature.agent.')
             ->group(function () {
                 Route::post('pairings/lookup', [AgentController::class, 'lookup'])
-                    ->middleware('throttle:10,1')->name('pairings.lookup');
+                    ->middleware('throttle:10,1,signature-agent-lookup')->name('pairings.lookup');
                 Route::post('pairings/{pairing}/claim', [AgentController::class, 'claim'])
-                    ->whereUuid('pairing')->middleware('throttle:20,1')->name('pairings.claim');
+                    ->whereUuid('pairing')->middleware('throttle:20,1,signature-agent-claim')->name('pairings.claim');
                 Route::post('pairings/{pairing}/poll', [AgentController::class, 'poll'])
-                    ->whereUuid('pairing')->middleware('throttle:120,1')->name('pairings.poll');
+                    ->whereUuid('pairing')->middleware('throttle:120,1,signature-agent-poll')->name('pairings.poll');
 
-                Route::middleware([AuthenticateAgent::class, 'throttle:120,1'])->group(function () {
+                Route::middleware([AuthenticateAgent::class, 'throttle:120,1,signature-agent'])->group(function () {
                     Route::get('status', [AgentController::class, 'status'])->name('status');
                     Route::delete('device', [AgentController::class, 'unpair'])->name('device');
                     Route::post('jobs/{job}/claim', [AgentController::class, 'claimJob'])->whereUuid('job')->name('jobs.claim');
@@ -329,7 +329,7 @@ class SignatureServiceProvider extends ServiceProvider
         // client mode: there the job is the hub's, and AgentWebController
         // asks the hub for its status.
         Route::prefix('signature/agent-web')
-            ->middleware(['web', 'throttle:120,1'])
+            ->middleware(['web', 'throttle:120,1,signature-agent-web'])
             ->name('signature.agent.web.')
             ->group(function () {
                 Route::get('jobs/{uuid}', [AgentWebController::class, 'job'])->whereUuid('uuid')->name('job');

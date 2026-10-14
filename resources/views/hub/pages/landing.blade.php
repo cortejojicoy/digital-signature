@@ -131,8 +131,11 @@
                 this.timer = setTimeout(() => this.pollSignIn(), 1500)
             },
         }"
-        x-on:beforeunload.window="stop()"
     >
+        {{-- No beforeunload → stop() here: opening a kukuxsign:// link fires
+             beforeunload without leaving the page, which killed the poll the
+             moment the agent was launched, so its claim never showed. A real
+             unload drops the timers anyway. --}}
         <div class="dsh-note dsh-note--bad" role="alert" x-show="error" x-text="error" x-cloak style="margin-bottom: 1rem;"></div>
 
         @unless ($agentEnabled)

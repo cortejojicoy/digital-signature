@@ -239,13 +239,15 @@ class Signature extends Model
     }
 
     /**
-     * "Chrome on Mac · Browser key", or why there is no device: what the UI
-     * shows in the Created on / Signed on slot.
+     * "Chrome on Mac · Browser key", "MacBook Pro · Certificate Test UP 4",
+     * or why there is no device: what the UI shows in the Created on /
+     * Signed on slot.
      */
     public function deviceSummary(): string
     {
         if ($this->device) {
-            return $this->device->displayName().' · '.$this->device->protectionLabel()
+            return $this->device->displayName().' · '
+                .($this->device->usesCertificate() ? trim('Certificate '.$this->device->certificateName()) : $this->device->protectionLabel())
                 .($this->device->isRevoked() ? ' (revoked)' : '');
         }
 

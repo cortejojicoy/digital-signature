@@ -22,13 +22,13 @@ Route::prefix('signature/hub')
     ->middleware(['web'])
     ->name('signature.hub.')
     ->group(function () {
-        Route::middleware('throttle:120,1')->group(function () {
+        Route::middleware('throttle:120,1,signature-hub-web')->group(function () {
             Route::post('pairings', [GuestPairingController::class, 'store'])->name('pairings.store');
             Route::get('pairings/{uuid}', [GuestPairingController::class, 'show'])->whereUuid('uuid')->name('pairings.show');
             Route::post('pairings/{uuid}/confirm', [GuestPairingController::class, 'confirm'])->whereUuid('uuid')->name('pairings.confirm');
             Route::post('pairings/{uuid}/cancel', [GuestPairingController::class, 'cancel'])->whereUuid('uuid')->name('pairings.cancel');
 
-            Route::post('login/challenges', [HubLoginController::class, 'store'])->middleware('throttle:20,1')->name('login.store');
+            Route::post('login/challenges', [HubLoginController::class, 'store'])->middleware('throttle:20,1,signature-hub-login')->name('login.store');
             Route::get('login/challenges/{uuid}', [HubLoginController::class, 'show'])->whereUuid('uuid')->name('login.show');
         });
 
@@ -36,13 +36,13 @@ Route::prefix('signature/hub')
         Route::get('landing', LandingRedirectController::class)->name('landing');
 
         Route::get('break-glass', [BreakGlassController::class, 'show'])->name('break-glass');
-        Route::post('break-glass', [BreakGlassController::class, 'store'])->middleware('throttle:10,1')->name('break-glass.store');
+        Route::post('break-glass', [BreakGlassController::class, 'store'])->middleware('throttle:10,1,signature-hub-break-glass')->name('break-glass.store');
     });
 
 // The agent: outside `web` (no cookies, no CSRF), authenticated like
 // jobs/{job}/claim. Wire contract: docs/hub/contracts.md §4.
 Route::prefix('signature/agent')
-    ->middleware([EnsureAgentVersion::class, AuthenticateAgent::class, 'throttle:120,1'])
+    ->middleware([EnsureAgentVersion::class, AuthenticateAgent::class, 'throttle:120,1,signature-hub-agent'])
     ->name('signature.agent.')
     ->group(function () {
         Route::post('logins/{challenge}/claim', [AgentLoginController::class, 'claim'])->whereUuid('challenge')->name('logins.claim');

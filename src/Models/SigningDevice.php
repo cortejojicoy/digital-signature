@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Kukux\DigitalSignature\Enums\DeviceType;
+use Kukux\DigitalSignature\Security\AgentCertificateValidator;
 
 /**
  * One registered signing key: a browser profile, or a desktop agent install.
@@ -25,19 +26,25 @@ class SigningDevice extends Model
         'device_type', 'detected_device_type', 'chassis_type', 'virtual',
         'form_factor', 'platform', 'browser', 'model', 'user_agent',
         'hardware_id_hash', 'agent_version', 'session_public_key', 'rebound_at',
+        'key_source', 'certificate_fingerprint', 'certificate_serial', 'certificate_issuer',
+        'certificate_subject', 'certificate_not_after', 'certificate_chain',
+        'certificate_checked_at', 'certificate_status',
         'status', 'registered_ip', 'last_used_ip',
         'last_used_at', 'approved_at', 'revoked_at',
     ];
 
     protected $casts = [
-        'user_presence' => 'boolean',
-        'attested'      => 'boolean',
-        'virtual'       => 'boolean',
-        'chassis_type'  => 'integer',
-        'rebound_at'    => 'datetime',
-        'last_used_at'  => 'datetime',
-        'approved_at'   => 'datetime',
-        'revoked_at'    => 'datetime',
+        'user_presence'          => 'boolean',
+        'attested'               => 'boolean',
+        'virtual'                => 'boolean',
+        'chassis_type'           => 'integer',
+        'rebound_at'             => 'datetime',
+        'certificate_not_after'  => 'datetime',
+        'certificate_chain'      => 'array',
+        'certificate_checked_at' => 'datetime',
+        'last_used_at'           => 'datetime',
+        'approved_at'            => 'datetime',
+        'revoked_at'             => 'datetime',
     ];
 
     protected $hidden = ['public_key', 'session_public_key', 'hardware_id_hash', 'active_hardware_key', 'active_agent_user_key'];
@@ -133,6 +140,40 @@ class SigningDevice extends Model
             'software'       => 'Software key',
             default          => 'Browser key',
         };
+    }
+
+    /** An agent whose identity key came from an imported certificate (PNPKI). */
+    public function usesCertificate(): bool
+    {
+        return $this->kind === 'agent' && $this->key_source === 'pkcs12';
+    }
+
+    /** The certificate's common name: "Test UP 4". */
+    public function certificateName(): ?string
+    {
+        return $this->usesCertificate() ? AgentCertificateValidator::commonName($this->certificate_subject) : null;
+    }
+
+    /** Who issued it: "Government Signing CA - G2". */
+    public function certificateIssuerName(): ?string
+    {
+        return $this->usesCertificate()
+            ? (AgentCertificateValidator::commonName($this->certificate_issuer) ?? $this->certificate_issuer)
+            : null;
+    }
+
+    /** "Certificate · Test UP 4 · until Sep 2028", or null for a platform key. */
+    public function certificateSummary(): ?string
+    {
+        if (! $this->usesCertificate()) {
+            return null;
+        }
+
+        return implode(' · ', array_filter([
+            'Certificate',
+            $this->certificateName(),
+            $this->certificate_not_after ? 'until '.$this->certificate_not_after->format('M Y') : null,
+        ]));
     }
 
     /**

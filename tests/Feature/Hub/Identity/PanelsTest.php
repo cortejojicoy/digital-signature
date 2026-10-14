@@ -48,7 +48,10 @@ it('sends a guest at /admin to the landing, which has no password form', functio
         ->assertSee('Pair this computer')
         ->assertSee('Sign in with your computer')
         ->assertDontSee('type="password"', false)
-        ->assertDontSee('Break-glass');
+        ->assertDontSee('Break-glass')
+        // Opening the kukuxsign:// link fires beforeunload; stopping the
+        // poll there meant the agent's claim never reached the page.
+        ->assertDontSee('beforeunload', false);
 
     expect(collect(app('router')->getRoutes()->getRoutes())->map->getName()->filter()
         ->filter(fn (string $name) => str_contains($name, 'password-reset') || str_contains($name, 'auth.register')))->toBeEmpty();

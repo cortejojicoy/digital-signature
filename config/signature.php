@@ -564,6 +564,50 @@ return [
                 explode(',', (string) env('SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES', 'virtual_machine')),
             ))),
         ],
+
+        /*
+        | Agents whose identity key is imported from a certificate file
+        | (PKCS#12, e.g. a PNPKI certificate) instead of made in the Secure
+        | Enclave / TPM. Off by default: each app opts in. The agent sends the
+        | chain; the server checks it here and keeps it on the device.
+        |
+        | trusted_roots: certificate files (DER or PEM) a chain must end at.
+        |   SIGNATURE_AGENT_PKCS12_ROOTS takes comma-separated paths; unset
+        |   or blank, the bundled Philippine Root CA - G2 (DICT).
+        |
+        | revocation: at pairing, and on use once recheck_ttl seconds passed
+        |   ocsp_then_crl — the leaf's OCSP responder, else its CRL
+        |   crl           — the CRL only
+        |   off           — no check; the device records `unknown`
+        |
+        | unreachable: when neither source answers
+        |   allow — go ahead and record `unknown`. A confirmed revocation
+        |           is always refused.
+        |   deny  — refuse until a source answers
+        |
+        | subject_binding: how a certificate is tied to the account
+        |   none       — the account holder's confirmation on the web
+        |   name_match — the certificate's CN must be the user's name
+        |                (case, accents and punctuation ignored)
+        |   admin_approval is planned but not built: set it and certificate
+        |   pairing is refused (`certificates_disabled`).
+        |
+        | one_device_per_certificate: one active computer per certificate,
+        |   across all accounts. A file can be imported anywhere; this keeps
+        |   "Used on" meaningful.
+        */
+        'pkcs12' => [
+            'enabled'         => env('SIGNATURE_AGENT_PKCS12', false),
+            'trusted_roots'   => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) (env('SIGNATURE_AGENT_PKCS12_ROOTS') ?: \Kukux\DigitalSignature\Security\AgentCertificateValidator::PNPKI_ROOT)),
+            ))),
+            'revocation'      => env('SIGNATURE_AGENT_PKCS12_REVOCATION', 'ocsp_then_crl'),
+            'unreachable'     => env('SIGNATURE_AGENT_PKCS12_UNREACHABLE', 'allow'),
+            'recheck_ttl'     => env('SIGNATURE_AGENT_PKCS12_RECHECK_TTL', 86400),
+            'subject_binding' => env('SIGNATURE_AGENT_PKCS12_SUBJECT_BINDING', 'none'),
+            'one_device_per_certificate' => env('SIGNATURE_AGENT_PKCS12_ONE_DEVICE', true),
+        ],
     ],
 
     /*
