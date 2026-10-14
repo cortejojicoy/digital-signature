@@ -198,6 +198,26 @@ A computer holds one account's signature per app. Re-pairing from the same compu
 
 `server_id` and `salt` must stay stable for an installation. If you rotate `APP_KEY`, pin them first, or every paired agent will have to pair again. The agent only connects to **HTTPS** origins.
 
+#### Certificate keys (PKCS#12)
+
+An agent can also sign with a key imported from a certificate file, such as a PNPKI `.p12`. Off by default. See [Desktop agent: certificate keys](desktop-agent.md#certificate-keys-pkcs12).
+
+```php
+'devices' => [
+    // …
+    'pkcs12' => [
+        'enabled'         => env('SIGNATURE_AGENT_PKCS12', false),
+        // DER or PEM files; default: the bundled Philippine Root CA - G2.
+        'trusted_roots'   => [\Kukux\DigitalSignature\Security\AgentCertificateValidator::PNPKI_ROOT],
+        'revocation'      => env('SIGNATURE_AGENT_PKCS12_REVOCATION', 'ocsp_then_crl'),   // ocsp_then_crl | crl | off
+        'unreachable'     => env('SIGNATURE_AGENT_PKCS12_UNREACHABLE', 'allow'),          // allow | deny
+        'recheck_ttl'     => env('SIGNATURE_AGENT_PKCS12_RECHECK_TTL', 86400),            // seconds
+        'subject_binding' => env('SIGNATURE_AGENT_PKCS12_SUBJECT_BINDING', 'none'),       // none | name_match
+        'one_device_per_certificate' => env('SIGNATURE_AGENT_PKCS12_ONE_DEVICE', true),
+    ],
+],
+```
+
 ---
 
 ## Queue
@@ -344,6 +364,13 @@ SIGNATURE_AGENT_MIN_VERSION=0.1.0   # older agents get HTTP 426
 SIGNATURE_AGENT_SERVER_ID=          # blank = derived from APP_KEY; `signature:install --agent` pins it
 SIGNATURE_AGENT_SALT=               # same
 SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES=virtual_machine  # comma-separated; empty = allow VMs
+SIGNATURE_AGENT_PKCS12=false        # pair agents whose key is an imported certificate (.p12)
+SIGNATURE_AGENT_PKCS12_ROOTS=       # comma-separated root files; blank = bundled PNPKI root
+SIGNATURE_AGENT_PKCS12_REVOCATION=ocsp_then_crl   # ocsp_then_crl | crl | off
+SIGNATURE_AGENT_PKCS12_UNREACHABLE=allow          # allow | deny, when OCSP and CRL are both down
+SIGNATURE_AGENT_PKCS12_RECHECK_TTL=86400          # seconds before a signing re-checks revocation
+SIGNATURE_AGENT_PKCS12_SUBJECT_BINDING=none       # none | name_match
+SIGNATURE_AGENT_PKCS12_ONE_DEVICE=true            # one active computer per certificate
 
 # Routing, sessions and consent
 SIGNATURE_SEQUENCE_MODE=sequential  # sequential | parallel

@@ -62,6 +62,18 @@ Everything lives under `signature.devices.agent` in `config/signature.php`.
 | `devices_url` | `SIGNATURE_AGENT_DEVICES_URL` | the app's origin | Where the agent sends people to manage their signing devices, for example to remove the computer their account is already paired with. Must be on this app's origin, or the agent uses the origin instead. |
 | `blocked_device_types` | `SIGNATURE_AGENT_BLOCKED_DEVICE_TYPES` | `virtual_machine` | Device types refused at pairing, comma-separated. Checked against what the agent *detected*, which the owner can't change. Set it empty to allow VMs, for example for development in Parallels. |
 
+Certificate keys have their own block, `signature.devices.pkcs12` (see [Certificate keys](#certificate-keys-pkcs12)):
+
+| Key | Env var | Default | What it does |
+|---|---|---|---|
+| `enabled` | `SIGNATURE_AGENT_PKCS12` | `false` | Pair agents whose identity key was imported from a `.p12`. Lookup reports it as `accepts_certificates`. |
+| `trusted_roots` | `SIGNATURE_AGENT_PKCS12_ROOTS` | the bundled Philippine Root CA - G2 | Root certificate files (DER or PEM) a chain must end at. Comma-separated in the env var. |
+| `revocation` | `SIGNATURE_AGENT_PKCS12_REVOCATION` | `ocsp_then_crl` | `ocsp_then_crl`, `crl` or `off`. |
+| `unreachable` | `SIGNATURE_AGENT_PKCS12_UNREACHABLE` | `allow` | When neither OCSP nor the CRL answers: `allow` (record `unknown`) or `deny` (`503 revocation_unavailable`). |
+| `recheck_ttl` | `SIGNATURE_AGENT_PKCS12_RECHECK_TTL` | `86400` | Seconds after the last definite answer before a signing asks again. |
+| `subject_binding` | `SIGNATURE_AGENT_PKCS12_SUBJECT_BINDING` | `none` | `none` (the web confirmation is enough) or `name_match` (the certificate's CN must be the user's name). `admin_approval` isn't built; setting it turns certificate pairing off. |
+| `one_device_per_certificate` | `SIGNATURE_AGENT_PKCS12_ONE_DEVICE` | `true` | One active computer per certificate, across all accounts. |
+
 ### Approval modes
 
 `approval` decides what happens when a user who has a paired computer signs a document.
@@ -116,7 +128,7 @@ A few rules the server enforces:
 
 - Codes use an unambiguous alphabet, are stored hashed, and lookups are throttled to 10 a minute.
 - The claim's `algorithm` must be `ES256` or `RS256` and match the identity key. The session key must be ES256.
-- A key fingerprint that's already registered is refused (409).
+- A key fingerprint that's already registered is refused (409). A certificate's key is the same at every pairing, so for those the rule is one active computer per certificate instead (see [Certificate keys](#certificate-keys-pkcs12)).
 - Confirming respects `signature.devices.max_per_user`.
 - Device types in `blocked_device_types` are refused at claim (`422 device_type_not_allowed`), and again at confirm in case the policy tightened in between.
 - Every agent device is saved with `attested = false` for now.
@@ -179,6 +191,24 @@ The agent reports what the computer is, from a fixed catalogue (`Kukux\DigitalSi
 The confirm prompt lets the owner correct it. `detected_device_type` keeps what the agent reported, and policy only ever looks at that, so a detected virtual machine can't be relabelled. A type is a label for people, never a security signal: assurance comes from `protection` and attestation.
 
 Virtual machines already paired before they were blocked keep working. **My signing devices** marks them "Virtual machine: no longer allowed for new pairings".
+
+### Certificate keys (PKCS#12)
+
+The agent can sign with a key imported from a certificate file (a PNPKI `.p12`) instead of one made in the Secure Enclave / TPM. Its claim adds `key_source: "pkcs12"` and `certificate_chain` (base64 DER, leaf first); `identity_public_key` is the leaf's key, RSA 2048+ (`RS256`) or P-256 (`ES256`). Without `key_source` a claim is a platform key, as before. Turn it on with `SIGNATURE_AGENT_PKCS12=true`; lookup then returns `accepts_certificates: true`, so the agent can stop before any OS prompt when it's off.
+
+At claim, `Agent\AgentCertificateService` checks, in order:
+
+1. Certificates are on (`422 certificates_disabled` otherwise).
+2. The chain (`Security\AgentCertificateValidator`): the leaf parses, isn't a CA, may sign (keyUsage `digitalSignature` or `nonRepudiation`, when present), and its key is the identity key; each certificate is issued and signed by the next, a CA within its path length; the top is a trusted root or issued by one. Any failure is `422 certificate_untrusted`; a leaf out of date is `422 certificate_expired`.
+3. `subject_binding = name_match`: the leaf's CN equals the user's name, ignoring case, accents and punctuation (`422 certificate_subject_mismatch`).
+4. Revocation (`Security\CertificateRevocationChecker`): OCSP to the leaf's AIA URL through `openssl ocsp`, the response verified against the issuer's chain; else the CRL through `CrlValidator`, verified against the issuer. Revoked is `422 certificate_revoked`. If neither answers, `unreachable` decides.
+5. No other active agent device holds this certificate (or its key): `409 certificate_in_use`, with `device: { label, device_type }` like `account_already_paired`. Re-pairing the computer that already holds it is fine, and confirm checks again under a lock.
+
+On confirm the device keeps `key_source = pkcs12` and the certificate: `certificate_fingerprint` (SHA-256 of the leaf DER, hex), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at` and `certificate_status` (`good`, `revoked` or `unknown`). A certificate the account paired before and removed is paired again on its old row, since its key is the same. **My signing devices** shows *Certificate · Test UP 4 · until Sep 2028 · issued by …*.
+
+On every job completion the certificate must still be in date (`422 certificate_expired`). Once `recheck_ttl` has passed since the last definite answer, the chain and revocation are checked again; a confirmed revocation revokes the device (and its token), records `agent.certificate_revoked`, and fails the job with `422 certificate_revoked`. Either way the job is marked `rejected` with that code as its `reason`. A completed job keeps the leaf's fingerprint in `meta.certificate`, and the `agent.approved` audit row in `context.certificate`, so the evidence outlives the device.
+
+A `.p12` can be imported on any computer, and its key is decrypted in memory while signing. One active computer per certificate keeps "Used on" meaningful, but it can't prove there's no other copy.
 
 ---
 
@@ -309,7 +339,7 @@ All three come from the package migration, and the agent columns already exist o
 | `digital_signature_agent_pairings` | `AgentPairing` | One pairing attempt: `user_code_hash`, `nonce`, `poll_secret_hash`, `status` (`pending`, `awaiting_confirmation`, `confirmed`, `rejected`, `expired`), `claim` (json), `device_id`, `replaces_device_id` (the device a rebind updates), `token_issued_at`, `expires_at` |
 | `digital_signature_agent_tokens` | `AgentToken` | Bearer tokens: `device_id`, `token_hash` (unique), `last_used_at`, `revoked_at` |
 | `digital_signature_agent_jobs` | `AgentJob` | Signing jobs: `user_id`, `device_id`, `signature_id`, `purpose`, `title`, `signable` morph, `payload_hash`, `nonce`, `link_token_hash`, `status` (`pending`, `claimed`, `completed`, `rejected`, `expired`), `reason`, `claimed_at`, `completed_at`, `consumed_at`, `expires_at` |
-| `digital_signature_devices` | `SigningDevice` | Agent rows have `kind = agent`, `protection`, `user_presence`, `attested`, `device_type`, `detected_device_type`, `chassis_type`, `virtual`, `form_factor`, `model`, `hardware_id_hash`, `active_hardware_key` (unique), `agent_version`, `session_public_key`, `rebound_at` |
+| `digital_signature_devices` | `SigningDevice` | Agent rows have `kind = agent`, `protection`, `user_presence`, `attested`, `device_type`, `detected_device_type`, `chassis_type`, `virtual`, `form_factor`, `model`, `hardware_id_hash`, `active_hardware_key` (unique), `agent_version`, `session_public_key`, `rebound_at`, `key_source` (`platform` or `pkcs12`) and, for certificate keys, `certificate_fingerprint` (indexed), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at`, `certificate_status` |
 
 Secrets (codes, poll secrets, tokens, link tokens) are only ever stored as SHA-256.
 
@@ -341,6 +371,7 @@ The agent shows `message` to the user. `AgentApiException::render()` produces it
 | 409 | `key_already_registered` | Identity key already registered |
 | 409 | `machine_already_paired` | Another account's agent already holds this computer for this app |
 | 409 | `account_already_paired` | This account is already paired with another computer for this app. `device.label` names it. |
+| 409 | `certificate_in_use` | Another active computer holds this certificate. `device.label` names it. |
 | 409 | `token_already_issued` | Poll after the token was handed out |
 | 409 | `job_unavailable` | Job not pending (claim), or not claimed by this device / expired (complete) |
 | 422 | `invalid_request` | A required string field is missing or too long |
@@ -348,6 +379,12 @@ The agent shows `message` to the user. `AgentApiException::render()` produces it
 | 422 | `invalid_proof` | Registration or receipt proof didn't verify |
 | 422 | `presence_required` | `require_presence` is on and the key has no user presence |
 | 422 | `device_type_not_allowed` | The detected device type is in `blocked_device_types` (virtual machines by default) |
+| 422 | `certificates_disabled` | A certificate claim while `pkcs12.enabled` is off (or `subject_binding` is `admin_approval`) |
+| 422 | `certificate_untrusted` | The chain doesn't verify up to a trusted root, the leaf can't sign, or its key isn't the identity key |
+| 422 | `certificate_expired` | The leaf is out of date, at claim or at job completion |
+| 422 | `certificate_revoked` | OCSP or the CRL says revoked, at claim or at job completion |
+| 422 | `certificate_subject_mismatch` | `name_match`: the leaf's CN isn't the user's name |
+| 503 | `revocation_unavailable` | `unreachable = deny` and neither OCSP nor the CRL answered |
 | 426 | `agent_outdated` | Below `min_version`; the body also has `min_version` |
 
 On the PHP side you'll see:
@@ -378,4 +415,6 @@ These were planned but aren't in the package today, so don't build on them:
 | TPM / Secure Enclave attestation checks | The agent's attestation is saved with the claim but never verified. Every device is stored with `attested = false`. |
 | Pairing QR code | Users type the pairing code by hand. |
 | Scheduled cleanup | Expired pairings and jobs are only marked expired when something touches them. Prune the tables yourself. |
-| PNPKI and USB token support | The agent signs with its own hardware key only. No `.p12` certificates or USB tokens. |
+| USB token support | The agent signs with its hardware key or an imported `.p12` certificate. No USB tokens. |
+| `subject_binding = admin_approval` | Not built: setting it turns certificate pairing off. Use `name_match` or `none`. |
+| PAdES with the certificate | The certificate key approves jobs; the PDF is still signed with the app's own certificate. |
