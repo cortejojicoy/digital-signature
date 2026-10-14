@@ -4,6 +4,7 @@ namespace Kukux\DigitalSignature\Agent;
 
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -13,6 +14,7 @@ use Kukux\DigitalSignature\Models\AgentPairing;
 use Kukux\DigitalSignature\Models\AgentToken;
 use Kukux\DigitalSignature\Models\SignatureAudit;
 use Kukux\DigitalSignature\Models\SigningDevice;
+use Kukux\DigitalSignature\Security\AgentCertificateValidator;
 use Kukux\DigitalSignature\Security\DeviceProofVerifier;
 use Kukux\DigitalSignature\Security\DeviceRegistry;
 
@@ -33,6 +35,10 @@ use Kukux\DigitalSignature\Security\DeviceRegistry;
  * a computer is its salted hardware id. While one account's agent device is
  * active on it, another account's claim is refused; the same account pairing
  * again updates that device in place ("rebind") rather than adding one.
+ *
+ * An identity key imported from a certificate file (`key_source: pkcs12`)
+ * comes with its chain, which AgentCertificateService checks at claim; one
+ * active computer per certificate, across accounts.
  */
 class AgentPairingService
 {
@@ -40,7 +46,10 @@ class AgentPairingService
 
     private const PROTECTIONS = ['secure_enclave', 'tpm', 'software'];
 
-    public function __construct(private readonly DeviceRegistry $registry) {}
+    public function __construct(
+        private readonly DeviceRegistry $registry,
+        private readonly AgentCertificateService $certificates,
+    ) {}
 
     // -------------------------------------------------------------------------
     // Web
@@ -120,6 +129,7 @@ class AgentPairingService
         $identity = DeviceProofVerifier::parsePublicKey($claim['identity_public_key']);
         $session = DeviceProofVerifier::parsePublicKey($claim['session_public_key']);
         $device = $claim['device'];
+        $certificate = $claim['certificate'] ?? null;
 
         $detected = DeviceType::fromAgent($device['device_type'] ?? null, $device['form_factor'] ?? null);
         $virtual = (bool) ($device['virtual'] ?? false);
@@ -155,6 +165,27 @@ class AgentPairingService
         $existing = $proven ?? $holders->first();
         $holders->reject(fn (SigningDevice $d) => $d->is($existing))->each(fn (SigningDevice $old) => $this->registry->revoke($old));
 
+        // And that no other computer has paired this certificate since.
+        if ($certificate !== null && ($other = $this->certificates->holder($certificate['certificate_fingerprint'], $identity['fingerprint'], $existing, lock: true))) {
+            throw new InvalidArgumentException(self::certificateTakenMessage($other));
+        }
+
+        // A certificate's key is the same at every pairing, and a key appears
+        // once per account. So a certificate this account paired before, and
+        // has since removed, is paired again on its own row; a device this
+        // re-pair would have updated instead is retired.
+        $keyRow = $certificate === null ? null : SigningDevice::query()->lockForUpdate()
+            ->where('user_id', $userId)
+            ->where('key_fingerprint', $identity['fingerprint'])
+            ->first();
+
+        if ($keyRow !== null && $existing !== null && ! $keyRow->is($existing)) {
+            $this->registry->revoke($existing);
+            $existing = null;
+        }
+
+        $revived = $existing === null ? $keyRow : null;
+
         $shown = $this->chooseType($detected, $deviceType);
 
         $attributes = [
@@ -180,7 +211,7 @@ class AgentPairingService
             'session_public_key'   => $session['pem'],
             'status'               => 'active',
             'approved_at'          => now(),
-        ];
+        ] + self::certificateColumns($certificate);
 
         if ($existing !== null) {
             // Rebind: same row, uuid and label, so signature history and
@@ -194,6 +225,20 @@ class AgentPairingService
 
             $row = $existing;
             $event = SignatureAudit::AGENT_REBOUND;
+        } elseif ($revived !== null) {
+            $this->registry->assertCapacity($userId);
+
+            $revived->update($attributes + [
+                'label'         => $device['label'] ?: ($device['model'] ?: 'Computer'),
+                'registered_ip' => $claim['ip'] ?? null,
+                'revoked_at'    => null,
+            ]);
+
+            // To the owner this is a new pairing, not a re-pair of this computer.
+            $revived->wasRecentlyCreated = true;
+
+            $row = $revived;
+            $event = SignatureAudit::AGENT_PAIRED;
         } else {
             $this->registry->assertCapacity($userId);
 
@@ -215,7 +260,12 @@ class AgentPairingService
         SignatureAudit::record($event, [
             'subject_user_id' => $userId,
             'device_id'       => $row->id,
-            'context'         => ['pairing' => $pairing->uuid, 'protection' => $row->protection, 'device_type' => $row->device_type],
+            'context'         => array_filter([
+                'pairing'     => $pairing->uuid,
+                'protection'  => $row->protection,
+                'device_type' => $row->device_type,
+                'certificate' => $row->certificate_fingerprint,
+            ]),
         ]);
 
         // New keys either way, so the owner hears about it either way.
@@ -269,6 +319,7 @@ class AgentPairingService
         }
 
         $device = $claim['device'];
+        $certificate = $claim['certificate'] ?? null;
         $detected = DeviceType::fromAgent($device['device_type'] ?? null, $device['form_factor'] ?? null);
         $hardware = ($device['hardware_id_hash'] ?? '') ?: null;
 
@@ -312,6 +363,12 @@ class AgentPairingService
             'type_locked'     => $detected === DeviceType::VirtualMachine,
             'identified'      => ! empty($device['hardware_id_hash']),
             'other_devices'   => $others,
+            // "Test UP 4 · Government Signing CA - G2 · until Sep 2028"
+            'certificate'     => $certificate === null ? null : implode(' · ', array_filter([
+                AgentCertificateValidator::commonName($certificate['certificate_subject']),
+                AgentCertificateValidator::commonName($certificate['certificate_issuer']),
+                'until '.Carbon::parse($certificate['certificate_not_after'])->format('M Y'),
+            ])),
         ];
     }
 
@@ -359,6 +416,9 @@ class AgentPairingService
                 'hardware_id_hash' => $computer->hardware_id_hash ?: null,
             ],
             'devices_url'          => config('signature.devices.agent.devices_url') ?: AgentServer::origin(),
+            // Software certificates (PKCS#12) are checked and paired here,
+            // so the agent can say so before any OS prompt.
+            'accepts_certificates' => AgentCertificateService::enabled(),
             'expires_at'           => $pairing->expires_at->toIso8601String(),
         ];
     }
@@ -414,7 +474,15 @@ class AgentPairingService
                 throw new AgentApiException(422, 'presence_required', 'This server requires Touch ID or Windows Hello on the signing key.');
             }
 
-            if (SigningDevice::query()->where('key_fingerprint', $identity['fingerprint'])->exists()) {
+            // A certificate's key: its chain to a trusted root, whose it is,
+            // and that its issuer hasn't revoked it.
+            $certificate = ($input['key_source'] ?? 'platform') === 'pkcs12'
+                ? $this->certificates->check($input['certificate_chain'] ?? null, (string) $input['identity_public_key'], $pairing->user)
+                : null;
+
+            // A platform key is new at every pairing. A certificate's key is
+            // the same each time; who else holds it is checked below.
+            if ($certificate === null && SigningDevice::query()->where('key_fingerprint', $identity['fingerprint'])->exists()) {
                 throw new AgentApiException(409, 'key_already_registered', 'This key is already registered.');
             }
 
@@ -455,6 +523,15 @@ class AgentPairingService
             }
 
             $existing = $proven ?? $holders->first();
+
+            // One active computer per certificate, across accounts (§9.3).
+            // Re-pairing the computer that already holds it is fine.
+            if ($certificate !== null && ($other = $this->certificates->holder($certificate['certificate_fingerprint'], $identity['fingerprint'], $existing))) {
+                throw new AgentApiException(409, 'certificate_in_use', self::certificateTakenMessage($other), [
+                    'device' => ['label' => $other->displayName(), 'device_type' => $other->deviceType()->value],
+                ]);
+            }
+
             $pollSecret = AgentServer::token();
 
             $pairing->update([
@@ -487,6 +564,7 @@ class AgentPairingService
                     ],
                     'ip'                  => $ip,
                     'proven_device_id'    => $proven?->id,
+                    'certificate'         => $certificate,
                 ],
             ]);
 
@@ -659,6 +737,37 @@ class AgentPairingService
         $salt = AgentServer::salt();
 
         return array_map(fn (string $uuid) => hash('sha256', $salt.$uuid), [...self::PLACEHOLDER_UUIDS, ...$repeated]);
+    }
+
+    private static function certificateTakenMessage(SigningDevice $computer): string
+    {
+        return "This certificate is already paired on {$computer->displayName()}. "
+            .'A certificate can be paired with one computer at a time. Remove it there first, then pair this computer.';
+    }
+
+    /**
+     * The device's certificate columns from the claim's `certificate`: all
+     * cleared for a platform key, so a re-pair away from a certificate
+     * leaves none of it behind.
+     *
+     * @param  array<string, mixed>|null  $certificate
+     * @return array<string, mixed>
+     */
+    private static function certificateColumns(?array $certificate): array
+    {
+        $columns = [
+            'key_source'              => 'platform',
+            'certificate_fingerprint' => null,
+            'certificate_serial'      => null,
+            'certificate_issuer'      => null,
+            'certificate_subject'     => null,
+            'certificate_not_after'   => null,
+            'certificate_chain'       => null,
+            'certificate_checked_at'  => null,
+            'certificate_status'      => null,
+        ];
+
+        return $certificate === null ? $columns : array_intersect_key($certificate, $columns) + $columns;
     }
 
     private static function accountTakenMessage(SigningDevice $computer): string

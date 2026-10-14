@@ -17,7 +17,8 @@ use Kukux\DigitalSignature\Security\DeviceProofVerifier;
  *
  *   createForDocument()  web     — when a signer with a paired computer signs
  *   claim()              agent   — consumes the one-time link token
- *   complete()           agent   — identity-key receipt over the document hash
+ *   complete()           agent   — identity-key receipt over the document hash; a
+ *                                  certificate device's certificate is rechecked first
  *   reject()             agent   — the user declined, or the OS prompt was cancelled
  *   approvalFor()        server  — the completed job a signature may spend
  *   consume()            server  — spent on that signature
@@ -172,7 +173,27 @@ class AgentJobService
             throw new AgentApiException(422, 'invalid_proof', 'The signing proof did not verify.');
         }
 
-        $job->update(['status' => 'completed', 'completed_at' => now()]);
+        // An imported certificate's key counts only while the certificate
+        // does: in date, and not revoked (rechecked after recheck_ttl).
+        try {
+            app(AgentCertificateService::class)->recheck($device);
+        } catch (AgentApiException $e) {
+            $job->update(['status' => 'rejected', 'reason' => $e->errorCode]);
+            event(new AgentJobUpdated($job));
+
+            throw $e;
+        }
+
+        $job->update(array_filter([
+            'status'       => 'completed',
+            'completed_at' => now(),
+            // Evidence that outlives the device: which certificate approved it.
+            'meta'         => $device->usesCertificate() ? [...(array) ($job->meta ?? []), 'certificate' => [
+                'fingerprint' => $device->certificate_fingerprint,
+                'subject'     => $device->certificate_subject,
+                'status'      => $device->certificate_status,
+            ]] : null,
+        ]));
 
         $device->forceFill(['last_used_at' => now(), 'last_used_ip' => request()->ip()])->save();
 
@@ -180,12 +201,19 @@ class AgentJobService
             'subject_user_id' => $job->user_id,
             'actor_user_id'   => $job->user_id,
             'device_id'       => $device->id,
-            'context'         => ['job' => $job->uuid, 'payload_hash' => $job->payload_hash],
+            'context'         => array_filter([
+                'job'          => $job->uuid,
+                'payload_hash' => $job->payload_hash,
+                'certificate'  => $device->usesCertificate() ? $device->certificate_fingerprint : null,
+            ]),
         ]);
 
         event(new AgentJobUpdated($job));
 
-        return ['status' => 'completed'];
+        // The agent ignores it for now (pkcs12-key-storage-plan.md §8).
+        return $device->usesCertificate()
+            ? ['status' => 'completed', 'certificate_status' => $device->certificate_status ?? 'unknown']
+            : ['status' => 'completed'];
     }
 
     /**
