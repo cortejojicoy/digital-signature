@@ -106,6 +106,20 @@ return new class extends Migration
                 $t->text('session_public_key')->nullable();
                 $t->timestamp('rebound_at')->nullable();   // re-paired from the same computer
 
+                // Agent only: where the identity key came from. platform — made
+                // in the Secure Enclave / TPM; pkcs12 — imported from a
+                // certificate file (PNPKI), whose chain was checked against
+                // signature.devices.pkcs12 at pairing. The chain is public.
+                $t->string('key_source', 16)->default('platform');
+                $t->string('certificate_fingerprint', 64)->nullable();   // SHA-256 of the leaf DER, hex
+                $t->string('certificate_serial', 128)->nullable();       // hex
+                $t->text('certificate_issuer')->nullable();              // RFC 4514 DN
+                $t->text('certificate_subject')->nullable();
+                $t->timestamp('certificate_not_after')->nullable();
+                $t->text('certificate_chain')->nullable();               // json: base64 DER, leaf first
+                $t->timestamp('certificate_checked_at')->nullable();     // last definite revocation answer
+                $t->string('certificate_status', 16)->nullable();        // good | revoked | unknown
+
                 $t->string('status', 16)->default('active');   // active | pending | revoked
 
                 $t->string('registered_ip', 45)->nullable();
@@ -118,6 +132,7 @@ return new class extends Migration
                 $t->unique(['user_id', 'key_fingerprint'], 'dsd_user_key_unique');
                 $t->index(['user_id', 'status']);
                 $t->index('hardware_id_hash');
+                $t->index('certificate_fingerprint', 'dsd_certificate_fingerprint_idx');
             });
         }
 
@@ -945,6 +960,24 @@ return new class extends Migration
 
             Schema::table('digital_signature_devices', function (Blueprint $t) {
                 $t->unique('active_agent_user_key', 'dsd_active_agent_user_unique');
+            });
+        }
+
+        // Agents whose identity key is an imported certificate. Existing
+        // devices are all platform keys, which the default says.
+        if (! Schema::hasColumn('digital_signature_devices', 'key_source')) {
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->string('key_source', 16)->default('platform')->after('rebound_at');
+                $t->string('certificate_fingerprint', 64)->nullable()->after('key_source');
+                $t->string('certificate_serial', 128)->nullable()->after('certificate_fingerprint');
+                $t->text('certificate_issuer')->nullable()->after('certificate_serial');
+                $t->text('certificate_subject')->nullable()->after('certificate_issuer');
+                $t->timestamp('certificate_not_after')->nullable()->after('certificate_subject');
+                $t->text('certificate_chain')->nullable()->after('certificate_not_after');
+                $t->timestamp('certificate_checked_at')->nullable()->after('certificate_chain');
+                $t->string('certificate_status', 16)->nullable()->after('certificate_checked_at');
+
+                $t->index('certificate_fingerprint', 'dsd_certificate_fingerprint_idx');
             });
         }
 
