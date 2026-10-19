@@ -8,6 +8,7 @@ use Kukux\DigitalSignature\Documents\TemplateDocument;
 use Kukux\DigitalSignature\Routing\RoutingResult;
 use Kukux\DigitalSignature\Services\AutoAffixService;
 use Kukux\DigitalSignature\Services\DocumentRouter;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 
 /**
  * Opens (or advances) a signing session for the record the action sits on.
@@ -50,6 +51,12 @@ trait RequestsSignatures
         return $this;
     }
 
+    /** Hidden from anyone a super_admin hasn't given "Route for signatures". */
+    public function isHidden(): bool
+    {
+        return parent::isHidden() || ! FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -73,6 +80,13 @@ trait RequestsSignatures
      */
     protected function handleRequest(mixed $record): void
     {
+        if (! FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES)) {
+            $refused = RoutingResult::refused(RoutingResult::FEATURE_DISABLED);
+            $this->notifyFailure($refused->title(), $refused->body());
+
+            return;
+        }
+
         if (! $record instanceof Model) {
             $this->notifyFailure('No record', 'This action must run against a record.');
 

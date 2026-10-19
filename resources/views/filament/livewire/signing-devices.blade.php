@@ -166,7 +166,8 @@
         </details>
     @endif
 
-    @if ($agentEnabled)
+    {{-- Hidden, not refused, for someone a super_admin hasn't given pairing yet. --}}
+    @if ($agentEnabled && $agentAllowed)
         <div class="dsd-agent">
             @if ($pairing && $pairing->status === 'awaiting_confirmation' && $claim && $claim['blocked_by'])
                 <h4>Your account is already paired with another computer</h4>

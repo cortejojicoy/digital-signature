@@ -12,6 +12,7 @@ use Kukux\DigitalSignature\Exceptions\UnregisteredDeviceException;
 use Kukux\DigitalSignature\Models\AgentPairing;
 use Kukux\DigitalSignature\Models\SigningDevice;
 use Kukux\DigitalSignature\Security\DeviceRegistry;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 use Livewire\Component;
 
 /**
@@ -54,6 +55,12 @@ class SigningDevices extends Component
 
         if (! AgentServer::enabled()) {
             $this->error = 'Desktop agent pairing is not enabled on this server.';
+
+            return;
+        }
+
+        if (! FeatureAccess::allows(FeatureAccess::DESKTOP_AGENT)) {
+            $this->error = 'Desktop agent pairing is turned on for selected people only. Ask an administrator if you need it.';
 
             return;
         }
@@ -175,6 +182,7 @@ class SigningDevices extends Component
             'pairing'      => $pairing,
             'claim'        => $pairing ? app(AgentPairingService::class)->describeClaim($pairing) : null,
             'agentEnabled' => AgentServer::enabled(),
+            'agentAllowed' => FeatureAccess::allows(FeatureAccess::DESKTOP_AGENT),
             'downloadUrl'  => config('signature.devices.agent.download_url'),
             'thisBrowser'  => $key['fingerprint'] ?? null,
             'deviceTypes'  => DeviceType::grouped(),

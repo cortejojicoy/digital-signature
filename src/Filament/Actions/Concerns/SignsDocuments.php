@@ -6,6 +6,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Kukux\DigitalSignature\Contracts\Signable;
 use Kukux\DigitalSignature\Exceptions\AgentApprovalRequiredException;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Exceptions\ForgedSignatureException;
 use Kukux\DigitalSignature\Exceptions\MachineBindingException;
@@ -58,6 +59,12 @@ trait SignsDocuments
         return $this;
     }
 
+    /** Hidden from anyone a super_admin hasn't given "Sign document". */
+    public function isHidden(): bool
+    {
+        return parent::isHidden() || ! FeatureAccess::allows(FeatureAccess::SIGN_DOCUMENT);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -81,6 +88,12 @@ trait SignsDocuments
 
         if (! $userId) {
             $this->fail('Not authenticated', 'You must be logged in to sign a document.');
+
+            return;
+        }
+
+        if (! FeatureAccess::allows(FeatureAccess::SIGN_DOCUMENT)) {
+            $this->fail('Not available to you yet', 'Signing documents here is turned on for selected people only. Ask an administrator if you need it.');
 
             return;
         }

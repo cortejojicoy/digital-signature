@@ -30,6 +30,9 @@ final class RoutingResult
 
     public const NOT_READY = 'not_ready';
 
+    /** A super_admin limited "Route for signatures" to selected people (Support\FeatureAccess). */
+    public const FEATURE_DISABLED = 'feature_disabled';
+
     /**
      * @param  array<string, string>  $replace
      */

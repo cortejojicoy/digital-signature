@@ -475,6 +475,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Feature access
+    |--------------------------------------------------------------------------
+    | A super_admin can limit a feature to selected people from the launcher's
+    | Settings tab while it's being tested: Route for signatures, Sign
+    | document, the placement designer and desktop agent pairing. Every
+    | feature is open to everyone until someone changes it there.
+    |
+    | Who is a super_admin: a User with hasRole(hub.super_admin_role), or
+    | HubAccess::superAdminUsing(fn ($user) => ...) for apps without roles.
+    |
+    | search_columns: the users-table columns searched when picking people.
+    */
+    'feature_access' => [
+        'search_columns' => ['name', 'email'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Image Metadata (machine-binding security)
     |--------------------------------------------------------------------------
     | Every stored signature PNG receives four HMAC-signed tEXt chunks:

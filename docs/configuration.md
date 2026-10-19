@@ -396,7 +396,7 @@ SIGNATURE_LAUNCHER_COLOR=
 SIGNATURE_LAUNCHER_POLL=60
 SIGNATURE_LAUNCHER_WIDTH=56rem
 SIGNATURE_LAUNCHER_MANAGE_WIDTH=72rem
-SIGNATURE_LAUNCHER_CUSTOMIZABLE=true  # per-user Settings tab
+SIGNATURE_LAUNCHER_CUSTOMIZABLE=true  # placement controls in the super-admin Settings tab
 SIGNATURE_LAUNCHER_AVOID_OVERLAP=true
 SIGNATURE_LAUNCHER_OFFSET_X=1.5rem
 SIGNATURE_LAUNCHER_OFFSET_Y=1.5rem
@@ -513,7 +513,7 @@ full-bleed below 640px regardless.
 | `launcher.hide_when_empty` | `SIGNATURE_LAUNCHER_HIDE_WHEN_EMPTY` | `false` |
 | `launcher.width` | `SIGNATURE_LAUNCHER_WIDTH` | `56rem` |
 | `launcher.manage_width` | `SIGNATURE_LAUNCHER_MANAGE_WIDTH` | `72rem` (drawer width while **Manage signatures** or **All documents I've signed** is open) |
-| `launcher.customizable` | `SIGNATURE_LAUNCHER_CUSTOMIZABLE` | `true` (each user can move their own button from the drawer's **Settings** tab) |
+| `launcher.customizable` | `SIGNATURE_LAUNCHER_CUSTOMIZABLE` | `true` (a super admin can move their own button from the drawer's **Settings** tab) |
 | `launcher.avoid_overlap` | `SIGNATURE_LAUNCHER_AVOID_OVERLAP` | `true` |
 | `launcher.offset.x` | `SIGNATURE_LAUNCHER_OFFSET_X` | `1.5rem` |
 | `launcher.offset.y` | `SIGNATURE_LAUNCHER_OFFSET_Y` | `1.5rem` |
@@ -525,13 +525,14 @@ full-bleed below 640px regardless.
 `position` accepts `bottom-right`, `bottom-left`, `top-right`, `top-left`. The
 slide-over enters from whichever side the button sits on.
 
-`position` and `offset` are the **default** placement. With `customizable` on,
-each user can pick their own corner and offsets from the drawer's **Settings**
-tab: the button moves as they choose, and the choice is saved per user (in
-`digital_signature_user_preferences`) and follows them to other devices.
-**Reset to default** goes back to the config. Set `customizable` to `false` to
-hide the tab and apply the config placement to everyone; saved choices are
-then ignored, not deleted.
+`position` and `offset` are the **default** placement. The drawer's
+**Settings** tab is for super admins only. With `customizable` on, it lets them
+pick their own corner and offsets: the button moves as they choose, and the
+choice is saved per user (in `digital_signature_user_preferences`) and follows
+them to other devices. **Reset to default** goes back to the config. Set
+`customizable` to `false` to drop the placement controls and apply the config
+placement to everyone; saved choices are then ignored, not deleted. The tab
+stays for [feature access](#feature_access).
 
 #### Not landing on the host app's own floating button
 
@@ -600,6 +601,16 @@ that renders invisible on one of the three supported versions would be worse
 than one that isn't brand-coloured by default.
 
 Per-panel override: `SignaturePlugin::make()->withoutFloatingLauncher()`.
+
+### `feature_access`
+
+A super admin can limit a feature to selected people from the drawer's
+**Settings** tab while it's being tested. See
+[Feature access](filament-components.md#feature-access-for-testing).
+
+| Key | Default | |
+|---|---|---|
+| `feature_access.search_columns` | `['name', 'email']` | Users-table columns searched when adding people. A column your table doesn't have gives no results. |
 
 ### `filament_version`
 

@@ -564,6 +564,20 @@ return new class extends Migration
             });
         }
 
+        // Who may use each gated feature (Support\FeatureAccess), as set by a
+        // super_admin from the launcher's Settings tab. One row per feature;
+        // absent means everyone, so an app that never touches it is unchanged.
+        if (! Schema::hasTable('digital_signature_feature_access')) {
+            Schema::create('digital_signature_feature_access', function (Blueprint $t) {
+                $t->id();
+                $t->string('feature', 64)->unique();
+                $t->string('mode', 16)->default('everyone');
+                $t->text('user_ids')->nullable();
+                $t->unsignedBigInteger('updated_by')->nullable();
+                $t->timestamps();
+            });
+        }
+
         // ── Hub and client mode (docs/hub/index.md) ─────────────────────
         // Created in every mode, so switching an app between standalone and
         // client never needs a migration. Standalone never writes to them.
@@ -844,6 +858,7 @@ return new class extends Migration
         Schema::dropIfExists('digital_signature_hub_blocks');
         Schema::dropIfExists('digital_signature_transfers');
         Schema::dropIfExists('digital_signature_identities');
+        Schema::dropIfExists('digital_signature_feature_access');
         Schema::dropIfExists('digital_signature_user_preferences');
         Schema::dropIfExists('digital_signature_agent_jobs');
         Schema::dropIfExists('digital_signature_agent_tokens');

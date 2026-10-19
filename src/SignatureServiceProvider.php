@@ -72,6 +72,7 @@ use Kukux\DigitalSignature\Drivers\PdfSigners\DeferredPdfSigner;
 use Kukux\DigitalSignature\Hub\Cms\CmsSigner;
 use Kukux\DigitalSignature\Hub\HubApiServiceProvider;
 use Kukux\DigitalSignature\Hub\HubIdentityServiceProvider;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 use Kukux\DigitalSignature\Support\SignatureMode;
 use Livewire\Livewire;
 
@@ -145,6 +146,10 @@ class SignatureServiceProvider extends ServiceProvider
         $this->app->scoped(DeviceRegistry::class);
 
         $this->app->singleton(PdfTemplateRegistry::class);
+
+        // Who may use each gated feature. Scoped: the rules are read once per
+        // request, and a long-running worker never serves another request's.
+        $this->app->scoped(FeatureAccess::class);
 
         // Signatory routing. The factory is a singleton because the plugin's
         // resolveSignatoriesUsing() override is registered onto it at panel

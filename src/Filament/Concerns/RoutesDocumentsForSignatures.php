@@ -7,6 +7,7 @@ use Kukux\DigitalSignature\Contracts\SignableDocument;
 use Kukux\DigitalSignature\Filament\Support\RoutingNotification;
 use Kukux\DigitalSignature\Routing\RoutingResult;
 use Kukux\DigitalSignature\Services\DocumentRouter;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 
 /**
  * For a page that routes from somewhere other than its own action, typically
@@ -30,7 +31,9 @@ trait RoutesDocumentsForSignatures
      */
     protected function routeDocument(string|SignableDocument $document, mixed $subject, array $context = []): RoutingResult
     {
-        $result = app(DocumentRouter::class)->route($document, $subject, $context);
+        $result = FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES)
+            ? app(DocumentRouter::class)->route($document, $subject, $context)
+            : RoutingResult::refused(RoutingResult::FEATURE_DISABLED);
 
         RoutingNotification::send($result);
 

@@ -21,6 +21,7 @@ class RunMigration implements InstallStep
         'digital_signature_delegations', 'digital_signature_audits', 'digital_pdf_template_slots',
         'digital_signature_agent_pairings', 'digital_signature_agent_tokens', 'digital_signature_agent_jobs',
         'digital_signature_user_preferences',
+        'digital_signature_feature_access',
         'digital_signature_identities',
         'digital_signature_transfers',
         'digital_signature_hub_blocks',

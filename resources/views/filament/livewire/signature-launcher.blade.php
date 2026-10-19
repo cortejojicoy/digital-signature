@@ -655,6 +655,51 @@
         .dark .dsig-range { accent-color: var(--dsig-accent, #f4f4f5); }
         .dsig-settings__foot { display: flex; align-items: center; gap: .75rem; }
 
+        /* ── Settings: feature access ──────────────────────────────────── */
+        .dsig-seg {
+            display: inline-flex; flex-wrap: wrap; gap: .25rem; margin-top: .75rem; padding: .25rem;
+            border-radius: .625rem; background: rgb(0 0 0 / 0.04);
+        }
+        .dark .dsig-seg { background: rgb(255 255 255 / 0.06); }
+        .dsig-seg__opt {
+            border: 0; background: transparent; color: inherit; cursor: pointer;
+            font-size: .75rem; font-weight: 600; padding: .3rem .65rem; border-radius: .45rem; opacity: .65;
+        }
+        .dsig-seg__opt:hover { opacity: 1; }
+        .dsig-seg__opt:disabled { cursor: wait; }
+        .dsig-seg__opt--on { opacity: 1; background: #fff; box-shadow: 0 0 0 1px var(--dsig-accent, rgb(0 0 0 / 0.15)); }
+        .dark .dsig-seg__opt--on { background: rgb(255 255 255 / 0.12); }
+        .dsig-seg__opt:focus-visible { outline: 2px solid var(--dsig-accent, #18181b); outline-offset: 1px; }
+        .dsig-people { display: flex; flex-wrap: wrap; gap: .375rem; margin: .75rem 0 .5rem; }
+        .dsig-chip {
+            display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .25rem .2rem .6rem;
+            border-radius: 9999px; font-size: .75rem; font-weight: 600;
+            border: 1px solid rgb(0 0 0 / 0.12); background: rgb(0 0 0 / 0.02);
+        }
+        .dark .dsig-chip { border-color: rgb(255 255 255 / 0.15); background: rgb(255 255 255 / 0.04); }
+        .dsig-chip__x {
+            display: inline-flex; border: 0; background: transparent; color: inherit; cursor: pointer;
+            padding: .1rem; border-radius: 9999px; opacity: .55;
+        }
+        .dsig-chip__x:hover { opacity: 1; background: rgb(0 0 0 / 0.06); }
+        .dark .dsig-chip__x:hover { background: rgb(255 255 255 / 0.1); }
+        .dsig-chip__x svg { width: .875rem; height: .875rem; }
+        .dsig-matches {
+            display: flex; flex-direction: column; margin-top: .375rem; overflow: hidden;
+            border: 1px solid rgb(0 0 0 / 0.1); border-radius: .5rem;
+        }
+        .dark .dsig-matches { border-color: rgb(255 255 255 / 0.12); }
+        .dsig-match {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .5rem; text-align: left;
+            border: 0; background: transparent; color: inherit; cursor: pointer;
+            padding: .45rem .6rem; font-size: .8125rem; font-weight: 600;
+        }
+        .dsig-match + .dsig-match { border-top: 1px solid rgb(0 0 0 / 0.06); }
+        .dark .dsig-match + .dsig-match { border-top-color: rgb(255 255 255 / 0.08); }
+        .dsig-match:hover, .dsig-match:focus-visible { background: rgb(0 0 0 / 0.04); outline: none; }
+        .dark .dsig-match:hover, .dark .dsig-match:focus-visible { background: rgb(255 255 255 / 0.06); }
+        .dsig-match .dsig-card__meta { margin: 0; font-weight: 400; }
+
         /*
             Day heading in the signed history. Sticky because the whole point
             of the grouping is knowing which day you are looking at, and that
@@ -1083,7 +1128,7 @@
                 Devices
             </button>
 
-            @if ($settings['customizable'])
+            @if ($settings['configurable'])
                 <button
                     type="button"
                     role="tab"
@@ -1557,13 +1602,99 @@
             </div>
 
             {{--
-                Button placement, per user. Each control moves the button at
-                once (it stays visible above the backdrop) and saves shortly
-                after; the config placement is what "Reset" returns to.
+                Settings, for super admins only. Feature access first: who may
+                use each gated feature while it's being tested. Then, when the
+                host allows it, the button's placement: each control moves the
+                button at once (it stays visible above the backdrop) and saves
+                shortly after; the config placement is what "Reset" returns to.
             --}}
-            @if ($settings['customizable'])
+            @if ($settings['configurable'])
                 <div x-show="! viewing && mode === 'tabs' && tab === 'settings'" x-cloak>
-                    <p class="dsig-section__title">Floating button</p>
+                    <p class="dsig-section__title">Feature access</p>
+                    <p class="dsig-card__meta" style="margin-bottom: .75rem">
+                        Turn a feature on for selected people while you test it. Super admins can always use every feature.
+                    </p>
+
+                    @if (! $this->loaded)
+                        <div class="dsig-skeleton"></div>
+                        <div class="dsig-skeleton"></div>
+                    @else
+                        @foreach ($this->featureAccess as $feature)
+                            <div class="dsig-card dsig-feature" wire:key="dsig-feature-{{ $feature['key'] }}">
+                                <p class="dsig-card__title">{{ $feature['label'] }}</p>
+                                <p class="dsig-card__meta">{{ $feature['description'] }}</p>
+
+                                <div class="dsig-seg" role="radiogroup" aria-label="Who can use {{ $feature['label'] }}">
+                                    @foreach (['everyone' => 'Everyone', 'selected' => 'Selected people', 'super_admins' => 'Super admins only'] as $mode => $modeLabel)
+                                        <button
+                                            type="button"
+                                            role="radio"
+                                            @class(['dsig-seg__opt', 'dsig-seg__opt--on' => $feature['mode'] === $mode])
+                                            aria-checked="{{ $feature['mode'] === $mode ? 'true' : 'false' }}"
+                                            wire:click="setFeatureMode(@js($feature['key']), @js($mode))"
+                                            wire:loading.attr="disabled"
+                                            @if ($settings['color']) style="--dsig-accent: {{ $settings['color'] }}" @endif
+                                        >
+                                            {{ $modeLabel }}
+                                        </button>
+                                    @endforeach
+                                </div>
+
+                                @if ($feature['mode'] === 'selected')
+                                    <div class="dsig-people">
+                                        @forelse ($feature['people'] as $person)
+                                            <span class="dsig-chip" wire:key="dsig-feature-{{ $feature['key'] }}-{{ $person['id'] }}" title="{{ $person['detail'] }}">
+                                                {{ $person['name'] }}
+                                                <button
+                                                    type="button"
+                                                    class="dsig-chip__x"
+                                                    aria-label="Remove {{ $person['name'] }}"
+                                                    wire:click="revokeFeature(@js($feature['key']), @js($person['id']))"
+                                                >
+                                                    <x-filament::icon icon="heroicon-m-x-mark" />
+                                                </button>
+                                            </span>
+                                        @empty
+                                            <p class="dsig-card__meta">Nobody selected yet, so only super admins can use it.</p>
+                                        @endforelse
+                                    </div>
+
+                                    <input
+                                        type="search"
+                                        class="dsig-input"
+                                        placeholder="Add someone by name or email"
+                                        aria-label="Add someone to {{ $feature['label'] }}"
+                                        wire:model.live.debounce.300ms="featureSearch.{{ $feature['key'] }}"
+                                    />
+
+                                    @if ($feature['matches'] !== [])
+                                        <div class="dsig-matches">
+                                            @foreach ($feature['matches'] as $match)
+                                                <button
+                                                    type="button"
+                                                    class="dsig-match"
+                                                    wire:key="dsig-feature-{{ $feature['key'] }}-match-{{ $match['id'] }}"
+                                                    wire:click="grantFeature(@js($feature['key']), @js($match['id']))"
+                                                >
+                                                    <span>{{ $match['name'] }}</span>
+                                                    @if ($match['detail'])
+                                                        <span class="dsig-card__meta">{{ $match['detail'] }}</span>
+                                                    @endif
+                                                </button>
+                                            @endforeach
+                                        </div>
+                                    @elseif (mb_strlen($feature['search']) >= 2)
+                                        <p class="dsig-card__meta" style="margin-top: .5rem">No one matches “{{ $feature['search'] }}”.</p>
+                                    @endif
+                                @elseif ($feature['mode'] === 'super_admins')
+                                    <p class="dsig-card__meta" style="margin-top: .5rem">Hidden from everyone else.</p>
+                                @endif
+                            </div>
+                        @endforeach
+                    @endif
+
+                    @if ($settings['customizable'])
+                    <p class="dsig-section__title" style="margin-top: 1.5rem">Floating button</p>
                     <p class="dsig-card__meta" style="margin-bottom: .75rem">
                         Choose the corner your Signatures button sits in. It moves as you choose, and only for you.
                     </p>
@@ -1616,6 +1747,7 @@
                             <span class="dsig-card__meta" x-show="saved" x-cloak>Saved</span>
                         </div>
                     </div>
+                    @endif
                 </div>
             @endif
 
