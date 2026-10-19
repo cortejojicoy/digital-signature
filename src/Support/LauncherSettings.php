@@ -58,9 +58,10 @@ final class LauncherSettings
     public const POSITIONS = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
 
     /**
-     * Whether users may move their own launcher from the drawer's Settings
-     * tab. When off, the tab is hidden and saved choices are ignored, so the
-     * config placement applies to everyone again.
+     * Whether the drawer's Settings tab offers moving the launcher. The tab
+     * itself is for super admins only (it also holds feature access). When
+     * off, the placement controls are hidden and saved choices are ignored,
+     * so the config placement applies to everyone again.
      */
     public static function customizable(): bool
     {
