@@ -51,6 +51,7 @@ Clicking it opens a drawer with these tabs:
 | **Signed** | Documents the user has already signed |
 | **My signatures** | The user's signature library, plus a form to add one |
 | **Devices** | Browsers and paired computers that can sign as this user |
+| **Settings** | Super admins only: [feature access](#feature-access-for-testing) and the button's placement |
 
 The drawer footer has a **Manage signatures** link. See [Managing a signature](#managing-a-signature) below.
 
@@ -63,11 +64,40 @@ While the launcher is on, the inbox page and the Signatures resource drop out of
 
 ### Position and look
 
-Icon, label, colour, badge polling and drawer width are config. Position and offsets in config are the default: each user can move their own button from the drawer's **Settings** tab (turn that off with `launcher.customizable => false`). See [Configuration](configuration.md#launcher).
+Icon, label, colour, badge polling and drawer width are config. Position and offsets in config are the default: a super admin can move their own button from the drawer's **Settings** tab (turn that off with `launcher.customizable => false`). See [Configuration](configuration.md#launcher).
 
 The Signed tab shows recent signatures. **All documents I've signed** widens the drawer into the full record, with a title filter and **Show more**, the same way **Manage signatures** does. There is no separate page.
 
 The button automatically moves out of the way of other things pinned in the same corner (your own FAB, a chat widget, a cookie bar). If it guesses wrong, use `launcher.avoid` / `launcher.ignore` to override specific selectors, or set `avoid_overlap => false` and place it with `launcher.offset`. See [Not landing on the host app's own floating button](configuration.md#not-landing-on-the-host-apps-own-floating-button).
+
+### Feature access (for testing)
+
+The **Settings** tab lets a super admin turn a feature on for selected people while it's being tested, then for everyone. For each feature they pick:
+
+| Choice | Who can use it |
+|---|---|
+| **Everyone** | Everybody. The default, until someone changes it. |
+| **Selected people** | The people added there (search by name or email), plus super admins. |
+| **Super admins only** | Super admins. Hidden from everyone else. |
+
+| Feature | What it hides from everyone not allowed |
+|---|---|
+| Route for signatures | `RouteForSignaturesAction`, `RequestSignaturesAction`; `routeDocument()` refuses with `feature_disabled` |
+| Sign document | `SignDocumentAction`, `SignDocumentHeaderAction` |
+| Placement designer | The designer page answers 403 |
+| Desktop agent pairing | **Pair desktop agent** in the Devices tab |
+
+Hidden actions also refuse if called anyway. The people picked are kept when you switch a feature back to **Everyone**, so a test can be resumed. Rules are stored in `digital_signature_feature_access`.
+
+Super admins always pass. Who counts as one: a user whose `hasRole('super_admin')` is true (Filament Shield, spatie/laravel-permission; the role name is `signature.hub.super_admin_role`). Without roles, tell the package yourself in a service provider:
+
+```php
+use Kukux\DigitalSignature\Hub\Identity\HubAccess;
+
+HubAccess::superAdminUsing(fn ($user): bool => $user->is_admin);
+```
+
+Only the Filament surfaces are gated. `DocumentRouter` and `SignatureManager` aren't, since jobs, commands and tests call them with nobody signed in. Check a feature in your own code with `FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES)`.
 
 ### Mounting it yourself
 
