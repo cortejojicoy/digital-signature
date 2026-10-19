@@ -7,6 +7,7 @@ use Filament\Support\Exceptions\Halt;
 use Kukux\DigitalSignature\Filament\Support\RoutingNotification;
 use Kukux\DigitalSignature\Routing\RoutingResult;
 use Kukux\DigitalSignature\Services\DocumentRouter;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 
 /**
  * "Route for signatures": DocumentRouter behind a button.
@@ -53,8 +54,22 @@ trait RoutesForSignatures
         $this->action(fn () => $this->routeForSignatures());
     }
 
+    /** Hidden from anyone a super_admin hasn't given "Route for signatures". */
+    public function isHidden(): bool
+    {
+        return parent::isHidden() || ! FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES);
+    }
+
     protected function routeForSignatures(): RoutingResult
     {
+        if (! FeatureAccess::allows(FeatureAccess::ROUTE_FOR_SIGNATURES)) {
+            RoutingNotification::send($refused = RoutingResult::refused(RoutingResult::FEATURE_DISABLED));
+
+            $this->halt();
+
+            return $refused;
+        }
+
         try {
             $result = app(DocumentRouter::class)->route(
                 $this->getDocumentDefinition(),
