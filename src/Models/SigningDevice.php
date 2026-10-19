@@ -22,7 +22,7 @@ class SigningDevice extends Model
     protected $fillable = [
         'uuid', 'user_id', 'label',
         'public_key', 'key_fingerprint', 'algorithm',
-        'kind', 'protection', 'user_presence', 'attested',
+        'kind', 'protection', 'user_presence', 'presence_method', 'attested',
         'device_type', 'detected_device_type', 'chassis_type', 'virtual',
         'form_factor', 'platform', 'browser', 'model', 'user_agent',
         'hardware_id_hash', 'agent_version', 'session_public_key', 'rebound_at',

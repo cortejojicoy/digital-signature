@@ -99,7 +99,12 @@
                         · {{ $device->last_used_at ? 'last used '.$device->last_used_at->diffForHumans() : 'not used yet' }}
                     </p>
                     @if ($device->usesCertificate())
-                        <p class="dsd-meta">{{ $device->certificateSummary() }} · issued by {{ $device->certificateIssuerName() }}</p>
+                        <p class="dsd-meta">
+                            {{ $device->certificateSummary() }} · issued by {{ $device->certificateIssuerName() }}
+                            @if ($device->presence_method === 'certificate_password')
+                                · Approved with certificate password
+                            @endif
+                        </p>
                     @endif
                     <p class="dsd-meta dsd-mono">{{ $device->shortFingerprint() }}</p>
 
@@ -107,7 +112,7 @@
                         <span @class(['dsd-badge', 'dsd-badge--strong' => in_array($device->protection, ['secure_enclave', 'tpm'], true)])>
                             {{ $device->protectionLabel() }}
                         </span>
-                        @if ($device->user_presence)
+                        @if ($device->user_presence && $device->presence_method !== 'certificate_password')
                             <span class="dsd-badge">{{ $device->platform === 'Windows' ? 'Windows Hello' : 'Touch ID' }}</span>
                         @endif
                         @if ($device->attested)

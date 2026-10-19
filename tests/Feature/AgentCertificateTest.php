@@ -279,6 +279,23 @@ describe('pairing with a certificate', function () {
             ->and($this->revocation->asked)->toBe(0);
     });
 
+    it('keeps how each use is approved: the certificate password, or the OS by default', function () {
+        config(['signature.devices.agent.require_presence' => true]);
+        $pki = TestCertificates::pki();
+
+        $password = pairWithCertificate($this, certUser(), $pki['leaf'], ['presence_method' => 'certificate_password'])['device']->fresh();
+        $os = pairWithCertificate($this, certUser(43, 'Maria Santos'), $pki['p256'], ['device' => ['hardware_id_hash' => str_repeat('cd', 32)]])['device']->fresh();
+
+        expect($password->presence_method)->toBe('certificate_password')
+            ->and($password->user_presence)->toBeTrue()
+            ->and($os->presence_method)->toBe('os');
+
+        Auth::login(TestUser::find(42));
+
+        \Livewire\Livewire::test(\Kukux\DigitalSignature\Filament\Livewire\SigningDevices::class)
+            ->assertSee('Approved with certificate password');
+    });
+
     it('shows the certificate in the confirm prompt and the devices list', function () {
         $user = certUser();
 
@@ -316,6 +333,20 @@ describe('refusals', function () {
         claimWithCertificate($this, certUser(), TestCertificates::pki()['leaf'])['response']
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'certificates_disabled');
+    });
+
+    it('refuses a certificate password on a platform key, and an unknown presence method', function () {
+        $leaf = TestCertificates::pki()['leaf'];
+
+        claimWithCertificate($this, certUser(), $leaf, null, ['key_source' => null, 'certificate_chain' => null, 'presence_method' => 'certificate_password'])['response']
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'invalid_presence_method');
+
+        claimWithCertificate($this, TestUser::find(42), $leaf, null, ['presence_method' => 'pin'])['response']
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'invalid_presence_method');
+
+        expect(AgentPairing::where('status', 'awaiting_confirmation')->exists())->toBeFalse();
     });
 
     it('refuses certificates under admin_approval, which is not built', function () {

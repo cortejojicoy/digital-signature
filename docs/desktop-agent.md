@@ -194,7 +194,7 @@ Virtual machines already paired before they were blocked keep working. **My sign
 
 ### Certificate keys (PKCS#12)
 
-The agent can sign with a key imported from a certificate file (a PNPKI `.p12`) instead of one made in the Secure Enclave / TPM. Its claim adds `key_source: "pkcs12"` and `certificate_chain` (base64 DER, leaf first); `identity_public_key` is the leaf's key, RSA 2048+ (`RS256`) or P-256 (`ES256`). Without `key_source` a claim is a platform key, as before. Turn it on with `SIGNATURE_AGENT_PKCS12=true`; lookup then returns `accepts_certificates: true`, so the agent can stop before any OS prompt when it's off.
+The agent can sign with a key imported from a certificate file (a PNPKI `.p12`) instead of one made in the Secure Enclave / TPM. Its claim adds `key_source: "pkcs12"` and `certificate_chain` (base64 DER, leaf first); `identity_public_key` is the leaf's key, RSA 2048+ (`RS256`) or P-256 (`ES256`). Without `key_source` a claim is a platform key, as before. A certificate key unlocked by the certificate's own password at every use, instead of Touch ID / Hello, also sends `presence_method: "certificate_password"` with `user_presence: true`; the default is `os`, any other value (or `certificate_password` without `key_source: "pkcs12"`) is `422 invalid_presence_method`. Either method satisfies `require_presence`, and the device keeps it as `presence_method`. Turn it on with `SIGNATURE_AGENT_PKCS12=true`; lookup then returns `accepts_certificates: true`, so the agent can stop before any OS prompt when it's off.
 
 At claim, `Agent\AgentCertificateService` checks, in order:
 
@@ -204,7 +204,7 @@ At claim, `Agent\AgentCertificateService` checks, in order:
 4. Revocation (`Security\CertificateRevocationChecker`): OCSP to the leaf's AIA URL through `openssl ocsp`, the response verified against the issuer's chain; else the CRL through `CrlValidator`, verified against the issuer. Revoked is `422 certificate_revoked`. If neither answers, `unreachable` decides.
 5. No other active agent device holds this certificate (or its key): `409 certificate_in_use`, with `device: { label, device_type }` like `account_already_paired`. Re-pairing the computer that already holds it is fine, and confirm checks again under a lock.
 
-On confirm the device keeps `key_source = pkcs12` and the certificate: `certificate_fingerprint` (SHA-256 of the leaf DER, hex), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at` and `certificate_status` (`good`, `revoked` or `unknown`). A certificate the account paired before and removed is paired again on its old row, since its key is the same. **My signing devices** shows *Certificate · Test UP 4 · until Sep 2028 · issued by …*.
+On confirm the device keeps `key_source = pkcs12` and the certificate: `certificate_fingerprint` (SHA-256 of the leaf DER, hex), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at` and `certificate_status` (`good`, `revoked` or `unknown`). A certificate the account paired before and removed is paired again on its old row, since its key is the same. **My signing devices** shows *Certificate · Test UP 4 · until Sep 2028 · issued by …*, followed by *· Approved with certificate password* when that's its `presence_method`.
 
 On every job completion the certificate must still be in date (`422 certificate_expired`). Once `recheck_ttl` has passed since the last definite answer, the chain and revocation are checked again; a confirmed revocation revokes the device (and its token), records `agent.certificate_revoked`, and fails the job with `422 certificate_revoked`. Either way the job is marked `rejected` with that code as its `reason`. A completed job keeps the leaf's fingerprint in `meta.certificate`, and the `agent.approved` audit row in `context.certificate`, so the evidence outlives the device.
 
@@ -306,7 +306,7 @@ These are **not** in the `web` group (the agent has no cookies, so CSRF would re
 | Method | Path | Auth | Throttle | Body | Returns |
 |---|---|---|---|---|---|
 | POST | `pairings/lookup` | none | 10/min | `user_code` | pairing, nonce, user, `server{id,name,origin,salt}`, `require_presence`, `blocked_device_types`, `agent_device`, `devices_url`, `expires_at` |
-| POST | `pairings/{uuid}/claim` | code + proof | 20/min | `user_code`, `identity_public_key`, `session_public_key` (base64 SPKI), `algorithm`, `protection`, `user_presence`, `agent_version`, `device{…}`, `attestation?`, `proof` | `status: awaiting_confirmation`, `poll_secret`, `existing_device{uuid,label,device_type}` or null |
+| POST | `pairings/{uuid}/claim` | code + proof | 20/min | `user_code`, `identity_public_key`, `session_public_key` (base64 SPKI), `algorithm`, `protection`, `user_presence`, `presence_method?` (`os` \| `certificate_password`), `agent_version`, `device{…}`, `attestation?`, `proof` | `status: awaiting_confirmation`, `poll_secret`, `existing_device{uuid,label,device_type}` or null |
 | POST | `pairings/{uuid}/poll` | poll secret | 120/min | `poll_secret` | `status`; when confirmed, also `device{uuid,label,device_type}`, `token` (once) and `rebound` |
 | GET | `status` | agent | 120/min | none | `device{uuid,label,status}`, `user{id,name}`, `other_devices[{uuid,label,device_type,last_used_at}]` |
 | DELETE | `device` | agent | 120/min | none | 204, device and tokens revoked |
@@ -339,7 +339,7 @@ All three come from the package migration, and the agent columns already exist o
 | `digital_signature_agent_pairings` | `AgentPairing` | One pairing attempt: `user_code_hash`, `nonce`, `poll_secret_hash`, `status` (`pending`, `awaiting_confirmation`, `confirmed`, `rejected`, `expired`), `claim` (json), `device_id`, `replaces_device_id` (the device a rebind updates), `token_issued_at`, `expires_at` |
 | `digital_signature_agent_tokens` | `AgentToken` | Bearer tokens: `device_id`, `token_hash` (unique), `last_used_at`, `revoked_at` |
 | `digital_signature_agent_jobs` | `AgentJob` | Signing jobs: `user_id`, `device_id`, `signature_id`, `purpose`, `title`, `signable` morph, `payload_hash`, `nonce`, `link_token_hash`, `status` (`pending`, `claimed`, `completed`, `rejected`, `expired`), `reason`, `claimed_at`, `completed_at`, `consumed_at`, `expires_at` |
-| `digital_signature_devices` | `SigningDevice` | Agent rows have `kind = agent`, `protection`, `user_presence`, `attested`, `device_type`, `detected_device_type`, `chassis_type`, `virtual`, `form_factor`, `model`, `hardware_id_hash`, `active_hardware_key` (unique), `agent_version`, `session_public_key`, `rebound_at`, `key_source` (`platform` or `pkcs12`) and, for certificate keys, `certificate_fingerprint` (indexed), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at`, `certificate_status` |
+| `digital_signature_devices` | `SigningDevice` | Agent rows have `kind = agent`, `protection`, `user_presence`, `attested`, `device_type`, `detected_device_type`, `chassis_type`, `virtual`, `form_factor`, `model`, `hardware_id_hash`, `active_hardware_key` (unique), `agent_version`, `session_public_key`, `rebound_at`, `key_source` (`platform` or `pkcs12`), `presence_method` (`os` or `certificate_password`) and, for certificate keys, `certificate_fingerprint` (indexed), `certificate_serial`, `certificate_issuer`, `certificate_subject`, `certificate_not_after`, `certificate_chain`, `certificate_checked_at`, `certificate_status` |
 
 Secrets (codes, poll secrets, tokens, link tokens) are only ever stored as SHA-256.
 
@@ -378,6 +378,7 @@ The agent shows `message` to the user. `AgentApiException::render()` produces it
 | 422 | `invalid_algorithm`, `invalid_key` | Bad algorithm, or keys don't match it |
 | 422 | `invalid_proof` | Registration or receipt proof didn't verify |
 | 422 | `presence_required` | `require_presence` is on and the key has no user presence |
+| 422 | `invalid_presence_method` | `presence_method` isn't `os` or `certificate_password`, or is `certificate_password` without `key_source: "pkcs12"` |
 | 422 | `device_type_not_allowed` | The detected device type is in `blocked_device_types` (virtual machines by default) |
 | 422 | `certificates_disabled` | A certificate claim while `pkcs12.enabled` is off (or `subject_binding` is `admin_approval`) |
 | 422 | `certificate_untrusted` | The chain doesn't verify up to a trusted root, the leaf can't sign, or its key isn't the identity key |
