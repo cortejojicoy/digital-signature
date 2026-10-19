@@ -4,6 +4,8 @@ namespace Kukux\DigitalSignature\Filament\Livewire;
 
 use Filament\Facades\Filament;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Collection as BaseCollection;
 use Kukux\DigitalSignature\Client\HubLinks;
@@ -15,6 +17,7 @@ use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Models\UserPreference;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 use Kukux\DigitalSignature\Support\LauncherSettings;
 use Kukux\DigitalSignature\Support\SignatureMode;
 use Kukux\DigitalSignature\Support\ViewerAssets;
@@ -67,8 +70,19 @@ class SignatureLauncher extends Component
 
     public int $signedLimit = 100;
 
+    /**
+     * Settings tab, Feature access: what a super_admin has typed into each
+     * feature's "add someone" box, keyed by feature.
+     *
+     * @var array<string, string>
+     */
+    public array $featureSearch = [];
+
     /** This request's preferences, loaded once — see preferences(). */
     protected ?array $preferences = null;
+
+    /** Whether the signed-in user is a super_admin, once per request. */
+    protected ?bool $configurable = null;
 
     public function loadRequests(): void
     {
@@ -96,7 +110,7 @@ class SignatureLauncher extends Component
     {
         $userId = $this->currentUserId();
 
-        if (! $userId || ! LauncherSettings::customizable()) {
+        if (! $userId || ! LauncherSettings::customizable() || ! $this->canConfigure()) {
             return;
         }
 
@@ -126,7 +140,7 @@ class SignatureLauncher extends Component
     {
         $userId = $this->currentUserId();
 
-        if (! $userId) {
+        if (! $userId || ! $this->canConfigure()) {
             return;
         }
 
@@ -143,6 +157,163 @@ class SignatureLauncher extends Component
         $row->save();
 
         $this->preferences = $preferences;
+    }
+
+    // -------------------------------------------------------------------------
+    // Settings tab: feature access (super_admin only)
+    //
+    // Who may use each gated feature while it's being tested. Every write
+    // re-checks the role here: the tab being hidden is not the guard.
+    // -------------------------------------------------------------------------
+
+    public function setFeatureMode(string $feature, string $mode): void
+    {
+        if (! $this->canConfigure() || ! $this->isFeature($feature) || ! in_array($mode, FeatureAccess::MODES, true)) {
+            return;
+        }
+
+        app(FeatureAccess::class)->setMode($feature, $mode, $this->currentUserId());
+    }
+
+    public function grantFeature(string $feature, string $userId): void
+    {
+        if (! $this->canConfigure() || ! $this->isFeature($feature)) {
+            return;
+        }
+
+        $model = $this->userModel();
+
+        if ($model === null || ! $model::query()->whereKey($userId)->exists()) {
+            return;
+        }
+
+        app(FeatureAccess::class)->grant($feature, $userId, $this->currentUserId());
+
+        $this->featureSearch[$feature] = '';
+    }
+
+    public function revokeFeature(string $feature, string $userId): void
+    {
+        if (! $this->canConfigure() || ! $this->isFeature($feature)) {
+            return;
+        }
+
+        app(FeatureAccess::class)->revoke($feature, $userId, $this->currentUserId());
+    }
+
+    /**
+     * Each gated feature as the Settings tab shows it: who may use it, the
+     * people picked, and anyone matching what was typed to add.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFeatureAccessProperty(): array
+    {
+        if (! $this->loaded || ! $this->canConfigure()) {
+            return [];
+        }
+
+        $access = app(FeatureAccess::class);
+        $ids = collect(FeatureAccess::features())->map(fn ($feature, string $key): array => $access->userIds($key));
+        $people = $this->peopleByIds($ids->flatten()->unique()->values()->all());
+
+        return collect(FeatureAccess::features())
+            ->map(fn (array $feature, string $key): array => [
+                'key'         => $key,
+                'label'       => $feature['label'],
+                'description' => $feature['description'],
+                'mode'        => $access->mode($key),
+                'people'      => array_values(array_filter(array_map(fn (string $id) => $people[$id] ?? null, $ids[$key]))),
+                'search'      => trim($this->featureSearch[$key] ?? ''),
+                'matches'     => $this->searchPeople($this->featureSearch[$key] ?? '', $ids[$key]),
+            ])
+            ->values()
+            ->all();
+    }
+
+    protected function canConfigure(): bool
+    {
+        return $this->configurable ??= FeatureAccess::isSuperAdmin();
+    }
+
+    protected function isFeature(string $feature): bool
+    {
+        return array_key_exists($feature, FeatureAccess::features());
+    }
+
+    /** @return class-string<Model>|null */
+    protected function userModel(): ?string
+    {
+        $model = config('auth.providers.users.model');
+
+        return is_string($model) && is_subclass_of($model, Model::class) ? $model : null;
+    }
+
+    /**
+     * Up to eight users matching $term on the configured columns, leaving out
+     * those already picked.
+     *
+     * @param  array<int, string>  $exclude
+     * @return array<int, array{id: string, name: string, detail: ?string}>
+     */
+    protected function searchPeople(string $term, array $exclude): array
+    {
+        $term = trim($term);
+        $model = $this->userModel();
+        $columns = array_values(array_filter((array) config('signature.feature_access.search_columns', ['name', 'email']), 'is_string'));
+
+        if (mb_strlen($term) < 2 || $model === null || $columns === []) {
+            return [];
+        }
+
+        $like = '%'.addcslashes($term, '%_\\').'%';
+
+        try {
+            $users = $model::query()
+                ->where(function ($query) use ($columns, $like): void {
+                    foreach ($columns as $column) {
+                        $query->orWhere($column, 'like', $like);
+                    }
+                })
+                ->whereKeyNot($exclude)
+                ->limit(8)
+                ->get();
+        } catch (QueryException) {
+            // A search column the host's users table doesn't have.
+            return [];
+        }
+
+        return $users->map(fn (Model $user): array => $this->person($user))->all();
+    }
+
+    /**
+     * @param  array<int, string>  $ids
+     * @return array<string, array{id: string, name: string, detail: ?string}>
+     */
+    protected function peopleByIds(array $ids): array
+    {
+        $model = $this->userModel();
+
+        if ($ids === [] || $model === null) {
+            return [];
+        }
+
+        return $model::query()->whereKey($ids)->get()
+            ->mapWithKeys(fn (Model $user): array => [(string) $user->getKey() => $this->person($user)])
+            ->all();
+    }
+
+    /** @return array{id: string, name: string, detail: ?string} */
+    protected function person(Model $user): array
+    {
+        $name = $user->getAttribute('name');
+        $email = $user->getAttribute('email');
+
+        return [
+            'id'     => (string) $user->getKey(),
+            'name'   => is_string($name) && $name !== '' ? $name : (is_string($email) ? $email : 'User #'.$user->getKey()),
+            'detail' => is_string($name) && $name !== '' && is_string($email) ? $email : null,
+        ];
     }
 
     /**
@@ -354,6 +525,9 @@ class SignatureLauncher extends Component
             'offsetY'       => LauncherSettings::offsetY($preferences),
             'zIndex'        => LauncherSettings::zIndex(),
             'customizable'  => LauncherSettings::customizable(),
+            // The Settings tab: feature access and, when customizable, the
+            // button's placement. Super admins only.
+            'configurable'  => $this->canConfigure(),
         ];
     }
 
