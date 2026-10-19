@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Storage;
 use Kukux\DigitalSignature\Filament\Livewire\SignatureLauncher;
 use Kukux\DigitalSignature\Filament\Pages\SignatureInbox;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
+use Kukux\DigitalSignature\Hub\Identity\HubAccess;
 use Kukux\DigitalSignature\Models\SignatureRequest;
 use Kukux\DigitalSignature\Services\SigningSessionManager;
 use Kukux\DigitalSignature\SignaturePlugin;
@@ -669,7 +670,12 @@ describe('moving the button from the Settings tab', function () {
 
     beforeEach(function () {
         Storage::fake('testing');
+
+        // The Settings tab is for super admins.
+        HubAccess::superAdminUsing(fn (): bool => true);
     });
+
+    afterEach(fn () => HubAccess::superAdminUsing(null));
 
     it('offers the Settings tab with the placement in effect', function () {
         config()->set('signature.launcher.position', 'top-left');
@@ -728,7 +734,7 @@ describe('moving the button from the Settings tab', function () {
             ->toContain('--dsig-x: 1.5rem');
     });
 
-    it('ignores saved choices and hides the tab when customising is off', function () {
+    it('ignores saved choices and drops the placement controls when customising is off', function () {
         $this->actingAs(makeUser(46, 'Mover'));
 
         Livewire::test(SignatureLauncher::class)->call('saveLauncherPlacement', 'top-left', 40, 40);
@@ -737,7 +743,19 @@ describe('moving the button from the Settings tab', function () {
 
         $html = Livewire::test(SignatureLauncher::class)->html();
 
+        // The tab stays for feature access; only the placement goes.
         expect($html)->toContain('dsig-launcher--bottom-right')
-            ->and($html)->not->toContain("tab === 'settings'");
+            ->and($html)->toContain("tab === 'settings'")
+            ->and($html)->not->toContain('Floating button');
+    });
+
+    it('hides the tab from anyone but a super_admin', function () {
+        HubAccess::superAdminUsing(fn (): bool => false);
+        $this->actingAs(makeUser(47, 'Mover'));
+
+        Livewire::test(SignatureLauncher::class)->call('saveLauncherPlacement', 'top-left', 40, 40);
+
+        expect(Livewire::test(SignatureLauncher::class)->html())->not->toContain("tab === 'settings'")
+            ->and(\Kukux\DigitalSignature\Models\UserPreference::count())->toBe(0);
     });
 });
