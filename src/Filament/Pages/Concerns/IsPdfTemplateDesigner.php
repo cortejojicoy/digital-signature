@@ -3,6 +3,7 @@
 namespace Kukux\DigitalSignature\Filament\Pages\Concerns;
 
 use Kukux\DigitalSignature\Services\PdfTemplateRegistry;
+use Kukux\DigitalSignature\Support\FeatureAccess;
 
 /**
  * Behaviour of the React-driven placement designer, minus the `$view`
@@ -20,6 +21,8 @@ trait IsPdfTemplateDesigner
 
     public function mount(string $templateKey): void
     {
+        abort_unless(FeatureAccess::allows(FeatureAccess::TEMPLATE_DESIGNER), 403);
+
         $template = app(PdfTemplateRegistry::class)->find($templateKey)
             ?? abort(404, "No PdfTemplate registered with key [{$templateKey}]");
 
