@@ -45,6 +45,12 @@ return [
         'body'  => ':error',
     ],
 
+    // A super_admin has limited "Route for signatures" to selected people.
+    'feature_disabled' => [
+        'title' => 'Not available to you yet',
+        'body'  => 'Routing documents for signatures is turned on for selected people only. Ask an administrator if you need it.',
+    ],
+
     /*
     |----------------------------------------------------------------------
     | Document of record
