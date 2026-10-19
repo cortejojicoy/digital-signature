@@ -4,6 +4,14 @@ All notable changes to `kukux/digital-signature`. Versions follow [semver](https
 
 ## Unreleased
 
+### Added
+
+- **Feature access, for testing.** The launcher's **Settings** tab lets a super admin limit a feature to selected people (or super admins only) before turning it on for everyone: Route for signatures (`RouteForSignaturesAction`, `RequestSignaturesAction`, `routeDocument()`), Sign document, the placement designer, and desktop agent pairing. Every feature stays open to everyone until someone changes it. New: `Support\FeatureAccess`, `Models\FeatureRule`, the `digital_signature_feature_access` table, `config('signature.feature_access.search_columns')`, and the `feature_disabled` routing reason. Docs: [filament-components.md](docs/filament-components.md#feature-access-for-testing).
+
+### Changed
+
+- **The launcher's Settings tab is for super admins only** (`HubAccess::isSuperAdmin()`: `hasRole('super_admin')`, or `HubAccess::superAdminUsing()`). Other users no longer see it, and `saveLauncherPlacement()` / `resetLauncherPlacement()` ignore them. A placement someone saved earlier still applies.
+
 ### Fixed
 
 - **The migration failed on MySQL and MariaDB** (3.0.0, 3.0.1). Two hub indexes had generated names one character past MySQL's 64-character limit, so `migrate` stopped after creating `digital_signature_hub_sign_requests` without its indexes. They now have short names (`dshsr_app_idempotency_unique`, `dshw_delivery_due_idx`), and rerunning `php artisan migrate` on a database where it failed adds the three indexes that run left out. PostgreSQL truncated the long names instead of failing, so it is unaffected. A new test keeps every index and foreign key name within 64 characters, since the suite runs on SQLite, which accepts any length.
