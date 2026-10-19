@@ -119,6 +119,9 @@ return new class extends Migration
                 $t->text('certificate_chain')->nullable();               // json: base64 DER, leaf first
                 $t->timestamp('certificate_checked_at')->nullable();     // last definite revocation answer
                 $t->string('certificate_status', 16)->nullable();        // good | revoked | unknown
+                // How each use is approved: os — Touch ID / Windows Hello;
+                // certificate_password — the certificate's own password.
+                $t->string('presence_method', 32)->default('os');
 
                 $t->string('status', 16)->default('active');   // active | pending | revoked
 
@@ -978,6 +981,14 @@ return new class extends Migration
                 $t->string('certificate_status', 16)->nullable()->after('certificate_checked_at');
 
                 $t->index('certificate_fingerprint', 'dsd_certificate_fingerprint_idx');
+            });
+        }
+
+        // Agents approved with the certificate's password instead of Touch
+        // ID / Hello. Existing devices all used the OS, which the default says.
+        if (! Schema::hasColumn('digital_signature_devices', 'presence_method')) {
+            Schema::table('digital_signature_devices', function (Blueprint $t) {
+                $t->string('presence_method', 32)->default('os')->after('certificate_status');
             });
         }
 
