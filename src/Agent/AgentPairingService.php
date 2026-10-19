@@ -46,6 +46,8 @@ class AgentPairingService
 
     private const PROTECTIONS = ['secure_enclave', 'tpm', 'software'];
 
+    private const PRESENCE_METHODS = ['os', 'certificate_password'];
+
     public function __construct(
         private readonly DeviceRegistry $registry,
         private readonly AgentCertificateService $certificates,
@@ -195,6 +197,8 @@ class AgentPairingService
             'kind'                 => 'agent',
             'protection'           => $claim['protection'],
             'user_presence'        => (bool) $claim['user_presence'],
+            // A claim made before presence_method existed is a Touch ID / Hello one.
+            'presence_method'      => $claim['presence_method'] ?? 'os',
             // Phase 5: verify $claim['attestation'] against the Microsoft
             // TPM roots. Until then nothing is marked attested.
             'attested'             => false,
@@ -474,9 +478,23 @@ class AgentPairingService
                 throw new AgentApiException(422, 'presence_required', 'This server requires Touch ID or Windows Hello on the signing key.');
             }
 
+            // How the user approves each use: Touch ID / Hello, or, for a
+            // certificate's key, the certificate's own password. Either one
+            // is presence.
+            $pkcs12 = ($input['key_source'] ?? 'platform') === 'pkcs12';
+            $presenceMethod = $input['presence_method'] ?? 'os';
+
+            if (! in_array($presenceMethod, self::PRESENCE_METHODS, true)) {
+                throw new AgentApiException(422, 'invalid_presence_method', 'Unsupported presence method.');
+            }
+
+            if ($presenceMethod === 'certificate_password' && ! $pkcs12) {
+                throw new AgentApiException(422, 'invalid_presence_method', 'Only a certificate key can be approved with a certificate password.');
+            }
+
             // A certificate's key: its chain to a trusted root, whose it is,
             // and that its issuer hasn't revoked it.
-            $certificate = ($input['key_source'] ?? 'platform') === 'pkcs12'
+            $certificate = $pkcs12
                 ? $this->certificates->check($input['certificate_chain'] ?? null, (string) $input['identity_public_key'], $pairing->user)
                 : null;
 
@@ -544,7 +562,8 @@ class AgentPairingService
                     'algorithm'           => $algorithm,
                     'protection'          => $protection,
                     'user_presence'       => $presence,
-                    'attestation'         => is_array($input['attestation'] ?? null) ? $input['attestation'] : null,
+                    'presence_method'     => $presenceMethod,
+                    'attestation'       => is_array($input['attestation'] ?? null) ? $input['attestation'] : null,
                     'agent_version'       => Str::limit((string) ($input['agent_version'] ?? ''), 32, ''),
                     'device'              => [
                         'platform'         => match ($device['platform'] ?? null) {
