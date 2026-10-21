@@ -33,6 +33,7 @@ use Kukux\DigitalSignature\Http\Controllers\Agent\AgentController;
 use Kukux\DigitalSignature\Http\Controllers\Agent\AgentWebController;
 use Kukux\DigitalSignature\Http\Controllers\DeviceController;
 use Kukux\DigitalSignature\Http\Controllers\DocumentOfRecordController;
+use Kukux\DigitalSignature\Http\Controllers\DocumentVerificationController;
 use Kukux\DigitalSignature\Http\Middleware\AuthenticateAgent;
 use Kukux\DigitalSignature\Http\Middleware\EnsureAgentVersion;
 use Kukux\DigitalSignature\Http\Controllers\DeviceFingerprintController;
@@ -361,6 +362,23 @@ class SignatureServiceProvider extends ServiceProvider
         Route::get('/signature/verify/{uuid}', [SignatureVerificationController::class, 'show'])
             ->middleware(['web'])
             ->name('signature.verify');
+
+        // Verify a whole PDF: the page fingerprints and checks it in the
+        // browser, then asks the record by fingerprint. Public, for the same
+        // reason as the QR page above. The lookup is not in `web`: it has no
+        // session behind it and Kukux Sign Agent calls it without cookies.
+        // See DocumentVerificationController.
+        Route::get('/signature/verify', [DocumentVerificationController::class, 'page'])
+            ->middleware(['web'])
+            ->name('signature.verify.document');
+        Route::post('/signature/verify/lookup', [DocumentVerificationController::class, 'lookup'])
+            ->middleware(['throttle:60,1,signature-verify'])
+            ->name('signature.verify.lookup');
+        Route::get('/signature/verify/assets/verify.js', [DocumentVerificationController::class, 'script'])
+            ->name('signature.verify.script');
+        Route::get('/signature/trust/ca.pem', [DocumentVerificationController::class, 'trustAnchor'])
+            ->middleware(['throttle:60,1,signature-verify'])
+            ->name('signature.verify.trust');
 
         // The document behind one signature request: read it, then sign it
         // where you put your signature.
