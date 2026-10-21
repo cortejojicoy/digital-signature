@@ -69,20 +69,24 @@ export async function sha256Hex(bytes, subtle = globalThis.crypto.subtle) {
 }
 
 /**
- * The last signature's location in the file, or null when there is none.
+ * Every signature in the file, in the order they were added.
  *
- * "Last" by position: an incremental update appends, so the signature added
- * most recently is the one furthest into the file. Ranges that don't make
- * sense for this file (outside it, overlapping, a gap that isn't a hex
- * string) are skipped, so a /ByteRange that merely appears inside some text
- * can't be mistaken for a signature.
+ * Ranges that don't make sense for this file (outside it, overlapping, a gap
+ * that isn't a hex string) are skipped, so a /ByteRange that merely appears
+ * inside some text can't be mistaken for a signature. Order is by where each
+ * signed revision ends: an incremental update appends, so a later signature
+ * covers more of the file.
+ *
+ * Progressive signing (this package's default) leaves one: each pass
+ * rebuilds the file and drops the earlier PKCS#7 blocks. A PDF signed
+ * incrementally keeps all of them, and then each can be checked here.
  *
  * @param {Uint8Array} bytes
- * @returns {{ byteRange: number[], revisionEnd: number, contents: Uint8Array, coversWholeFile: boolean } | null}
+ * @returns {Array<{ byteRange: number[], revisionEnd: number, contents: Uint8Array, coversWholeFile: boolean }>}
  */
-export function findLastSignature(bytes) {
+export function findSignatures(bytes) {
     const text = latin1(bytes);
-    let found = null;
+    const found = new Map();
 
     for (const match of text.matchAll(BYTE_RANGE)) {
         const [a, b, c, d] = match.slice(1, 5).map(Number);
@@ -97,20 +101,27 @@ export function findLastSignature(bytes) {
             continue;
         }
 
-        if (found === null || c + d > found.revisionEnd) {
-            found = {
-                byteRange: [a, b, c, d],
-                revisionEnd: c + d,
-                contents: hexToBytes(gap.slice(1, -1)),
-            };
-        }
+        // The same dictionary can be written twice (an object stream and its
+        // xref twin); one signature per revision end.
+        found.set(c + d, {
+            byteRange: [a, b, c, d],
+            revisionEnd: c + d,
+            contents: hexToBytes(gap.slice(1, -1)),
+            coversWholeFile: c + d === bytes.length,
+        });
     }
 
-    if (found === null) {
-        return null;
-    }
+    return [...found.values()].sort((x, y) => x.revisionEnd - y.revisionEnd);
+}
 
-    return { ...found, coversWholeFile: found.revisionEnd === bytes.length };
+/**
+ * The last signature: the one that covers the most of the file, and so the
+ * one the file's integrity rests on. null when there is none.
+ *
+ * @param {Uint8Array} bytes
+ */
+export function findLastSignature(bytes) {
+    return findSignatures(bytes).at(-1) ?? null;
 }
 
 /** The bytes a signature's /ByteRange covers, joined: what was actually signed. */
@@ -220,29 +231,35 @@ export async function verifyCms(cmsDer, data, trustedCerts = []) {
 }
 
 /**
- * Everything the page needs from a file: its fingerprints and what its last
- * signature says about itself.
+ * Everything the page needs from a file: its fingerprints and what each of
+ * its signatures says about itself.
+ *
+ * `signature` is the last one, which the verdict turns on: it covers every
+ * byte before it, so if it is intact nothing earlier was changed after.
+ * `signatures` is all of them, oldest first, for the per-signature rows.
  *
  * @param {Uint8Array} bytes
  * @param {object[]} trustedCerts  pkijs.Certificate, from parsePemCertificates()
  */
 export async function inspectPdf(bytes, trustedCerts = [], subtle = globalThis.crypto.subtle) {
     const sha256 = await sha256Hex(bytes, subtle);
-    const signature = findLastSignature(bytes);
+    const found = findSignatures(bytes);
 
-    if (signature === null) {
-        return { sha256, signedRevisionSha256: null, signature: null };
+    if (found.length === 0) {
+        return { sha256, signedRevisionSha256: null, signature: null, signatures: [] };
     }
 
-    const signedRevisionSha256 = signature.coversWholeFile
+    const signatures = [];
+
+    for (const entry of found) {
+        const check = await verifyCms(entry.contents, signedBytes(bytes, entry.byteRange), trustedCerts);
+        signatures.push({ ...check, coversWholeFile: entry.coversWholeFile });
+    }
+
+    const last = found.at(-1);
+    const signedRevisionSha256 = last.coversWholeFile
         ? sha256
-        : await sha256Hex(bytes.subarray(0, signature.revisionEnd), subtle);
+        : await sha256Hex(bytes.subarray(0, last.revisionEnd), subtle);
 
-    const check = await verifyCms(signature.contents, signedBytes(bytes, signature.byteRange), trustedCerts);
-
-    return {
-        sha256,
-        signedRevisionSha256,
-        signature: { ...check, coversWholeFile: signature.coversWholeFile },
-    };
+    return { sha256, signedRevisionSha256, signature: signatures.at(-1), signatures };
 }

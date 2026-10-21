@@ -107,32 +107,59 @@ export function describeSlot(slot) {
     }
 }
 
-/** What the file's own signature says, as label/value rows. */
-export function describeEmbedded(inspection, issuer) {
-    const signature = inspection.signature;
+/**
+ * What the file's own digital signatures say, as label/value rows.
+ *
+ * One row for a single signature, numbered rows for several. Unless the
+ * record answered (and so lists every slot itself), it also says how many
+ * digital signatures the file carries: with progressive signing that is one,
+ * the last signer's, and the signatures stamped before it are images the
+ * file alone can't vouch for.
+ *
+ * @param {{ signature: object|null, signatures?: object[] }} inspection
+ * @param {string} issuer
+ * @param {{ recordChecked?: boolean }} options
+ */
+export function describeEmbedded(inspection, issuer, { recordChecked = false } = {}) {
+    const signatures = inspection.signatures ?? (inspection.signature ? [inspection.signature] : []);
+    const last = signatures.at(-1) ?? null;
+    const made = (s) => (s.intact ? `Intact${s.signer ? `, made by ${s.signer}` : ''}` : 'Broken: doesn\'t match the file');
 
-    if (signature === null) {
-        return [['Digital signature', 'None in this file']];
+    if (last === null) {
+        return recordChecked
+            ? [['Digital signature', 'None in this file']]
+            : [
+                ['Digital signature', 'None in this file'],
+                ['Signatures on the page', 'Images only. Only the record can confirm who signed.'],
+            ];
     }
 
-    const rows = [[
-        'Digital signature',
-        signature.intact ? `Intact${signature.signer ? `, made by ${signature.signer}` : ''}` : 'Broken: doesn\'t match the file',
-    ]];
+    const rows = signatures.length === 1
+        ? [['Digital signature', made(last)]]
+        : signatures.map((s, i) => [`Digital signature ${i + 1} of ${signatures.length}`, made(s)]);
 
-    if (signature.intact) {
+    if (last.intact) {
         rows.push([
             'Certificate',
-            signature.trusted === true
+            last.trusted === true
                 ? `Issued under ${issuer}'s certificate authority`
-                : signature.trusted === false
+                : last.trusted === false
                     ? 'Issued by a certificate authority this system doesn\'t trust'
                     : 'Not checked',
         ]);
     }
 
-    if (!signature.coversWholeFile) {
+    if (!last.coversWholeFile) {
         rows.push(['Saved since signing', 'Yes, bytes were added after the last signature']);
+    }
+
+    if (!recordChecked) {
+        rows.push([
+            'Other signatures',
+            signatures.length === 1
+                ? 'This file carries one digital signature, the last signer\'s. Any other signature on the page is an image that only the record can confirm.'
+                : `This file carries ${signatures.length} digital signatures. Any other signature on the page is an image that only the record can confirm.`,
+        ]);
     }
 
     return rows;
