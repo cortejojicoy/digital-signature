@@ -12,6 +12,8 @@ use Kukux\DigitalSignature\Console\Hub\Api\HubAuditMirrorsCommand;
 use Kukux\DigitalSignature\Console\Hub\Api\HubWebhooksCommand;
 use Kukux\DigitalSignature\Events\AgentJobUpdated;
 use Kukux\DigitalSignature\Hub\Api\People;
+use Kukux\DigitalSignature\Hub\Documents\HubDocumentLookup;
+use Kukux\DigitalSignature\Hub\Documents\HubDocuments;
 use Kukux\DigitalSignature\Hub\OAuth\HubAppRegistrar;
 use Kukux\DigitalSignature\Hub\OAuth\HubOAuthServer;
 use Kukux\DigitalSignature\Hub\Signing\CompleteHubSignRequest;
@@ -22,6 +24,7 @@ use Kukux\DigitalSignature\Hub\Specimens\MirrorAuditor;
 use Kukux\DigitalSignature\Hub\Specimens\SpecimenService;
 use Kukux\DigitalSignature\Hub\Webhooks\HubNotifier;
 use Kukux\DigitalSignature\Hub\Webhooks\HubWebhookDispatcher;
+use Kukux\DigitalSignature\Verification\DocumentLookup;
 
 /**
  * Registered by SignatureServiceProvider only in the matching mode:
@@ -43,9 +46,14 @@ class HubApiServiceProvider extends ServiceProvider
             HubSignRequestService::class,
             HubRevocation::class,
             MirrorAuditor::class,
+            HubDocuments::class,
         ] as $service) {
             $this->app->singleton($service);
         }
+
+        // The verify-a-PDF lookup answers from what apps reported, since the
+        // hub holds no signing sessions of its own.
+        $this->app->bind(DocumentLookup::class, HubDocumentLookup::class);
     }
 
     public function boot(): void
