@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     findLastSignature,
+    findSignatures,
     inspectPdf,
     parsePemCertificates,
     sha256Hex,
@@ -120,6 +121,31 @@ await test('recovers the signed copy from a file saved again after signing', asy
     assert.equal(result.signedRevisionSha256, fixtures.sha256['v2.pdf'], 'but its signed prefix does');
     assert.equal(result.signature.coversWholeFile, false);
     assert.equal(result.signature.intact, true);
+});
+
+await test('a progressively signed file carries one digital signature, the last signer\'s', async () => {
+    const result = await inspectPdf(read('v2.pdf'), trusted);
+
+    assert.equal(result.signatures.length, 1);
+    assert.equal(result.signatures[0].signer, fixtures.signers['v2.pdf']);
+});
+
+await test('checks every signature in a file that kept them all', async () => {
+    const result = await inspectPdf(read('two-signatures.pdf'), trusted);
+
+    assert.deepEqual(result.signatures.map((s) => s.signer), fixtures.signers['two-signatures.pdf']);
+    assert.ok(result.signatures.every((s) => s.intact && s.trusted === true), 'both intact and trusted');
+    assert.deepEqual(result.signatures.map((s) => s.coversWholeFile), [false, true], 'only the later one covers the whole file');
+    assert.equal(result.signature.signer, 'Ben Accepted', 'the verdict turns on the last one');
+    assert.equal(result.signedRevisionSha256, result.sha256);
+});
+
+await test('lists signatures in the order they were added', async () => {
+    const found = findSignatures(read('two-signatures.pdf'));
+
+    assert.equal(found.length, 2);
+    assert.ok(found[0].revisionEnd < found[1].revisionEnd);
+    assert.equal(findLastSignature(read('two-signatures.pdf')).revisionEnd, found[1].revisionEnd);
 });
 
 await test('ignores a /ByteRange that is only text and points at no signature', async () => {

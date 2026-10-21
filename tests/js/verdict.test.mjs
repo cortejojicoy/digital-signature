@@ -86,6 +86,27 @@ test('describes the embedded signature without overclaiming trust', () => {
     assert.equal(Object.fromEntries(describeEmbedded(unsigned, 'X'))['Digital signature'], 'None in this file');
 });
 
+test('says the file alone vouches only for its digital signatures when the record could not be asked', () => {
+    const one = { signature: intact.signature, signatures: [intact.signature] };
+    const rows = Object.fromEntries(describeEmbedded(one, 'X'));
+
+    assert.match(rows['Other signatures'], /one digital signature, the last signer's/);
+    // When the record answered, it lists every slot itself.
+    assert.equal(Object.fromEntries(describeEmbedded(one, 'X', { recordChecked: true }))['Other signatures'], undefined);
+    assert.match(Object.fromEntries(describeEmbedded(unsigned, 'X'))['Signatures on the page'], /only the record can confirm/i);
+});
+
+test('numbers the rows when a file carries several digital signatures', () => {
+    const ana = { intact: true, trusted: true, signer: 'Ana', coversWholeFile: false };
+    const ben = { intact: true, trusted: true, signer: 'Ben', coversWholeFile: true };
+    const rows = describeEmbedded({ signature: ben, signatures: [ana, ben] }, 'X', { recordChecked: true });
+
+    assert.deepEqual(rows.slice(0, 2), [
+        ['Digital signature 1 of 2', 'Intact, made by Ana'],
+        ['Digital signature 2 of 2', 'Intact, made by Ben'],
+    ]);
+});
+
 if (failures > 0) {
     console.error(`\n${failures} failing`);
     process.exit(1);
