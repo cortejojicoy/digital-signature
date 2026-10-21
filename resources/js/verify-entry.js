@@ -136,7 +136,7 @@ if (app) {
 
         const details = el('dl');
 
-        for (const [label, value] of describeEmbedded(inspection, context.issuer)) {
+        for (const [label, value] of describeEmbedded(inspection, context.issuer, { recordChecked: record !== null })) {
             details.append(el('dt', {}, label), el('dd', {}, value));
         }
 
