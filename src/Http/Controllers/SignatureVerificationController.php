@@ -6,11 +6,9 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use Illuminate\Support\Facades\Cache;
-use Kukux\DigitalSignature\Client\Exceptions\HubException;
-use Kukux\DigitalSignature\Client\HubClient;
 use Kukux\DigitalSignature\Models\Signature;
 use Kukux\DigitalSignature\Support\SignatureMode;
+use Kukux\DigitalSignature\Verification\CertificateStatus;
 
 /**
  * What the QR on a signed page resolves to.
@@ -93,18 +91,6 @@ class SignatureVerificationController extends Controller
      */
     protected function hubCertificateStatus(?string $fingerprint): string
     {
-        if ($fingerprint === null || $fingerprint === '') {
-            return 'unknown';
-        }
-
-        try {
-            return Cache::remember('signature:hub:certificate:'.$fingerprint, 300, function () use ($fingerprint) {
-                $status = app(HubClient::class)->certificate($fingerprint)['status'] ?? 'unknown';
-
-                return in_array($status, ['valid', 'revoked', 'unknown'], true) ? $status : 'unknown';
-            });
-        } catch (HubException) {
-            return 'unchecked';
-        }
+        return app(CertificateStatus::class)->atHub($fingerprint);
     }
 }
