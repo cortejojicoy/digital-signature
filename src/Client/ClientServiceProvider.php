@@ -10,8 +10,14 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Kukux\DigitalSignature\Client\Console\HubRetryCommand;
 use Kukux\DigitalSignature\Client\Console\HubSyncCommand;
+use Kukux\DigitalSignature\Client\Console\HubSyncDocumentsCommand;
 use Kukux\DigitalSignature\Client\Exceptions\ClientMisconfiguredException;
+use Kukux\DigitalSignature\Client\Jobs\ReportDocumentToHub;
 use Kukux\DigitalSignature\Contracts\SignatoryUserMapper;
+use Kukux\DigitalSignature\Events\DocumentSigned;
+use Kukux\DigitalSignature\Events\SignatureDeclined;
+use Kukux\DigitalSignature\Events\SigningSessionCompleted;
+use Kukux\DigitalSignature\Events\SigningSessionOpened;
 use Kukux\DigitalSignature\Signatories\HubUserMapper;
 use Kukux\DigitalSignature\Signatories\IdentityUserMapper;
 use Kukux\DigitalSignature\Support\SignatureMode;
@@ -47,10 +53,39 @@ class ClientServiceProvider extends ServiceProvider
         $this->bindSignatoryMapper();
 
         if ($this->app->runningInConsole()) {
-            $this->commands([HubSyncCommand::class, HubRetryCommand::class]);
+            $this->commands([HubSyncCommand::class, HubRetryCommand::class, HubSyncDocumentsCommand::class]);
         }
 
         $this->registerLoginButton();
+
+        $this->reportDocumentsToHub();
+    }
+
+    /**
+     * Every change to a routed document queues a report of it to the hub, so
+     * the hub can verify its PDFs (HubDocumentReporter). After the commit:
+     * the job reads the session, and must see what was just written.
+     */
+    protected function reportDocumentsToHub(): void
+    {
+        if (! HubDocumentReporter::enabled()) {
+            return;
+        }
+
+        Event::listen(
+            [SigningSessionOpened::class, SigningSessionCompleted::class, DocumentSigned::class, SignatureDeclined::class],
+            function (object $event): void {
+                $sessionId = match (true) {
+                    $event instanceof DocumentSigned    => $event->signature->signing_session_id,
+                    $event instanceof SignatureDeclined => $event->request->signing_session_id,
+                    default                             => $event->session->getKey(),
+                };
+
+                if ($sessionId !== null) {
+                    ReportDocumentToHub::dispatch((int) $sessionId)->afterCommit();
+                }
+            },
+        );
     }
 
     /**

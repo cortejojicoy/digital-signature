@@ -9,6 +9,7 @@ use Filament\Support\Facades\FilamentAsset;
 use Kukux\DigitalSignature\Filament\Resources\SignatureResource;
 use Kukux\DigitalSignature\Hub\Filament\Pages\Apps;
 use Kukux\DigitalSignature\Hub\Filament\Pages\AuditLog;
+use Kukux\DigitalSignature\Hub\Filament\Pages\Documents;
 use Kukux\DigitalSignature\Hub\Filament\Pages\Identify;
 use Kukux\DigitalSignature\Hub\Filament\Pages\Landing;
 use Kukux\DigitalSignature\Hub\Filament\Pages\PendingClaims;
@@ -99,6 +100,7 @@ final class HubPanels
                 PersonnelProfile::class,
                 PendingClaims::class,
                 AuditLog::class,
+                Documents::class,
                 Apps::class,
             ])
             ->userMenuItems([

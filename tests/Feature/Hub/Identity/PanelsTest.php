@@ -162,3 +162,26 @@ it('registers an app and shows its secrets once', function () {
 
     $component->call('dismissSecrets')->assertSet('secrets', null)->assertSee('Performance');
 });
+
+it('lists the documents apps reported for PDF verification', function () {
+    $app = HubApp::create([
+        'client_id' => 'performance', 'name' => 'Performance', 'secret_hash' => str_repeat('0', 64),
+        'redirect_uris' => [], 'scopes' => ['sign'], 'mirror_prefix' => 'performance', 'active' => true,
+    ]);
+
+    app(\Kukux\DigitalSignature\Hub\Documents\HubDocuments::class)->record($app, (string) \Illuminate\Support\Str::uuid(), \Kukux\DigitalSignature\Verification\DocumentSnapshot::fromArray([
+        'title' => 'Accomplishment Report', 'status' => 'open', 'required' => 2,
+        'versions' => [['number' => 0, 'sha256' => hash('sha256', 'base')], ['number' => 1, 'sha256' => hash('sha256', 'v1')]],
+        'slots' => [
+            ['slot' => 'prepared_by', 'label' => 'Prepared by', 'state' => 'signed', 'signer' => 'Ana', 'version' => 1],
+            ['slot' => 'accepted_by', 'label' => 'Accepted by', 'state' => 'pending'],
+        ],
+    ]));
+
+    $this->actingAs($this->admin);
+    Filament::setCurrentPanel($this->adminPanel);
+
+    Livewire::test(\Kukux\DigitalSignature\Hub\Filament\Pages\Documents::class)
+        ->assertSuccessful()
+        ->assertSee(['Accomplishment Report', 'Performance', '1 of 2', 'Verify a PDF']);
+});

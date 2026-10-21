@@ -823,6 +823,37 @@ return new class extends Migration
             });
         }
 
+        // A document an app routed, as it reported it to the hub, so the
+        // hub can verify a PDF it never held. `report` is a
+        // Verification\DocumentSnapshot array: title, status, slots.
+        if (! Schema::hasTable('digital_signature_hub_documents')) {
+            Schema::create('digital_signature_hub_documents', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('app_id')->constrained('digital_signature_hub_apps')->cascadeOnDelete();
+                $t->uuid('uuid');                       // the app's signing session uuid
+                $t->string('title')->nullable();
+                $t->string('status', 16);               // open | complete | cancelled | expired
+                $t->json('report');
+                $t->timestamp('reported_at');
+                $t->timestamps();
+
+                $t->unique(['app_id', 'uuid'], 'dshd_app_uuid_unique');
+            });
+        }
+
+        // One row per version of a reported document: what a lookup finds by.
+        if (! Schema::hasTable('digital_signature_hub_document_versions')) {
+            Schema::create('digital_signature_hub_document_versions', function (Blueprint $t) {
+                $t->id();
+                $t->foreignId('document_id')->constrained('digital_signature_hub_documents')->cascadeOnDelete();
+                $t->unsignedInteger('number');          // 0 = the frozen base
+                $t->char('sha256', 64)->index();
+                $t->timestamps();
+
+                $t->unique(['document_id', 'number'], 'dshdv_document_number_unique');
+            });
+        }
+
         $this->addColumnsMissingFromEarlierReleases();
 
         // Primary (reusable) signatures — those with no signable_id — were
@@ -845,6 +876,8 @@ return new class extends Migration
             return;
         }
 
+        Schema::dropIfExists('digital_signature_hub_document_versions');
+        Schema::dropIfExists('digital_signature_hub_documents');
         Schema::dropIfExists('digital_signature_hub_events');
         Schema::dropIfExists('digital_signature_hub_pending_signs');
         Schema::dropIfExists('digital_signature_hub_accounts');

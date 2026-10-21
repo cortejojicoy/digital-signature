@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Kukux\DigitalSignature\Hub\Api\HealthController;
 use Kukux\DigitalSignature\Hub\Api\PeopleController;
 use Kukux\DigitalSignature\Hub\Api\SignatureController;
+use Kukux\DigitalSignature\Hub\Documents\DocumentController;
 use Kukux\DigitalSignature\Hub\OAuth\AuthenticateHubToken;
 use Kukux\DigitalSignature\Hub\OAuth\OAuthController;
 use Kukux\DigitalSignature\Hub\Signing\SignRequestController;
@@ -57,6 +58,10 @@ Route::prefix('signature/hub')->name('signature.hub.')->group(function () use ($
         Route::middleware([AuthenticateHubToken::class.':app,sign', 'throttle:signature-hub-api'])->group(function () {
             Route::post('sign-requests', [SignRequestController::class, 'store'])->name('sign-requests.store');
             Route::get('sign-requests/{id}', [SignRequestController::class, 'show'])->whereUuid('id')->name('sign-requests.show');
+
+            // A routed document's versions and signers, so the hub can verify
+            // a PDF from this app (Hub\Documents\DocumentController).
+            Route::put('documents/{uuid}', [DocumentController::class, 'update'])->whereUuid('uuid')->name('documents.update');
         });
     });
 });

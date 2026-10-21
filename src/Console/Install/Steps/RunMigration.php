@@ -35,6 +35,8 @@ class RunMigration implements InstallStep
         'digital_signature_hub_accounts',
         'digital_signature_hub_pending_signs',
         'digital_signature_hub_events',
+        'digital_signature_hub_documents',
+        'digital_signature_hub_document_versions',
     ];
 
     public function label(): string

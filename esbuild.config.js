@@ -32,6 +32,14 @@ const builds = [
         entryPoints: ['resources/js/pdf-viewer-entry.js'],
         outfile: 'resources/dist/digital-signature-pdf-viewer.js',
     },
+    {
+        // The public "verify a PDF" page only. It carries PKI.js for the
+        // in-browser signature check, which no panel page needs, and the
+        // page is served outside any panel, by DocumentVerificationController.
+        ...shared,
+        entryPoints: ['resources/js/verify-entry.js'],
+        outfile: 'resources/dist/digital-signature-verify.js',
+    },
 ];
 
 /**

@@ -207,6 +207,18 @@ class HubClient
         return $this->send(fn (PendingRequest $http) => $http->get('signature/hub/api/v1/certificates/'.rawurlencode($fingerprint)))->json();
     }
 
+    /**
+     * Report one routed document (a Verification\DocumentSnapshot array) so
+     * the hub can verify its PDFs. The whole document each time; idempotent.
+     *
+     * @param  array<string, mixed>  $report
+     * @return array{uuid: string, status: string, versions: int}
+     */
+    public function putDocument(string $uuid, array $report): array
+    {
+        return $this->send(fn (PendingRequest $http) => $http->put('signature/hub/api/v1/documents/'.rawurlencode($uuid), $report))->json();
+    }
+
     // -------------------------------------------------------------------------
     // Token
     // -------------------------------------------------------------------------
