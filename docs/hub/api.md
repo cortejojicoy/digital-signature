@@ -204,6 +204,29 @@ proof purpose, user-presence method), `hub.sign_declined`, `hub.sign_refused`
 
 ---
 
+## Documents (for PDF verification)
+
+`PUT /api/v1/documents/{uuid}`, scope `sign`. A client app reports one routed
+document so the hub's `/signature/verify` page and Kukux Sign Agent can verify
+its PDFs. `{uuid}` is the app's signing session uuid. The whole document every
+time; the latest report replaces the last. Client apps send it themselves
+(`Client\Jobs\ReportDocumentToHub`, `signature:hub-sync-documents`).
+
+```json
+{
+  "title": "Accomplishment Report", "status": "open", "expired": false, "required": 4,
+  "versions": [{"number": 0, "sha256": "<file sha256>", "created_at": "…"}, {"number": 1, "sha256": "…"}],
+  "slots": [{"slot": "prepared_by", "label": "Prepared by", "state": "signed", "signer": "Juan dela Cruz",
+             "signed_at": "…", "version": 1, "certificate_fingerprint": "<sha256>", "revoked": false}]
+}
+```
+
+`200 {"uuid", "status", "versions"}`; `422 invalid_request` when it doesn't hold
+together. Never the PDF. If two apps report the same fingerprint, lookups
+answer with the first report. Details: [document-verification.md](../document-verification.md#at-the-hub).
+
+---
+
 ## Webhooks
 
 Format: [contracts.md §3](contracts.md#3-webhooks-hub--app). Verify on the app

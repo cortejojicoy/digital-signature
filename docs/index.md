@@ -18,6 +18,7 @@ A Laravel Filament plugin for capturing signatures, issuing X.509 certificates, 
 | [PDF Templates](pdf-templates.md) | `PdfTemplate` contract, slot definitions, placement-designer foundations |
 | [Certificates](certificates.md) | Certificate issuance, UserCertificate model, CA setup, CFSSL |
 | [Security](security.md) | PKCS#7, DocMDP, HMAC PNG metadata, XMP, signer identity, DB cross-validation, machine lock, CRL, TSA |
+| [Verifying a signed PDF](document-verification.md) | The public "drop a PDF here" page: local signature check, fingerprint lookup, verdicts, and verification at the hub |
 | [Signatory Routing](signatory-routing.md) | Role-bound slots, signing sessions, consent models, multi-signatory PDFs, Filament v3/v4/v5 compatibility |
 | [Integrating documents](integration/index.md) | **2.0.** Make your app's documents signable through contracts and container bindings: routing, guards, wording, the document of record, testing, recipes |
 | [Guide: Route for Signatures](route-for-signatures.md) | The 1.x guide, mapped onto 2.0 |
