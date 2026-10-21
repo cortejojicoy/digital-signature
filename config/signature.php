@@ -65,9 +65,17 @@ return [
     | existed.
     |
     | Turn it off if your documents never leave an authenticated context.
+    |
+    | document_lookup: GET /signature/verify, "drop a PDF here". The browser
+    | fingerprints the file and checks its embedded signature itself; only the
+    | SHA-256 is sent (POST /signature/verify/lookup), never the file. The
+    | answer says whether those bytes are a version this system issued, and
+    | for each slot who signed it and when: again, only what the holder's
+    | copy already shows. Off with `enabled` too.
     */
     'verify' => [
-        'enabled' => env('SIGNATURE_VERIFY_ENABLED', true),
+        'enabled'         => env('SIGNATURE_VERIFY_ENABLED', true),
+        'document_lookup' => env('SIGNATURE_VERIFY_DOCUMENT_LOOKUP', true),
     ],
 
     /*
@@ -690,6 +698,12 @@ return [
         // Create a local user on first hub sign-in when no user matches by
         // hub link or email.
         'create_users'   => (bool) env('SIGNATURE_HUB_CREATE_USERS', true),
+
+        // Send each routed document's version fingerprints and signers to
+        // the hub as it changes, so the hub's verify page and Kukux Sign
+        // Agent can verify its PDFs. Never the PDF itself. Backfill and catch
+        // cancellations with `signature:hub-sync-documents`.
+        'report_documents' => (bool) env('SIGNATURE_HUB_REPORT_DOCUMENTS', true),
 
         // Where "Change it at the hub" links point (person panel path).
         'profile_path'   => '/',
